@@ -304,7 +304,7 @@ finished.
 A task gate is an `argv` command like any other in `gates`, run by
 `jobs.py` after the worker exits (§10) — distinct from the hook-driven gates
 in §3, which fire during the session rather than after a task. One ships
-with gatekit: `.claude/gatekit/bin/gatekit _gate tokens [--root DIR]
+with gatekit: `.claude/gatekit/bin/gatekit.py _gate tokens [--root DIR]
 [--lang ko|en] [--json] GLOB...` (ADR-0008), which scans the files matching the given
 globs (typically the task's own `write_scope`) for colour literals not
 present in `spec/tokens.json`. Its exit code is the task-gate convention,
