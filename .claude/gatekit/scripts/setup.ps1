@@ -1202,14 +1202,18 @@ if ($script:pkgs.Count -ge 4) {
         if ($wingetOkForList) {
             $wl = Get-WingetListInfo $pkg.winget_id
             $wsrc = $wl.source
+            $mismatch = ''
+            if ($wl.state -eq 'found' -and $wl.version -and $info.version -and -not ($info.version.StartsWith($wl.version) -or $wl.version.StartsWith($info.version))) {
+                $mismatch = T (' (winget 은 다른 설치 ' + $wl.version + ' 를 가리킵니다)') (' (winget lists a different install, ' + $wl.version + ')')
+            }
             if ($wl.state -eq 'found' -and $wl.available) {
                 $verdict = 'warn'
-                $upd = (T '업데이트 가능: ' 'update available: ') + $wl.available
+                $upd = (T '업데이트 가능: ' 'update available: ') + $wl.available + $mismatch
                 if ($key -eq 'git') { $action = T '관리자 권한이 필요할 수 있어 직접 업데이트하세요' 'it may need administrator rights, so update it yourself' }
                 else { $action = T ('허락하면 업데이트합니다 (-Update ' + $key + ')') ('updated if you allow it (-Update ' + $key + ')') }
             } elseif ($wl.state -eq 'found') {
                 $verdict = 'ok'
-                $upd = T '최신입니다(winget 확인)' 'up to date (checked with winget)'
+                $upd = (T '최신입니다(winget 확인)' 'up to date (checked with winget)') + $mismatch
             } elseif ($wl.state -eq 'notfound') {
                 $upd = T 'winget 이 관리하는 설치가 아니어서 업데이트 여부를 확인하지 못했습니다' 'not a winget-managed install, so the update state could not be checked'
             } elseif ($wl.state -eq 'timeout') {

@@ -85,6 +85,13 @@ class TestPackageTable(PackagesCase):
             self.assertNotIn("--accept", call)
             self.assertNotIn(" install ", " " + call + " ")
 
+    def test_winget_row_for_a_different_install_is_flagged(self) -> None:
+        self.fake_pwsh("7.7.0-preview.5")  # the first pwsh on PATH is a preview build
+        self.winget({"Microsoft.PowerShell": row("PowerShell", "Microsoft.PowerShell", "7.6.1")})
+        _, _, by_id = self.run_json("-Lang", "en")
+        self.assertIn("installed 7.7.0-preview.5", by_id["P-pwsh"]["detail"])
+        self.assertIn("winget lists a different install, 7.6.1", by_id["P-pwsh"]["detail"])
+
     def test_not_managed_by_winget_is_unverified(self) -> None:
         self.fake_uv()
         self.winget({})
