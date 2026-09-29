@@ -396,7 +396,10 @@ class TestRegistration(unittest.TestCase):
         settings = json.loads(settings_path.read_text(encoding="utf-8"))
         matchers = {entry["matcher"]: entry for entry in settings["hooks"]["PreToolUse"]}
         self.assertIn("Bash", matchers)
-        self.assertIn("_gate bash", matchers["Bash"]["hooks"][0]["command"])
+        hook = matchers["Bash"]["hooks"][0]
+        # exec form: no shell string, the gate name is the last argv element
+        self.assertEqual(hook["args"][-2:], ["_gate", "bash"])
+        self.assertTrue(hook["args"][0].endswith("bin/gatekit.py"))
 
     def test_doctor_lists_bash_gate(self) -> None:
         from gatekit import doctor
