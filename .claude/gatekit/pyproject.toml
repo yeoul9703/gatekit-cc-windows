@@ -1,0 +1,14 @@
+[project]
+name = "gatekit"
+version = "0.1.0"
+description = "Gate harness for Claude Code (Windows + uv). Standard library only at runtime."
+requires-python = ">=3.11"
+dependencies = []
+
+[tool.uv]
+# Not an installable package: bin/gatekit.py is run with the project venv's
+# python. No build backend, no entry-point script.
+package = false
+
+[dependency-groups]
+dev = []

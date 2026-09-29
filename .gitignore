@@ -11,3 +11,6 @@ __pycache__/
 
 # Scratch notes (tasks, eval criteria)
 tmp/
+
+# uv virtualenv (created by scripts/setup.ps1 / uv sync)
+.venv/
