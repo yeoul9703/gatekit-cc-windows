@@ -23,7 +23,7 @@ version checks that this audience never benefits from.
    scripts, tests). No plugin manager, no global install; opening the folder
    is enough.
 3. **uv manages Python.** `.claude/gatekit/pyproject.toml`
-   (`requires-python >=3.11`, no runtime dependencies, `[tool.uv]
+   (`requires-python >=3.14`, `.python-version` 3.14, no runtime dependencies, `[tool.uv]
    package=false`, dev group `pyright[nodejs]` + `ruff`) and `uv.lock` let uv
    build `.claude/gatekit/.venv`. Commands run as `uv run --project
    .claude/gatekit --frozen python .claude/gatekit/bin/gatekit.py <sub>`,
@@ -46,7 +46,7 @@ version checks that this audience never benefits from.
    blocked by policy or network). `scripts/verify.ps1` runs syntax, tests,
    pyright, ruff, doctor and a `settings.json` check.
 7. **Doctor has eight axes**: plugin files, hooks registered, project state,
-   spec set, contract freshness, workers, python (venv >= 3.11), uv.
+   spec set, contract freshness, workers, python (venv >= 3.14), uv.
 
 ## Rationale (measured)
 
@@ -62,8 +62,14 @@ version checks that this audience never benefits from.
   a command that exists on every Windows machine (`powershell.exe`).
 - The 3.9 release line reached end of life in 2025-10 and 3.10 reaches it in
   2026-10;
-  pinning `>=3.11` with uv-provided interpreters avoids depending on
+  pinning `>=3.14` with uv-provided interpreters avoids depending on
   whatever the machine has.
+
+## Decision change 2026-09-30 (Python 3.11 to 3.14)
+
+The first draft pinned 3.11. The user decided on 3.14 because this tool will
+still be used after 2026-10, when 3.10 reaches end of life; 3.11 ends
+2027-10 and 3.14 ends 2030-10, so 3.14 avoids another forced migration.
 
 ## Consequences
 

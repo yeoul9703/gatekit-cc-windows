@@ -75,6 +75,11 @@ try {
             $cfgFile = Join-Path $venvDir 'pyvenv.cfg'
             if (Test-Path -LiteralPath $cfgFile) {
                 foreach ($line in (Get-Content -LiteralPath $cfgFile -ErrorAction SilentlyContinue)) {
+                    if ($line -match '^\s*version(_info)?\s*=\s*(\d+)\.(\d+)') {
+                        if (([int]$Matches[2] * 1000 + [int]$Matches[3]) -lt 3014) {
+                            $problems += '.claude/gatekit/.venv: Python is older than 3.14 (pyvenv.cfg), rebuild it with /gatekit:setup / .venv 의 Python 이 3.14 보다 낮습니다 - /gatekit:setup 으로 다시 만드세요'
+                        }
+                    }
                     if ($line -match '^\s*home\s*=\s*(.+?)\s*$') {
                         if (-not (Test-Path -LiteralPath $Matches[1])) {
                             $problems += '.claude/gatekit/.venv: its Python folder is gone (pyvenv.cfg home), so the hooks cannot start / .venv 가 가리키는 Python 폴더가 없어 훅이 시작되지 않습니다'

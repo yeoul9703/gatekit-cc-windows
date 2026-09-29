@@ -40,7 +40,8 @@
 #   0  ready
 # Test hooks (environment): GATEKIT_SETUP_KEEP_PATH=1 never reads the registry PATH;
 #   GATEKIT_SETUP_REGISTRY_PATH replaces the registry PATH value; GATEKIT_SETUP_SYNC_TIMEOUT
-#   (seconds) replaces the 300 second uv sync limit; GATEKIT_SETUP_OFFICIAL_RUNNER is an
+#   (seconds) replaces the 300 second uv sync limit; GATEKIT_SETUP_MIN_PYTHON (major.minor)
+#   replaces the required 3.14 for the .venv Python; GATEKIT_SETUP_OFFICIAL_RUNNER is an
 #   executable run instead of the official installer script (it receives the script URL).
 
 param(
@@ -62,6 +63,8 @@ $launcher = Join-Path $kit 'bin\gatekit.py'
 $dash = [string][char]0x2014
 $allowed = @('pwsh', 'uv', 'claude', 'git', 'venv')
 $uvMinimum = [version]'0.4.27'
+$pythonMinimum = [version]'3.14'
+if ($env:GATEKIT_SETUP_MIN_PYTHON -match '^\d+\.\d+$') { $pythonMinimum = [version]$env:GATEKIT_SETUP_MIN_PYTHON }
 $claudeRecommended = [version]'2.1.277'
 $syncTimeout = 300
 if ($env:GATEKIT_SETUP_SYNC_TIMEOUT -match '^\d+$') { $syncTimeout = [int]$env:GATEKIT_SETUP_SYNC_TIMEOUT }
@@ -743,6 +746,10 @@ function Test-VenvHealth {
     }
     $v = Get-PythonVersion
     if (-not $v) { return @{ state = 'broken'; reason = (T 'python.exe 가 실행되지 않습니다' 'python.exe does not start'); version = '' } }
+    $pv = Get-VersionFrom $v
+    if ($pv -and $pv -lt $pythonMinimum) {
+        return @{ state = 'old'; reason = (T ('python ' + $v + ' 은(는) 필요한 ' + $pythonMinimum.Major + '.' + $pythonMinimum.Minor + ' 보다 낮습니다') ('python ' + $v + ' is older than the required ' + $pythonMinimum.Major + '.' + $pythonMinimum.Minor)); version = $v }
+    }
     return @{ state = 'ok'; reason = ''; version = $v }
 }
 
@@ -758,13 +765,16 @@ if (-not $uvOk) {
         if ($wantVenv) { $msg = (T '이미 준비되어 있어 건너뜁니다: ' 'already ready, skipped: ') + $msg }
         Add-Item 'S5' 'required' '.venv' 'ok' $msg
         $venvReady = $true
-    } elseif ($health.state -eq 'broken' -and -not $wantVenv) {
+    } elseif (($health.state -eq 'broken' -or $health.state -eq 'old') -and -not $wantVenv) {
         Set-Flag 'needs'
-        Add-Item 'S5' 'required' '.venv' 'fail' (T ('.venv 가 손상되었습니다: ' + $health.reason) ('the .venv is damaged: ' + $health.reason)) `
+        $damageVerdict = 'fail'
+        $damage = T ('.venv 가 손상되었습니다: ' + $health.reason) ('the .venv is damaged: ' + $health.reason)
+        if ($health.state -eq 'old') { $damageVerdict = 'warn'; $damage = T ('.venv 의 Python 이 너무 낮습니다: ' + $health.reason) ('the .venv Python is too old: ' + $health.reason) }
+        Add-Item 'S5' 'required' '.venv' $damageVerdict $damage `
             (T ('허락하면 손상된 ' + $venvRel + ' 폴더를 지우고 다시 만듭니다. Python 과 패키지를 내려받을 수 있습니다(수십 MB) (-Install venv)') ('if you allow it, the damaged ' + $venvRel + ' folder is deleted and rebuilt. Python and packages may be downloaded (tens of MB) (-Install venv)'))
     } else {
-        if ($health.state -eq 'broken') {
-            Say 'warn' 'S5-delete' '.venv' (T ('손상된 폴더를 지우고 다시 만듭니다: ' + $venvDir + ' (' + $health.reason + ')') ('deleting the damaged folder and rebuilding it: ' + $venvDir + ' (' + $health.reason + ')'))
+        if ($health.state -eq 'broken' -or $health.state -eq 'old') {
+            Say 'warn' 'S5-delete' '.venv' (T ('손상되었거나 낮은 버전의 폴더를 지우고 다시 만듭니다: ' + $venvDir + ' (' + $health.reason + ')') ('deleting the damaged or outdated folder and rebuilding it: ' + $venvDir + ' (' + $health.reason + ')'))
             if ((Split-Path -Leaf $venvDir) -eq '.venv') { Remove-Item -LiteralPath $venvDir -Recurse -Force -ErrorAction SilentlyContinue }
         }
         $syncArgs = @('sync', '--project', $kit, '--frozen', '--no-dev')

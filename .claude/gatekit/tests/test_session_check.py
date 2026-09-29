@@ -104,6 +104,20 @@ class TestSessionCheck(unittest.TestCase):
         cfg.write_text("home = %s" % self.root, encoding="utf-8")
         self.assertEqual(self.run_check().stdout.strip(), b"")
 
+    def test_venv_python_below_3_14_is_reported(self) -> None:
+        self.fake("uv")
+        self.fake("claude")
+        self.venv()
+        cfg = self.root / ".claude" / "gatekit" / ".venv" / "pyvenv.cfg"
+        for old in ("3.11.9", "3.13.5"):
+            cfg.write_text("home = %s\nversion_info = %s\n" % (self.root, old), encoding="utf-8")
+            message = json.loads(self.run_check().stdout.decode("ascii"))["systemMessage"]
+            self.assertIn("3.14", message)
+            self.assertIn("/gatekit:setup", message)
+        for fine in ("3.14.3", "3.15.0"):
+            cfg.write_text("home = %s\nversion_info = %s\n" % (self.root, fine), encoding="utf-8")
+            self.assertEqual(self.run_check().stdout.strip(), b"")
+
     def test_venv_with_a_zero_byte_python_is_reported_as_damaged(self) -> None:
         self.fake("uv")
         self.fake("claude")

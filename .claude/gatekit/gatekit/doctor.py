@@ -31,7 +31,7 @@ EXPECTED_HOOK_EVENTS = ("SessionStart", "UserPromptSubmit", "PreToolUse", "PostT
                         "PreCompact", "Stop")
 
 #: The venv's interpreter must be at least this (``requires-python`` in pyproject.toml).
-MIN_PYTHON = (3, 11)
+MIN_PYTHON = (3, 14)
 
 
 #: Output language of the axis texts: "en" (default) or "ko" (``--lang ko``).
@@ -341,7 +341,7 @@ def _venv_version(kit):
     """``(major, minor, micro)`` from ``.venv/pyvenv.cfg``, or ``None``.
 
     uv writes ``version_info = 3.14.3``; the stdlib ``venv`` module writes
-    ``version = 3.11.9``. Reading the file avoids spawning the interpreter.
+    ``version = 3.14.3``. Reading the file avoids spawning the interpreter.
     """
     try:
         with open(str(kit / ".venv" / "pyvenv.cfg"), "r", encoding="utf-8") as handle:
@@ -380,9 +380,9 @@ def axis_python(root) -> dict:
         return _axis("python", verdict.FAIL,
                      _t("venv python %s is below the required %d.%d",
                         ".venv 의 파이썬 %s 이(가) 필요한 %d.%d 보다 낮습니다") % (text, *MIN_PYTHON),
-                     _t("rebuild the venv: uv sync --project .claude/gatekit --frozen "
-                        "(delete .claude/gatekit/.venv first)",
-                        ".venv 를 다시 만드세요: 먼저 .claude/gatekit/.venv 를 지운 뒤 "
+                     _t("rebuild the venv: /gatekit:setup (-Install venv), or delete "
+                        ".claude/gatekit/.venv and run uv sync --project .claude/gatekit --frozen",
+                        ".venv 를 다시 만드세요: /gatekit:setup (-Install venv), 또는 .claude/gatekit/.venv 를 지운 뒤 "
                         "uv sync --project .claude/gatekit --frozen"))
     return _axis("python", verdict.OK, _t("venv python %s", ".venv 파이썬 %s") % text)
 

@@ -389,8 +389,8 @@ class TestAxisPython(DoctorTestCase):
         finally:
             paths.gatekit_root = original
 
-    def test_floor_is_three_eleven(self) -> None:
-        self.assertEqual(doctor.MIN_PYTHON, (3, 11))
+    def test_floor_is_three_fourteen(self) -> None:
+        self.assertEqual(doctor.MIN_PYTHON, (3, 14))
 
     def test_real_venv_meets_the_floor(self) -> None:
         result = doctor.axis_python(self.root)
@@ -406,20 +406,23 @@ class TestAxisPython(DoctorTestCase):
         self.assertIn("/gatekit:setup", result["fix"])
 
     def test_uv_style_cfg_at_the_floor_is_ok(self) -> None:
-        kit = self.venv_tree("home = x\nversion_info = 3.11.9\n")
+        kit = self.venv_tree("home = x\nversion_info = 3.14.0\n")
         result = self.run_axis(kit)
         self.assertEqual(result["verdict"], verdict.OK)
-        self.assertIn("3.11.9", result["detail"])
+        self.assertIn("3.14.0", result["detail"])
 
     def test_stdlib_style_cfg_is_read_too(self) -> None:
         kit = self.venv_tree("version = 3.14.3\n")
         self.assertEqual(self.run_axis(kit)["verdict"], verdict.OK)
 
     def test_old_venv_python_fails(self) -> None:
-        kit = self.venv_tree("version_info = 3.10.14\n")
-        result = self.run_axis(kit)
-        self.assertEqual(result["verdict"], verdict.FAIL)
-        self.assertIn("3.10.14", result["detail"])
+        for old in ("3.10.14", "3.11.9", "3.13.5"):
+            kit = self.venv_tree("version_info = %s\n" % old)
+            result = self.run_axis(kit)
+            self.assertEqual(result["verdict"], verdict.FAIL, old)
+            self.assertIn(old, result["detail"])
+            self.assertIn("-Install venv", result["fix"])
+            shutil.rmtree(kit)
 
     def test_unreadable_version_is_unverified_not_ok(self) -> None:
         kit = self.venv_tree("home = x\n")

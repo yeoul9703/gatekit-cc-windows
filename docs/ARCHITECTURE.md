@@ -22,7 +22,7 @@ directories) but contains no code copied from any other project.
 
 | Rule | Why |
 |---|---|
-| Windows + Claude Code only; Python 3.11+ (`requires-python >=3.11`) managed by uv; kernel code uses the standard library only, zero runtime dependencies (ADR-0018, ADR-0002) | the only prerequisites are Claude Code and uv; no `pip install` step exists |
+| Windows + Claude Code only; Python 3.14+ (`requires-python >=3.14`, `.python-version` 3.14) managed by uv; kernel code uses the standard library only, zero runtime dependencies (ADR-0018, ADR-0002) | the only prerequisites are Claude Code and uv; no `pip install` step exists |
 | One kernel package (`.claude/gatekit/gatekit/`), reached via `.claude/gatekit/bin/gatekit.py` run by `.claude/gatekit/.venv/Scripts/python.exe` | no plugin manager; hooks are shell-less exec-form commands (ADR-0018) |
 | Gates are hooks, not prose | prose instructions fire nondeterministically; hooks fire every time |
 | Every hook exits 0 on any internal error and writes a one-line diagnostic to `.gatekit/runs/hook-errors.log` | a broken hook must never break the user's session |
@@ -54,7 +54,7 @@ directories) but contains no code copied from any other project.
 │   └── gatekit/                         # the standalone kernel checkout
 │       ├── bin/
 │       │   └── gatekit.py               # entry point: sys.path bootstrap, then cli.main
-│       ├── pyproject.toml, uv.lock      # requires-python >=3.11, no runtime deps, [tool.uv] package=false, dev group pyright[nodejs]+ruff
+│       ├── pyproject.toml, uv.lock      # requires-python >=3.14, no runtime deps, [tool.uv] package=false, dev group pyright[nodejs]+ruff
 │       ├── .venv/                       # built by uv from uv.lock (ignored)
 │       ├── scripts/                     # setup.ps1 (check/-Install/-Update), session-check.ps1 (SessionStart), verify.ps1
 │       ├── gatekit/                     # kernel package (stdlib only)
@@ -647,7 +647,7 @@ more in `.gatekit/config.json`.
 4 spec set (`spec.validate` verdict, or `unverified` when no `spec/`);
 5 contract freshness (`source_sha256` matches);
 6 workers (default backend `check`);
-7 python (the `.venv` interpreter is ≥ 3.11);
+7 python (the `.venv` interpreter is ≥ 3.14);
 8 uv (uv is on PATH and answers `--version`). Each axis returns `{axis, verdict, detail, fix}` where
 `fix` is a copy-pasteable command or empty. Exit 1 iff any `fail`.
 

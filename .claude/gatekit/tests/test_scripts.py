@@ -164,7 +164,7 @@ if args[:1] != ['sync']:
     sys.exit(0)
 mode = MODE
 if mode == 'nopython' and '--no-python-downloads' in args:
-    print('error: No interpreter found for Python >=3.11 in managed installations or search path')
+    print('error: No interpreter found for Python >=3.14 in managed installations or search path')
     sys.exit(2)
 if mode == 'fail':
     print(TEXT)
@@ -610,7 +610,7 @@ class TestSetupVenv(SetupCase):
         self.assertTrue((venv / "pyvenv.cfg").exists(), out)  # default mode: left alone
         self.assertEqual(self.sync_calls(), [])
         code, out = self.run_setup("-Install", "venv", "-Lang", "en")
-        self.assertIn("deleting the damaged folder", out)
+        self.assertIn("deleting the damaged or outdated folder", out)
         self.assertFalse((venv / "pyvenv.cfg").exists(), out)  # removed; the plain fake builds nothing
         syncs = self.sync_calls()
         self.assertEqual(len(syncs), 1, self.calls())
@@ -623,6 +623,29 @@ class TestSetupVenv(SetupCase):
         code, _, by_id = self.run_json("-Install", "venv", "-Lang", "en")
         self.assertEqual(by_id["S5"]["verdict"], "ok", by_id["S5"])
         self.assertGreater((self.kit / ".venv" / "Scripts" / "python.exe").stat().st_size, 0)
+
+    def test_venv_python_below_3_14_warns_and_is_rebuilt_only_by_install_venv(self) -> None:
+        self.fake_uv("build")
+        self.run_setup("-Install", "venv", "-Lang", "en")
+        marker = self.kit / ".venv" / "marker.txt"
+        marker.write_text("x", encoding="utf-8")
+        self.log.unlink()
+        env = {"GATEKIT_SETUP_MIN_PYTHON": "3.99"}  # the fake venv now counts as too old
+        code, _, by_id = self.run_json("-Lang", "en", env=env)
+        self.assertEqual(by_id["S5"]["verdict"], "warn", by_id["S5"])
+        self.assertIn("older than the required 3.99", by_id["S5"]["detail"])
+        self.assertIn("-Install venv", by_id["S5"]["action"])
+        self.assertEqual(code, 2)
+        self.assertTrue(marker.exists())
+        self.assertEqual(self.sync_calls(), [])
+        code, out = self.run_setup("-Install", "venv", "-Lang", "en", env=env)
+        self.assertIn("outdated folder", out)
+        self.assertFalse(marker.exists(), out)  # deleted and rebuilt
+        self.assertEqual(len(self.sync_calls()), 1)
+
+    def test_default_minimum_python_is_3_14(self) -> None:
+        text = (SCRIPTS / "setup.ps1").read_bytes().decode("utf-8-sig")
+        self.assertIn("$pythonMinimum = [version]'3.14'", text)
 
     def test_healthy_venv_is_not_touched_by_install_venv(self) -> None:
         self.fake_uv("build")

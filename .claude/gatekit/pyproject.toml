@@ -2,7 +2,7 @@
 name = "gatekit"
 version = "0.1.0"
 description = "Gate harness for Claude Code (Windows + uv). Standard library only at runtime."
-requires-python = ">=3.11"
+requires-python = ">=3.14"
 dependencies = []
 
 [tool.uv]
@@ -18,12 +18,12 @@ dev = [
 
 [tool.pyright]
 include = ["gatekit"]
-pythonVersion = "3.11"
+pythonVersion = "3.14"
 pythonPlatform = "Windows"
 typeCheckingMode = "basic"
 
 [tool.ruff]
-target-version = "py311"
+target-version = "py314"
 
 [tool.ruff.lint]
 # Explicit set (ruff 0.16 default is ~413 rules): the pre-0.16 default plus bugbear.
