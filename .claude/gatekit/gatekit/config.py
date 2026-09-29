@@ -133,7 +133,7 @@ def write_text_atomic(target: pathlib.Path, text: str) -> None:
             stream.write(text)
             stream.flush()
             os.fsync(stream.fileno())
-        os.replace(tmp_name, str(target))
+        paths.replace_file(tmp_name, str(target))
     except BaseException:
         try:
             os.unlink(tmp_name)

@@ -1214,7 +1214,9 @@ class TestStop(JobTestCase):
             job_id = job_id_getter()
             if job_id:
                 st = jobs.read_json(self.task_dir(job_id, task_id) / "status.json", {}) or {}
-                if st.get("state") == state:
+                # A running task records its worker pid a moment after the
+                # state flips (slower on Windows); `stop` needs the pid.
+                if st.get("state") == state and (state != "running" or st.get("pid")):
                     return st
             _time.sleep(0.05)
         self.fail("task %s never reached %s" % (task_id, state))
@@ -1334,6 +1336,20 @@ class TestStop(JobTestCase):
         (tdir / "status.json").write_text("{not json", encoding="utf-8")
         result = jobs.stop(self.root, job["job_id"])  # must not raise
         self.assertIn("write-note", result["stopped"])
+
+    def test_pid_probe_does_not_kill_the_process_and_reports_its_age(self) -> None:
+        import subprocess
+
+        child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+        self.addCleanup(lambda: (child.kill(), child.wait()))
+        self.assertTrue(jobs._pid_alive(child.pid))
+        self.assertIsNone(child.poll(), "probing a pid must not end it (os.kill(pid, 0) does on Windows)")
+        age = jobs._process_age_s(child.pid)
+        self.assertIsNotNone(age)
+        self.assertLess(abs(age), 30.0)
+        child.kill()
+        child.wait()
+        self.assertFalse(jobs._pid_alive(child.pid))
 
     def test_parse_etime_handles_every_ps_shape(self) -> None:
         self.assertEqual(jobs._parse_etime("03:04"), 184.0)

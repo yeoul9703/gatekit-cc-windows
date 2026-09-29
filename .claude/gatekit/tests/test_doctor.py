@@ -19,6 +19,8 @@ import unittest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from gatekit import doctor, paths, verdict
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from fakebin import make_fake, print_and_exit  # noqa: E402
 
 
 class DoctorTestCase(unittest.TestCase):
@@ -54,9 +56,7 @@ class DoctorTestCase(unittest.TestCase):
         return {event: [entry] for event in doctor.EXPECTED_HOOK_EVENTS}
 
     def stub_claude(self) -> None:
-        path = self.bindir / "claude"
-        path.write_text("#!/bin/sh\necho 'claude 1.0.0'\n", encoding="utf-8")
-        path.chmod(path.stat().st_mode | stat.S_IXUSR)
+        make_fake(self.bindir, "claude", print_and_exit("claude 1.0.0"))
 
     def axis(self, report: dict, n: int) -> dict:
         return report["axes"][n - 1]

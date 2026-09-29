@@ -10,6 +10,7 @@ directory read concurrently never sees a half-written file.
 """
 from __future__ import annotations
 
+import contextlib
 import datetime
 import json
 import os
@@ -124,7 +125,7 @@ def write_json(path, data) -> None:
             handle.write("\n")
             handle.flush()
             os.fsync(handle.fileno())
-        os.replace(tmp, path)
+        paths.replace_file(tmp, path)
     except BaseException:
         try:
             os.unlink(tmp)
@@ -565,7 +566,7 @@ def run_gates(root, task: dict) -> dict:
         started = time.time()
         try:
             proc = subprocess.run(
-                [str(a) for a in argv],
+                paths.resolve_argv(argv),
                 cwd=str(root),
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.PIPE,
@@ -773,7 +774,7 @@ def _spawn_worker(root, backend: dict, task: dict, job_id: str, tdir, timeout_s:
     with open(out_path, "wb") as out_f, open(err_path, "wb") as err_f:
         try:
             proc = subprocess.Popen(
-                list(backend["argv"]),
+                paths.resolve_argv(backend["argv"]),
                 cwd=str(root),
                 env=env,
                 stdin=subprocess.PIPE,
@@ -786,13 +787,20 @@ def _spawn_worker(root, backend: dict, task: dict, job_id: str, tdir, timeout_s:
                     "elapsed_s": round(time.time() - started, 3)}
         if on_spawn is not None:
             try:
-                on_spawn(proc.pid, started)
+                # A `jobs stop` that landed between the "running" status and
+                # this pid being recorded found no pid to signal; on_spawn
+                # reports it so the freshly spawned worker is not left running.
+                if on_spawn(proc.pid, started):
+                    proc.kill()
             except Exception:  # recording the pid must never break the run
                 pass
         try:
             proc.communicate(prompt.encode("utf-8"), timeout=timeout_s)
             timed_out = False
         except subprocess.TimeoutExpired:
+            if _IS_WINDOWS:
+                # `claude.cmd`-style shims: end the whole tree, not just cmd.exe.
+                _terminate_pid(proc.pid)
             proc.kill()
             try:
                 proc.communicate(timeout=5)
@@ -814,6 +822,7 @@ def execute_task(root, jdir, job_id: str, task: dict, backend: dict, timeout_s: 
 
     def record_pid(pid, started):
         _set_status(jdir, task_id, pid=int(pid), pid_started_at=float(started))
+        return _stop_requested(jdir)
 
     result = _spawn_worker(root, backend, task, job_id, tdir, timeout_s, on_spawn=record_pid)
     # The worker has been reaped; its pid may be reused by anything now, so
@@ -1560,12 +1569,55 @@ def _merge_job_json(jdir, fields: dict, fallback: Optional[dict] = None) -> dict
     write itself is atomic, so the surviving loser is a lost field, never a
     corrupt file.
     """
-    job = read_json(jdir / "job.json", None)
-    if not isinstance(job, dict):
-        job = dict(fallback or {})
-    job.update(fields)
-    write_json(jdir / "job.json", job)
+    with _job_json_lock(jdir):
+        job = read_json(jdir / "job.json", None)
+        if not isinstance(job, dict):
+            job = dict(fallback or {})
+        job.update(fields)
+        write_json(jdir / "job.json", job)
     return job
+
+
+@contextlib.contextmanager
+def _job_json_lock(jdir, wait_s: float = 5.0, stale_s: float = 30.0):
+    """Cross-process mutex around a `job.json` read-modify-write.
+
+    Re-reading right before the write narrows the lost-update window between
+    `jobs stop` and the draining runner but does not close it (they are
+    separate processes, and the runner reacts to the worker being killed within
+    milliseconds). `os.mkdir` is atomic on every platform, so a lock directory
+    serialises them. A lock older than *stale_s* is a crashed holder's and is
+    broken; if the lock cannot be taken within *wait_s* the write proceeds
+    unlocked rather than hanging a hook or a stop.
+    """
+    lock = str(jdir / "job.json.lock")
+    held = False
+    deadline = time.time() + wait_s
+    while True:
+        try:
+            os.mkdir(lock)
+            held = True
+            break
+        except FileExistsError:
+            try:
+                if time.time() - os.path.getmtime(lock) > stale_s:
+                    os.rmdir(lock)
+                    continue
+            except OSError:
+                pass
+            if time.time() >= deadline:
+                break
+            time.sleep(0.01)
+        except OSError:
+            break
+    try:
+        yield
+    finally:
+        if held:
+            try:
+                os.rmdir(lock)
+            except OSError:
+                pass
 
 
 def _finalise_job(jdir, job: dict) -> dict:
@@ -1631,7 +1683,13 @@ def status(root, job_id: Optional[str] = None) -> dict:
 
 
 def _process_age_s(pid: int) -> Optional[float]:
-    """Seconds since `pid` started, via `ps -o etime=`; None when unknown."""
+    """Seconds since `pid` started; None when unknown.
+
+    POSIX: `ps -o etime=`. Windows has no `ps`, so the creation time comes
+    from GetProcessTimes.
+    """
+    if _IS_WINDOWS:
+        return _windows_process_age_s(pid)
     try:
         out = subprocess.run(["ps", "-o", "etime=", "-p", str(pid)],
                              stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
@@ -1639,6 +1697,79 @@ def _process_age_s(pid: int) -> Optional[float]:
     except (OSError, subprocess.SubprocessError):
         return None
     return _parse_etime(out)
+
+
+_IS_WINDOWS = os.name == "nt"
+_WIN_QUERY_LIMITED = 0x1000          # PROCESS_QUERY_LIMITED_INFORMATION
+_WIN_STILL_ACTIVE = 259
+#: 100-ns FILETIME ticks between 1601-01-01 and the Unix epoch.
+_WIN_EPOCH_DELTA_S = 11644473600
+
+
+def _windows_open(pid: int):
+    """(kernel32, handle) for a query-only handle to `pid`; handle is 0 when
+    the process does not exist or cannot be opened."""
+    import ctypes
+    from ctypes import wintypes
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.OpenProcess.restype = wintypes.HANDLE
+    kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    return kernel32, kernel32.OpenProcess(_WIN_QUERY_LIMITED, False, int(pid))
+
+
+def _windows_process_age_s(pid: int) -> Optional[float]:
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        kernel32, handle = _windows_open(pid)
+        if not handle:
+            return None
+        try:
+            created, exited, kernel, user = (wintypes.FILETIME() for _ in range(4))
+            kernel32.GetProcessTimes.argtypes = [wintypes.HANDLE] + [ctypes.POINTER(wintypes.FILETIME)] * 4
+            if not kernel32.GetProcessTimes(handle, ctypes.byref(created), ctypes.byref(exited),
+                                            ctypes.byref(kernel), ctypes.byref(user)):
+                return None
+            ticks = (created.dwHighDateTime << 32) | created.dwLowDateTime
+        finally:
+            kernel32.CloseHandle(handle)
+        return max(0.0, time.time() - (ticks / 1e7 - _WIN_EPOCH_DELTA_S))
+    except Exception:  # unknown age must degrade to "do not touch the pid"
+        return None
+
+
+def _pid_alive(pid: int) -> bool:
+    """True when a process with this pid exists and has not exited.
+
+    Never use `os.kill(pid, 0)` for this on Windows: there every signal other
+    than CTRL_*_EVENT is TerminateProcess, so a "probe" would kill the worker.
+    """
+    if _IS_WINDOWS:
+        try:
+            import ctypes
+            from ctypes import wintypes
+
+            kernel32, handle = _windows_open(pid)
+            if not handle:
+                return False
+            try:
+                code = wintypes.DWORD()
+                kernel32.GetExitCodeProcess.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
+                if not kernel32.GetExitCodeProcess(handle, ctypes.byref(code)):
+                    return False
+                return code.value == _WIN_STILL_ACTIVE
+            finally:
+                kernel32.CloseHandle(handle)
+        except Exception:
+            return False
+    try:
+        os.kill(pid, 0)
+    except (OSError, ValueError):
+        return False
+    return True
 
 
 def _parse_etime(text: str) -> Optional[float]:
@@ -1668,9 +1799,7 @@ def _parse_etime(text: str) -> Optional[float]:
 
 def _pid_belongs_to_status(pid: int, pid_started_at: float) -> bool:
     """True only when a live process of that pid is as old as the recorded spawn."""
-    try:
-        os.kill(pid, 0)
-    except (OSError, ValueError):
+    if not _pid_alive(pid):
         return False
     age = _process_age_s(pid)
     if age is None:
@@ -1680,9 +1809,17 @@ def _pid_belongs_to_status(pid: int, pid_started_at: float) -> bool:
 
 
 def _terminate_pid(pid: int, grace_s: Optional[float] = None) -> bool:
-    """SIGTERM, wait up to `grace_s`, then SIGKILL. True when a signal was sent."""
+    """SIGTERM, wait up to `grace_s`, then SIGKILL. True when a signal was sent.
+
+    Windows has neither signal: `os.kill(pid, SIGTERM)` is an immediate
+    TerminateProcess, and there is no SIGKILL. There the worker's whole process
+    tree is ended with `taskkill /T /F` (a `.cmd` shim leaves its child
+    running otherwise), falling back to `os.kill`.
+    """
     import signal
 
+    if _IS_WINDOWS:
+        return _terminate_pid_windows(pid, signal)
     grace = STOP_GRACE_S if grace_s is None else float(grace_s)
     try:
         os.kill(pid, signal.SIGTERM)
@@ -1690,15 +1827,33 @@ def _terminate_pid(pid: int, grace_s: Optional[float] = None) -> bool:
         return False
     deadline = time.time() + grace
     while time.time() < deadline:
-        try:
-            os.kill(pid, 0)
-        except OSError:
+        if not _pid_alive(pid):
             return True  # gone
         time.sleep(0.05)
     try:
         os.kill(pid, signal.SIGKILL)
     except OSError:
         pass
+    return True
+
+
+def _terminate_pid_windows(pid: int, signal_mod) -> bool:
+    sent = False
+    try:
+        result = subprocess.run(["taskkill", "/PID", str(int(pid)), "/T", "/F"],
+                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=10)
+        sent = result.returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        pass
+    if not sent:
+        try:
+            os.kill(pid, signal_mod.SIGTERM)  # TerminateProcess
+            sent = True
+        except OSError:
+            return False
+    deadline = time.time() + 5.0
+    while time.time() < deadline and _pid_alive(pid):
+        time.sleep(0.05)
     return True
 
 

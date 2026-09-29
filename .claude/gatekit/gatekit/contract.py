@@ -400,10 +400,12 @@ def _run_one(
     started = time.monotonic()
     try:
         completed = subprocess.run(  # noqa: S603 - argv list, shell=False by default
-            list(crit["argv"]),
+            paths.resolve_argv(crit["argv"]),
             cwd=str(root),
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=timeout,
             shell=False,
         )

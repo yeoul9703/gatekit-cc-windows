@@ -13,6 +13,8 @@ import unittest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from gatekit import paths
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from fakebin import make_fake, print_and_exit  # noqa: E402
 
 
 class TempProject(unittest.TestCase):
@@ -106,6 +108,29 @@ class TestDerivedDirs(TempProject):
         paths.ensure_dir(target)
         paths.ensure_dir(target)
         self.assertTrue(target.is_dir())
+
+
+class TestResolveArgv(TempProject):
+    def test_a_bare_command_that_is_only_a_cmd_shim_can_be_run(self) -> None:
+        """`subprocess` without a shell skips PATHEXT on Windows, so a bare
+        `claude`/`npm` that is really `claude.cmd` must be resolved first."""
+        import subprocess
+
+        make_fake(self.root, "faketool", print_and_exit("tool 9.9"))
+        old = os.environ.get("PATH", "")
+        os.environ["PATH"] = str(self.root) + os.pathsep + old
+        try:
+            argv = paths.resolve_argv(["faketool", "--version"])
+            proc = subprocess.run(argv, stdout=subprocess.PIPE)
+        finally:
+            os.environ["PATH"] = old
+        self.assertEqual(proc.returncode, 0)
+        self.assertIn(b"tool 9.9", proc.stdout)
+
+    def test_unknown_command_and_explicit_paths_are_left_alone(self) -> None:
+        self.assertEqual(paths.resolve_argv(["no-such-command-xyz", "1"]), ["no-such-command-xyz", "1"])
+        explicit = os.path.join("some", "dir", "tool")
+        self.assertEqual(paths.resolve_argv([explicit, 2]), [explicit, "2"])
 
 
 if __name__ == "__main__":  # pragma: no cover

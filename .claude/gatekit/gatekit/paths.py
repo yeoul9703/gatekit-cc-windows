@@ -26,6 +26,49 @@ STATE_DIRNAME = ".gatekit"
 SPEC_DIRNAME = "spec"
 
 
+def resolve_argv(argv):
+    """Return *argv* as a list of strings with a Windows-runnable ``argv[0]``.
+
+    ``subprocess`` without a shell does not apply ``PATHEXT`` on Windows, so
+    ``["npm", ...]`` or ``["claude", ...]`` cannot start a ``.cmd``/``.bat``
+    shim and raises FileNotFoundError even though the command works in a
+    terminal. On Windows a bare command name is therefore resolved with
+    ``shutil.which`` (which does honour ``PATHEXT``); if nothing is found the
+    name is left as is so the caller still reports the original error. On
+    macOS/Linux, and for any ``argv[0]`` that already contains a path
+    separator, the list is returned unchanged.
+    """
+    out = [str(a) for a in argv]
+    if os.name == "nt" and out and not any(sep in out[0] for sep in ("/", "\\")):
+        import shutil
+
+        found = shutil.which(out[0])
+        if found:
+            out[0] = found
+    return out
+
+
+def replace_file(src, dst, attempts: int = 40, delay_s: float = 0.05) -> None:
+    """``os.replace`` that tolerates Windows sharing violations.
+
+    POSIX replaces atomically no matter who has the destination open. On
+    Windows ``os.replace`` raises ``PermissionError`` while another thread or
+    process is reading or replacing the same file, which for gatekit's status,
+    ledger and config files is a transient condition; retry for about two
+    seconds before giving up. Elsewhere this is a plain ``os.replace``.
+    """
+    import time
+
+    for attempt in range(attempts if os.name == "nt" else 1):
+        try:
+            os.replace(src, dst)
+            return
+        except PermissionError:
+            if os.name != "nt" or attempt == attempts - 1:
+                raise
+            time.sleep(delay_s)
+
+
 def project_root(cwd: Optional[str] = None) -> pathlib.Path:
     """Return the nearest ancestor of *cwd* containing a root marker.
 
