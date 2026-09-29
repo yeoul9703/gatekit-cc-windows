@@ -203,6 +203,7 @@ class SetupCase(unittest.TestCase):
         self.kit = self.root / ".claude" / "gatekit"
         (self.kit / "scripts").mkdir(parents=True)
         shutil.copy(SCRIPTS / "setup.ps1", self.kit / "scripts" / "setup.ps1")
+        shutil.copy(SCRIPTS / "packages.json", self.kit / "scripts" / "packages.json")
         shutil.copy(PROJECT / ".claude" / "settings.json", self.root / ".claude" / "settings.json")
         self.bin = self.root / "fakebin"
         self.bin.mkdir()

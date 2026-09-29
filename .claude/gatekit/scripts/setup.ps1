@@ -10,13 +10,18 @@
 #                     "venv" builds .claude/gatekit/.venv WITH downloads (Python and packages,
 #                     tens of MB) and deletes and rebuilds a broken .venv. Only this switch may.
 #   -Update <list>    update the listed programs (pwsh, uv, claude, git; not venv).
+#   -Reinstall <list> reinstall the listed programs. Allowed names: uv, pwsh, claude only (git is
+#                     never reinstalled here; venv is rebuilt with -Install venv). uv: winget
+#                     --force when uv came from winget, otherwise the official installer script
+#                     (this also repairs a broken uv-receipt.json). pwsh: winget MSIX --force.
+#                     claude: the official installer script. The version is read again afterwards.
 #   -Json             print ONE ASCII-only JSON object {exit_code, exit_meaning, items:[{id,level,
 #                     name,verdict,detail,action,hints}]}. Non-ASCII text is written as \uXXXX.
 #                     Every line (skipped / done / progress too) is one item.
 #   -Lang ko|en       output language, one language per line. Default: ko if the Windows UI
 #                     language is Korean, otherwise en.
-# Any other name in -Install / -Update is refused with exit code 1.
-# -Install / -Update are the user's permission: the chat asked first. Only calls
+# Any other name in -Install / -Update / -Reinstall is refused with exit code 1.
+# -Install / -Update / -Reinstall are the user's permission: the chat asked first. Only calls
 # made for a listed name pass --accept-source-agreements / --accept-package-agreements.
 # Only user-scope installs run automatically. Anything that needs administrator
 # rights (git) is never run here; the script prints what to do instead.
@@ -47,6 +52,7 @@
 param(
     [string[]]$Install = @(),
     [string[]]$Update = @(),
+    [string[]]$Reinstall = @(),
     [switch]$Json,
     [string]$Lang = ''
 )
@@ -62,10 +68,26 @@ $venvPy = Join-Path $venvDir 'Scripts\python.exe'
 $launcher = Join-Path $kit 'bin\gatekit.py'
 $dash = [string][char]0x2014
 $allowed = @('pwsh', 'uv', 'claude', 'git', 'venv')
-$uvMinimum = [version]'0.4.27'
+$allowedReinstall = @('uv', 'pwsh', 'claude')
+
+# scripts/packages.json is the single source for winget ids, installer types, official script
+# urls and minimum versions. Nothing below hard-codes them.
+$script:pkgs = @{}
+$script:pkgLoadError = ''
+try {
+    $pkgData = (Get-Content -LiteralPath (Join-Path $PSScriptRoot 'packages.json') -Raw -Encoding UTF8 | ConvertFrom-Json)
+    foreach ($pk in @($pkgData.packages)) { $script:pkgs[[string]$pk.key] = $pk }
+} catch { $script:pkgLoadError = "$_" }
+$uvMinimum = [version]'0.0.0'
+$claudeRecommended = [version]'0.0.0'
+$pwshMinimum = [version]'0.0.0'
+try {
+    if ($script:pkgs['uv'].min_version) { $uvMinimum = [version]$script:pkgs['uv'].min_version }
+    if ($script:pkgs['claude'].min_version) { $claudeRecommended = [version]$script:pkgs['claude'].min_version }
+    if ($script:pkgs['pwsh'].min_version) { $pwshMinimum = [version]$script:pkgs['pwsh'].min_version }
+} catch { }
 $pythonMinimum = [version]'3.14'
 if ($env:GATEKIT_SETUP_MIN_PYTHON -match '^\d+\.\d+$') { $pythonMinimum = [version]$env:GATEKIT_SETUP_MIN_PYTHON }
-$claudeRecommended = [version]'2.1.277'
 $syncTimeout = 300
 if ($env:GATEKIT_SETUP_SYNC_TIMEOUT -match '^\d+$') { $syncTimeout = [int]$env:GATEKIT_SETUP_SYNC_TIMEOUT }
 
@@ -177,10 +199,25 @@ if ($Lang -ne '') {
 }
 $installList = Split-List $Install
 $updateList = Split-List $Update
+$reinstallList = Split-List $Reinstall
+if ($script:pkgs.Count -lt 4) {
+    $argsBad = $true
+    Add-Item 'args' 'required' 'packages.json' 'fail' (T ('scripts/packages.json 을 읽지 못했습니다: ' + $script:pkgLoadError) ('could not read scripts/packages.json: ' + $script:pkgLoadError)) (T '저장소에서 복원하세요(git checkout .claude/gatekit/scripts/packages.json)' 'restore it from the repository (git checkout .claude/gatekit/scripts/packages.json)')
+}
 foreach ($n in (@($installList) + @($updateList))) {
     if ($allowed -notcontains $n) {
         $argsBad = $true
         Add-Item 'args' 'required' (T '스위치' 'switch') 'fail' (T ('거부됨: "' + $n + '" 은(는) 허용 목록에 없습니다') ('refused: "' + $n + '" is not in the allowed list')) (T ('허용: ' + ($allowed -join ', ')) ('allowed: ' + ($allowed -join ', ')))
+    }
+}
+foreach ($n in $reinstallList) {
+    if ($allowedReinstall -notcontains $n) {
+        $argsBad = $true
+        $why = T ('거부됨: "' + $n + '" 은(는) -Reinstall 허용 목록에 없습니다') ('refused: "' + $n + '" is not in the -Reinstall allowed list')
+        $hint = T ('허용: ' + ($allowedReinstall -join ', ')) ('allowed: ' + ($allowedReinstall -join ', '))
+        if ($n -eq 'git') { $hint = (T 'git 은 관리자 권한이 필요할 수 있어 자동으로 다시 설치하지 않습니다. 직접 설치하세요: winget install --id ' 'git may need administrator rights, so it is never reinstalled automatically. Install it yourself: winget install --id ') + $script:pkgs['git'].winget_id + ' -e' }
+        if ($n -eq 'venv') { $hint = T '.venv 는 -Install venv 로 다시 만듭니다' 'the .venv is rebuilt with -Install venv' }
+        Add-Item 'args' 'required' (T '스위치' 'switch') 'fail' $why $hint
     }
 }
 if ($updateList -contains 'venv') {
@@ -445,7 +482,7 @@ function Get-UvMethod($uvPath) {
 function Get-UvUpdateAdvice([string]$method) {
     switch ($method) {
         'standalone' { return 'uv self update' }
-        'winget' { return 'winget upgrade --id astral-sh.uv -e' }
+        'winget' { return ('winget upgrade --id ' + $script:pkgs['uv'].winget_id + ' -e') }
         'scoop' { return 'scoop update uv' }
         'pip' { return 'python -m pip install -U uv' }
     }
@@ -457,6 +494,29 @@ function Test-PwshMsiPath([string]$path) {
     return ($path -match '(?i)\\Program Files( \(x86\))?\\PowerShell\\')
 }
 
+# After a reinstall: read the version again and (for uv) check the receipt.
+function Confirm-Reinstalled([string]$name, [string]$path) {
+    if ($name -eq 'pwsh') {
+        $r = Invoke-Proc $path @('-NoProfile', '-NoLogo', '-Command', '$PSVersionTable.PSVersion.ToString()') 20
+    } else {
+        $r = Invoke-Proc $path @('--version') 20
+    }
+    $vt = ($r.Out.Trim() -split "`r?`n")[0]
+    if ($r.Code -eq 0 -and $vt) {
+        Say 'ok' ('A-' + $name + '-version') $name ((T '재설치 후 버전 확인: ' 'version after the reinstall: ') + $vt)
+    } else {
+        Say 'unverified' ('A-' + $name + '-version') $name (T '재설치했지만 버전을 다시 읽지 못했습니다.' 'reinstalled, but the version could not be read again.')
+    }
+    if ($name -eq 'uv') {
+        $m = Get-UvMethod $path
+        if ($m.receipt -eq 'broken') {
+            Say 'warn' 'A-uv-receipt' 'uv' (T 'uv-receipt.json 이 아직 깨져 있습니다.' 'uv-receipt.json is still broken.')
+        } elseif ($m.receipt -eq 'valid') {
+            Say 'ok' 'A-uv-receipt' 'uv' (T 'uv-receipt.json 이 정상입니다(uv self update 사용 가능).' 'uv-receipt.json is valid (uv self update works).')
+        }
+    }
+}
+
 function Invoke-Action([string]$name, [string]$mode) {
     if ($name -eq 'venv') { return }                     # handled by the .venv step below
     $found = Get-App $name
@@ -464,6 +524,11 @@ function Invoke-Action([string]$name, [string]$mode) {
     $present = ($found.where -ne 'none')
     if ($mode -eq 'install' -and $present) {
         Say 'ok' ('A-' + $name) $name (T '이미 설치되어 있어 건너뜁니다.' 'already installed, skipped.')
+        return
+    }
+    if ($mode -eq 'reinstall' -and -not $present) {
+        Say 'info' ('A-' + $name) $name (T '설치되어 있지 않아 재설치 대신 새로 설치합니다.' 'not installed, so a fresh install is done instead of a reinstall.')
+        Invoke-Action $name 'install'
         return
     }
     if ($mode -eq 'update' -and -not $present) {
@@ -479,35 +544,52 @@ function Invoke-Action([string]$name, [string]$mode) {
     switch ($name) {
         'pwsh' {
             $verb = 'upgrade'
+            $pwshExtra = @('--installer-type', $script:pkgs['pwsh'].installer_type)
             if ($mode -eq 'install') { $verb = 'install' }
-            if ($mode -eq 'update' -and (Test-PwshMsiPath $apps[0].Source)) {
+            if ($mode -eq 'reinstall') { $verb = 'install'; $pwshExtra += '--force' }
+            if (($mode -eq 'update' -or $mode -eq 'reinstall') -and (Test-PwshMsiPath $apps[0].Source)) {
                 Say 'info' 'A-pwsh' 'pwsh' (T '기존 MSI 설치본이라 업데이트 중 관리자 확인 창(UAC)이 뜰 수 있습니다. 창이 뜨면 허용하거나 IT 담당자에게 문의하세요.' 'this is an older MSI install, so a Windows administrator prompt (UAC) may appear during the update. Allow it, or ask your IT contact.')
             }
-            $ok = Invoke-WingetAction $verb 'Microsoft.PowerShell' 'pwsh' 'PowerShell 7 (winget Microsoft.PowerShell)' @('--installer-type', 'msix')
+            $ok = Invoke-WingetAction $verb $script:pkgs['pwsh'].winget_id 'pwsh' ('PowerShell 7 (winget ' + $script:pkgs['pwsh'].winget_id + ')') $pwshExtra
         }
         'uv' {
-            if ($mode -eq 'install') {
+            if ($mode -eq 'reinstall') {
+                $m = Get-UvMethod $apps[0].Source
+                if ($m.method -eq 'winget') {
+                    $ok = Invoke-WingetAction 'install' $script:pkgs['uv'].winget_id 'uv' ('uv (winget ' + $script:pkgs['uv'].winget_id + ' --force)') @('--force')
+                } elseif ($m.method -eq 'scoop' -or $m.method -eq 'pip') {
+                    Set-Flag 'needs'
+                    Add-Item 'S16-uv' 'required' (T 'uv 재설치' 'uv reinstall') 'warn' (T ('이 uv 는 ' + $m.method + ' 로 설치되어 자동 재설치하지 않습니다.') ('this uv was installed with ' + $m.method + ', so it is not reinstalled automatically.')) (Get-UvUpdateAdvice $m.method)
+                    return
+                } else {
+                    $why = T 'uv 를 공식 설치 스크립트로 다시 설치합니다.' 'reinstalling uv with the official installer script.'
+                    if ($m.receipt -eq 'broken') { $why = T '깨진 uv-receipt.json 을 복구하려고 공식 설치 스크립트로 다시 설치합니다.' 'reinstalling uv with the official installer script to repair the broken uv-receipt.json.' }
+                    Say 'info' 'A-uv' 'uv' $why
+                    $ok = Invoke-OfficialScript $script:pkgs['uv'].official_script_url 'uv'
+                    if (-not $ok) { Report-ScriptFailure 'uv' }
+                }
+            } elseif ($mode -eq 'install') {
                 if ((Find-App 'winget' $script:sessionPath).Count -gt 0) {
-                    $ok = Invoke-WingetAction 'install' 'astral-sh.uv' 'uv' 'uv (winget astral-sh.uv)' @() $true
+                    $ok = Invoke-WingetAction 'install' $script:pkgs['uv'].winget_id 'uv' ('uv (winget ' + $script:pkgs['uv'].winget_id + ')') @() $true
                     if (-not $ok -and $script:lastWingetFail) {
                         $wf = $script:lastWingetFail
                         if ($wf.fail.cls -eq 'policy') {
                             Say 'info' 'A-uv' 'uv' (T 'winget 이 정책으로 막혀 있어 공식 설치 스크립트로 다시 시도합니다.' 'winget is blocked by policy, so the official installer script is tried instead.')
-                            $ok = Invoke-OfficialScript 'https://astral.sh/uv/install.ps1' 'uv'
+                            $ok = Invoke-OfficialScript $script:pkgs['uv'].official_script_url 'uv'
                             if (-not $ok) { Report-InstallFailure 'uv' $wf.what $wf.fail $wf.out }
                         } else {
                             Report-InstallFailure 'uv' $wf.what $wf.fail $wf.out
                         }
                     }
                 } else {
-                    $ok = Invoke-OfficialScript 'https://astral.sh/uv/install.ps1' 'uv'
+                    $ok = Invoke-OfficialScript $script:pkgs['uv'].official_script_url 'uv'
                     if (-not $ok) { Report-ScriptFailure 'uv' }
                 }
             } else {
                 $m = Get-UvMethod $apps[0].Source
-                if ($m.method -eq 'winget') { $ok = Invoke-WingetAction 'upgrade' 'astral-sh.uv' 'uv' 'uv (winget astral-sh.uv)' }
+                if ($m.method -eq 'winget') { $ok = Invoke-WingetAction 'upgrade' $script:pkgs['uv'].winget_id 'uv' ('uv (winget ' + $script:pkgs['uv'].winget_id + ')') }
                 elseif ($m.method -eq 'standalone' -and $m.receipt -eq 'broken') {
-                    $ok = Invoke-OfficialScript 'https://astral.sh/uv/install.ps1' 'uv'
+                    $ok = Invoke-OfficialScript $script:pkgs['uv'].official_script_url 'uv'
                     if (-not $ok) { Report-ScriptFailure 'uv' }
                 }
                 elseif ($m.method -eq 'standalone') {
@@ -528,11 +610,15 @@ function Invoke-Action([string]$name, [string]$mode) {
             }
         }
         'claude' {
-            if ($mode -eq 'install') {
-                $ok = Invoke-OfficialScript 'https://claude.ai/install.ps1' 'claude'
+            if ($mode -eq 'reinstall') {
+                Say 'info' 'A-claude' 'claude' (T 'claude 를 공식 설치 스크립트로 다시 설치합니다.' 'reinstalling claude with the official installer script.')
+                $ok = Invoke-OfficialScript $script:pkgs['claude'].official_script_url 'claude'
+                if (-not $ok) { Report-ScriptFailure 'claude' }
+            } elseif ($mode -eq 'install') {
+                $ok = Invoke-OfficialScript $script:pkgs['claude'].official_script_url 'claude'
                 if (-not $ok) {
                     if ((Find-App 'winget' $script:sessionPath).Count -gt 0) {
-                        $ok = Invoke-WingetAction 'install' 'Anthropic.ClaudeCode' 'claude' 'Claude Code (winget Anthropic.ClaudeCode)'
+                        $ok = Invoke-WingetAction 'install' $script:pkgs['claude'].winget_id 'claude' ('Claude Code (winget ' + $script:pkgs['claude'].winget_id + ')')
                     } else { Report-ScriptFailure 'claude' }
                 }
             } else {
@@ -553,7 +639,7 @@ function Invoke-Action([string]$name, [string]$mode) {
             Set-Flag 'needs'
             Add-Item 'S10-git' 'info' 'git' 'warn' (T '관리자 권한이 필요할 수 있어 자동으로 실행하지 않습니다.' 'it may need administrator rights, so it is not run automatically.') `
                 (T '직접 설치하세요(선택 사항).' 'install it yourself (optional).') `
-                @('winget install --id Git.Git -e --source winget', 'https://git-scm.com/download/win')
+                @(('winget install --id ' + $script:pkgs['git'].winget_id + ' -e --source winget'), $script:pkgs['git'].docs_url)
             return
         }
     }
@@ -565,8 +651,12 @@ function Invoke-Action([string]$name, [string]$mode) {
             Add-Item ('S9-' + $name) 'required' $name 'warn' (T '설치했지만 PATH 를 다시 읽어도 보이지 않습니다.' 'installed, but still not visible after re-reading PATH.') `
                 (T 'Claude 앱(VS Code 창)을 완전히 닫고 다시 연 뒤 /gatekit:setup 을 다시 실행하세요.' 'close the Claude app (VS Code window) completely, open it again, then run /gatekit:setup again.')
         } else {
-            [void]$script:done.Add($name + ' ' + (T $(if ($mode -eq 'install') { '설치' } else { '업데이트' }) $mode))
-            Say 'ok' ('A-' + $name) $name ((T '완료' 'done') + ' (' + (T $(if ($mode -eq 'install') { '설치' } else { '업데이트' }) $mode) + ')')
+            $modeKo = '업데이트'
+            if ($mode -eq 'install') { $modeKo = '설치' }
+            if ($mode -eq 'reinstall') { $modeKo = '재설치' }
+            [void]$script:done.Add($name + ' ' + (T $modeKo $mode))
+            Say 'ok' ('A-' + $name) $name ((T '완료' 'done') + ' (' + (T $modeKo $mode) + ')')
+            if ($mode -eq 'reinstall') { Confirm-Reinstalled $name $after.apps[0].Source }
         }
     }
 }
@@ -577,6 +667,7 @@ Say 'info' 'project' (T '프로젝트' 'project') $projectRoot
 # Actions run first so the report below shows the state AFTER them.
 foreach ($n in $installList) { Invoke-Action $n 'install' }
 foreach ($n in $updateList) { Invoke-Action $n 'update' }
+foreach ($n in $reinstallList) { Invoke-Action $n 'reinstall' }
 
 # S1 system --------------------------------------------------------------------
 $arch = $env:PROCESSOR_ARCHITEW6432
@@ -620,7 +711,7 @@ if ($wingetFound.where -eq 'none') {
         Add-Item 'S3' 'recommended' 'winget' 'unverified' (T 'winget 은 있지만 버전을 읽지 못했습니다' 'winget is there but its version could not be read')
     }
     $agName = T 'winget 소스 약관' 'winget source agreements'
-    $ag = Invoke-Proc $wingetApp[0].Source @('search', '--id', 'astral-sh.uv', '-e', '--source', 'winget', '--disable-interactivity') 30
+    $ag = Invoke-Proc $wingetApp[0].Source @('search', '--id', $script:pkgs['uv'].winget_id, '-e', '--source', 'winget', '--disable-interactivity') 30
     if ($ag.TimedOut -or -not $ag.Started) {
         Add-Item 'S3-agreement' 'recommended' $agName 'unverified' (T '제한 시간 안에 확인하지 못했습니다' 'could not be checked in time')
     } elseif ($ag.Code -eq 0) {
@@ -656,7 +747,7 @@ if ($pwshFound.where -eq 'none') {
         $stable = $false
         if ($vt -match '^(\d+)\.(\d+)\.(\d+)(-\S+)?$') {
             $ver = [version]($Matches[1] + '.' + $Matches[2] + '.' + $Matches[3])
-            if (-not $Matches[4] -and $ver -ge [version]'7.6.0') { $stable = $true }
+            if (-not $Matches[4] -and $ver -ge $pwshMinimum) { $stable = $true }
         } else { $vt = '?' }
         if ($stable) { $anyStable = $true }
         if ($index -eq 0) { $primaryStable = $stable; $primaryText = $vt; $primaryPath = $a.Source }
@@ -694,7 +785,7 @@ if ($uvFound.where -eq 'none') {
     Set-Flag 'needs'
     Add-Item 'S4' 'required' 'uv' 'fail' (T 'uv 를 찾을 수 없습니다. gatekit 은 uv 가 필요합니다(Python 은 uv 가 알아서 받습니다).' 'uv not found. gatekit needs uv (it fetches Python by itself).') `
         (T '허락하면 설치합니다 (-Install uv). 직접 하려면 아래 중 하나를 실행하세요' 'installed if you allow it (-Install uv). To do it yourself run ONE of these') `
-        @('winget install --id=astral-sh.uv -e', 'powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"', (T '설치 후 새 터미널(또는 Claude 창 재시작)에서 다시 실행하세요' 'after installing, run this again from a new terminal (or restart the Claude window)'))
+        @(('winget install --id=' + $script:pkgs['uv'].winget_id + ' -e'), ('powershell -ExecutionPolicy ByPass -c "irm ' + $script:pkgs['uv'].official_script_url + ' | iex"'), (T '설치 후 새 터미널(또는 Claude 창 재시작)에서 다시 실행하세요' 'after installing, run this again from a new terminal (or restart the Claude window)'))
 } elseif ($uvFound.where -eq 'registry') {
     Add-RestartItem 'S4' 'required' 'uv' $uvApps[0].Source
 } else {

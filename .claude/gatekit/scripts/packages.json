@@ -1,0 +1,50 @@
+{
+  "schema": 1,
+  "note": "Single source for the programs setup.ps1 manages. setup.ps1 and docs/SETUP-REFERENCE.md must agree with this file (tests check it). level: 필수 / 권장 / 선택.",
+  "packages": [
+    {
+      "key": "pwsh",
+      "name_ko": "PowerShell 7",
+      "winget_id": "Microsoft.PowerShell",
+      "level": "권장",
+      "min_version": "7.6.0",
+      "installer_type": "msix",
+      "admin_may_be_required": true,
+      "official_script_url": null,
+      "docs_url": "https://learn.microsoft.com/powershell/scripting/install/installing-powershell-on-windows"
+    },
+    {
+      "key": "uv",
+      "name_ko": "uv (Python 관리 도구)",
+      "winget_id": "astral-sh.uv",
+      "level": "필수",
+      "min_version": "0.4.27",
+      "installer_type": null,
+      "admin_may_be_required": false,
+      "official_script_url": "https://astral.sh/uv/install.ps1",
+      "docs_url": "https://docs.astral.sh/uv/getting-started/installation/"
+    },
+    {
+      "key": "claude",
+      "name_ko": "Claude Code (claude 명령)",
+      "winget_id": "Anthropic.ClaudeCode",
+      "level": "필수",
+      "min_version": "2.1.277",
+      "installer_type": null,
+      "admin_may_be_required": false,
+      "official_script_url": "https://claude.ai/install.ps1",
+      "docs_url": "https://code.claude.com/docs/en/setup"
+    },
+    {
+      "key": "git",
+      "name_ko": "Git for Windows",
+      "winget_id": "Git.Git",
+      "level": "선택",
+      "min_version": null,
+      "installer_type": null,
+      "admin_may_be_required": true,
+      "official_script_url": null,
+      "docs_url": "https://git-scm.com/download/win"
+    }
+  ]
+}
