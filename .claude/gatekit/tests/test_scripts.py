@@ -467,7 +467,9 @@ class TestSetupInstallPaths(SetupCase):
         self.assertEqual(by_id["A-git"]["verdict"], "ok")
         for call in self.calls():
             self.assertNotIn(" upgrade ", " " + call + " ")
-            self.assertNotIn("Git.Git", call)
+            self.assertNotIn(" install ", " " + call + " ")
+            if "Git.Git" in call:
+                self.assertTrue(call.startswith("winget list "), call)  # a read-only lookup only
 
     def test_update_accepts_agreements_only_for_the_listed_program(self) -> None:
         self.fake_winget(0)

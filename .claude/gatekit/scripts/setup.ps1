@@ -15,6 +15,13 @@
 #                     --force when uv came from winget, otherwise the official installer script
 #                     (this also repairs a broken uv-receipt.json). pwsh: winget MSIX --force.
 #                     claude: the official installer script. The version is read again afterwards.
+#   -RetryFailed      retry ONLY the items recorded as failed in .gatekit/runs/setup-last.json, with the
+#                     same action (install / update / reinstall). Nothing recorded: an info line.
+#                     A failed action is recorded there (time, item, action, exit code, class,
+#                     message) and removed again when the same item succeeds.
+#   -Status           check only, but skip the .venv / config / doctor steps: the programs, the
+#                     package table (installed version, update available, install method) and the
+#                     failure record. Cannot be combined with -Install/-Update/-Reinstall/-RetryFailed.
 #   -Json             print ONE ASCII-only JSON object {exit_code, exit_meaning, items:[{id,level,
 #                     name,verdict,detail,action,hints}]}. Non-ASCII text is written as \uXXXX.
 #                     Every line (skipped / done / progress too) is one item.
@@ -46,13 +53,16 @@
 # Test hooks (environment): GATEKIT_SETUP_KEEP_PATH=1 never reads the registry PATH;
 #   GATEKIT_SETUP_REGISTRY_PATH replaces the registry PATH value; GATEKIT_SETUP_SYNC_TIMEOUT
 #   (seconds) replaces the 300 second uv sync limit; GATEKIT_SETUP_MIN_PYTHON (major.minor)
-#   replaces the required 3.14 for the .venv Python; GATEKIT_SETUP_OFFICIAL_RUNNER is an
+#   replaces the required 3.14 for the .venv Python; GATEKIT_SETUP_LIST_TIMEOUT (seconds) replaces
+#   the 30 second `winget list` limit of the package table; GATEKIT_SETUP_OFFICIAL_RUNNER is an
 #   executable run instead of the official installer script (it receives the script URL).
 
 param(
     [string[]]$Install = @(),
     [string[]]$Update = @(),
     [string[]]$Reinstall = @(),
+    [switch]$RetryFailed,
+    [switch]$Status,
     [switch]$Json,
     [string]$Lang = ''
 )
@@ -89,6 +99,8 @@ try {
 $pythonMinimum = [version]'3.14'
 if ($env:GATEKIT_SETUP_MIN_PYTHON -match '^\d+\.\d+$') { $pythonMinimum = [version]$env:GATEKIT_SETUP_MIN_PYTHON }
 $syncTimeout = 300
+$listTimeout = 30
+if ($env:GATEKIT_SETUP_LIST_TIMEOUT -match '^\d+$') { $listTimeout = [int]$env:GATEKIT_SETUP_LIST_TIMEOUT }
 if ($env:GATEKIT_SETUP_SYNC_TIMEOUT -match '^\d+$') { $syncTimeout = [int]$env:GATEKIT_SETUP_SYNC_TIMEOUT }
 
 $script:sessionPath = $env:Path                     # the PATH this session was started with
@@ -100,6 +112,10 @@ $script:langMode = 'en'
 $script:lastScriptFail = $null
 $script:lastWingetFail = $null
 $script:showSummary = $true
+$script:currentAction = ''
+$script:agreementOk = $false
+$script:pkgInfo = @{}
+$script:failureFile = Join-Path $projectRoot '.gatekit\runs\setup-last.json'
 try { if ((Get-UICulture).TwoLetterISOLanguageName -eq 'ko') { $script:langMode = 'ko' } } catch { }
 
 # ---- output helpers -----------------------------------------------------------
@@ -179,6 +195,53 @@ function Complete-Run {
     exit $code
 }
 
+# ---- failure record (.gatekit/runs/setup-last.json) -----------------------------
+function Read-FailureRecords {
+    $list = @()
+    try {
+        if (Test-Path -LiteralPath $script:failureFile) {
+            $data = (Get-Content -LiteralPath $script:failureFile -Raw -Encoding UTF8 | ConvertFrom-Json)
+            foreach ($f in @($data.failures)) { if ($f -and $f.item) { $list += $f } }
+        }
+    } catch { }
+    return $list
+}
+
+function Write-FailureRecords($records) {
+    try {
+        $dir = Split-Path -Parent $script:failureFile
+        if (-not (Test-Path -LiteralPath $dir)) { [void](New-Item -ItemType Directory -Path $dir -Force) }
+        $obj = [ordered]@{ schema = 1; failures = @($records) }
+        $json = ConvertTo-AsciiJson (ConvertTo-Json -InputObject $obj -Depth 5)
+        [System.IO.File]::WriteAllText($script:failureFile, $json, (New-Object System.Text.UTF8Encoding($false)))
+    } catch { }
+}
+
+# One record per item+action; a new failure replaces the older one of the same item and action.
+function Add-FailureRecord([string]$item, [string]$action, [string]$cls, [string]$hex, [string]$message) {
+    if (-not $action) { return }
+    $code = 0
+    $hexText = ''
+    try {
+        if ($hex -match '^[0-9A-Fa-f]{8}$') { $code = [Convert]::ToInt32($hex, 16); $hexText = '0x' + $hex.ToUpper() }
+        elseif ($hex -match '^-?\d+$') { $code = [int]$hex; $hexText = '' }
+    } catch { }
+    $kept = @()
+    foreach ($f in @(Read-FailureRecords)) { if (-not ("$($f.item)" -eq $item -and "$($f.action)" -eq $action)) { $kept += $f } }
+    $kept += [pscustomobject][ordered]@{ time = (Get-Date).ToString('yyyy-MM-ddTHH:mm:sszzz'); item = $item; action = $action
+        exit_code = $code; exit_hex = $hexText; class = $cls; message = $message }
+    Write-FailureRecords $kept
+}
+
+# A success removes every record of that item (the item works now).
+function Remove-FailureRecord([string]$item) {
+    $all = @(Read-FailureRecords)
+    if ($all.Count -eq 0) { return }
+    $kept = @()
+    foreach ($f in $all) { if ("$($f.item)" -ne $item) { $kept += $f } }
+    if ($kept.Count -ne $all.Count) { Write-FailureRecords $kept }
+}
+
 # ---- argument validation ------------------------------------------------------
 function Split-List($value) {
     $result = @()
@@ -200,6 +263,29 @@ if ($Lang -ne '') {
 $installList = Split-List $Install
 $updateList = Split-List $Update
 $reinstallList = Split-List $Reinstall
+if ($RetryFailed -and -not $Status) {
+    $retried = @()
+    foreach ($f in @(Read-FailureRecords)) {
+        $n = "$($f.item)".ToLower()
+        $a = "$($f.action)".ToLower()
+        if ($a -eq 'install' -and $allowed -contains $n) {
+            if ($installList -notcontains $n) { $installList += $n }
+            $retried += ($n + ' ' + (T '설치' 'install'))
+        } elseif ($a -eq 'update' -and $allowed -contains $n -and $n -ne 'venv') {
+            if ($updateList -notcontains $n) { $updateList += $n }
+            $retried += ($n + ' ' + (T '업데이트' 'update'))
+        } elseif ($a -eq 'reinstall' -and $allowedReinstall -contains $n) {
+            if ($reinstallList -notcontains $n) { $reinstallList += $n }
+            $retried += ($n + ' ' + (T '재설치' 'reinstall'))
+        }
+    }
+    if ($retried.Count -eq 0) {
+        Say 'info' 'retry' '-RetryFailed' (T '다시 시도할 실패 기록이 없습니다.' 'no recorded failure to retry.')
+    } else {
+        $rt = $retried -join ', '
+        Say 'info' 'retry' '-RetryFailed' (T ('기록된 실패 항목만 같은 동작으로 다시 시도합니다: ' + $rt) ('retrying only the recorded failures with the same action: ' + $rt))
+    }
+}
 if ($script:pkgs.Count -lt 4) {
     $argsBad = $true
     Add-Item 'args' 'required' 'packages.json' 'fail' (T ('scripts/packages.json 을 읽지 못했습니다: ' + $script:pkgLoadError) ('could not read scripts/packages.json: ' + $script:pkgLoadError)) (T '저장소에서 복원하세요(git checkout .claude/gatekit/scripts/packages.json)' 'restore it from the repository (git checkout .claude/gatekit/scripts/packages.json)')
@@ -219,6 +305,10 @@ foreach ($n in $reinstallList) {
         if ($n -eq 'venv') { $hint = T '.venv 는 -Install venv 로 다시 만듭니다' 'the .venv is rebuilt with -Install venv' }
         Add-Item 'args' 'required' (T '스위치' 'switch') 'fail' $why $hint
     }
+}
+if ($Status -and ($RetryFailed -or $installList.Count -gt 0 -or $updateList.Count -gt 0 -or $reinstallList.Count -gt 0)) {
+    $argsBad = $true
+    Add-Item 'args' 'required' (T '스위치' 'switch') 'fail' (T '거부됨: -Status 는 점검만 하므로 -Install/-Update/-Reinstall/-RetryFailed 와 함께 쓸 수 없습니다' 'refused: -Status only looks, so it cannot be combined with -Install/-Update/-Reinstall/-RetryFailed') ''
 }
 if ($updateList -contains 'venv') {
     $argsBad = $true
@@ -385,6 +475,7 @@ function New-InquiryText([string]$what, [string]$code) {
 # Records one failed install/update and sets the right flag.
 function Report-InstallFailure([string]$name, [string]$what, $fail, [string]$out) {
     [void]$script:failedActions.Add($name)
+    Add-FailureRecord $name $script:currentAction $fail.cls $fail.hex (T $fail.ko $fail.en)
     $hints = @()
     if ($fail.can) { $hints += ((T '지금 할 수 있는 것: ' 'What you can do now: ') + $fail.can) }
     if ($fail.it) { $hints += ((T 'IT 담당자에게 보낼 문의문: ' 'Message for your IT contact: ') + (New-InquiryText $what ('0x' + $fail.hex))) }
@@ -409,6 +500,7 @@ function Invoke-WingetAction([string]$verb, [string]$id, [string]$name, [string]
     $winget = Find-App 'winget' $script:sessionPath
     if ($winget.Count -eq 0) {
         [void]$script:failedActions.Add($name)
+        Add-FailureRecord $name $script:currentAction 'winget-missing' '' (T 'winget 이 없어 자동 설치를 할 수 없습니다.' 'winget is missing, so it cannot install automatically.')
         Set-Flag 'needs'
         Add-Item ('S16-' + $name) 'required' ($name + ' ' + (T '설치' 'install')) 'fail' (T 'winget 이 없어 자동 설치를 할 수 없습니다.' 'winget is missing, so it cannot install automatically.') `
             (T 'Microsoft Store에서 "앱 설치 관리자(App Installer)"를 설치·업데이트한 뒤 다시 실행하세요.' 'install or update "App Installer" from the Microsoft Store, then run again.')
@@ -420,6 +512,7 @@ function Invoke-WingetAction([string]$verb, [string]$id, [string]$name, [string]
     $r = Invoke-Proc $winget[0].Source $wargs 900
     if ($r.TimedOut) {
         [void]$script:failedActions.Add($name)
+        Add-FailureRecord $name $script:currentAction 'timeout' '' (T 'winget 이 제한 시간 안에 끝나지 않아 중단했습니다.' 'winget did not finish in time and was stopped.')
         Set-Flag 'blocked'
         Add-Item ('S16-' + $name) 'required' ($name + ' ' + (T '설치' 'install')) 'fail' (T 'winget 이 제한 시간 안에 끝나지 않아 중단했습니다.' 'winget did not finish in time and was stopped.') `
             (T '네트워크를 확인하고 다시 시도하세요. 계속되면 IT 담당자에게 문의하세요.' 'check the network and try again. If it keeps happening, ask your IT contact.')
@@ -429,6 +522,7 @@ function Invoke-WingetAction([string]$verb, [string]$id, [string]$name, [string]
     $f = Get-WingetFailure $r.Code
     if ($f.cls -eq 'ok') { Say 'ok' ('A-' + $name) $name (T $f.ko $f.en); return $true }
     if ($f.cls -eq 'reboot') {
+        Add-FailureRecord $name $script:currentAction 'reboot' $f.hex (T $f.ko $f.en)
         Set-Flag 'restart'
         Add-Item ('S16-' + $name) 'required' $name 'warn' (T $f.ko $f.en) $f.can
         return $false
@@ -519,10 +613,12 @@ function Confirm-Reinstalled([string]$name, [string]$path) {
 
 function Invoke-Action([string]$name, [string]$mode) {
     if ($name -eq 'venv') { return }                     # handled by the .venv step below
+    $script:currentAction = $mode
     $found = Get-App $name
     $apps = $found.apps
     $present = ($found.where -ne 'none')
     if ($mode -eq 'install' -and $present) {
+        Remove-FailureRecord $name
         Say 'ok' ('A-' + $name) $name (T '이미 설치되어 있어 건너뜁니다.' 'already installed, skipped.')
         return
     }
@@ -648,9 +744,11 @@ function Invoke-Action([string]$name, [string]$mode) {
         if ($after.where -eq 'none') {
             Set-Flag 'restart'
             [void]$script:failedActions.Add($name)
+            Add-FailureRecord $name $mode 'restart' '' (T '설치했지만 PATH 를 다시 읽어도 보이지 않습니다.' 'installed, but still not visible after re-reading PATH.')
             Add-Item ('S9-' + $name) 'required' $name 'warn' (T '설치했지만 PATH 를 다시 읽어도 보이지 않습니다.' 'installed, but still not visible after re-reading PATH.') `
                 (T 'Claude 앱(VS Code 창)을 완전히 닫고 다시 연 뒤 /gatekit:setup 을 다시 실행하세요.' 'close the Claude app (VS Code window) completely, open it again, then run /gatekit:setup again.')
         } else {
+            Remove-FailureRecord $name
             $modeKo = '업데이트'
             if ($mode -eq 'install') { $modeKo = '설치' }
             if ($mode -eq 'reinstall') { $modeKo = '재설치' }
@@ -715,6 +813,7 @@ if ($wingetFound.where -eq 'none') {
     if ($ag.TimedOut -or -not $ag.Started) {
         Add-Item 'S3-agreement' 'recommended' $agName 'unverified' (T '제한 시간 안에 확인하지 못했습니다' 'could not be checked in time')
     } elseif ($ag.Code -eq 0) {
+        $script:agreementOk = $true
         Add-Item 'S3-agreement' 'recommended' $agName 'ok' (T '소스 조회 성공(약관 동의됨)' 'source lookup worked (agreements accepted)')
     } else {
         $agFail = Get-WingetFailure $ag.Code
@@ -729,6 +828,7 @@ if ($wingetFound.where -eq 'none') {
 # S2 pwsh -----------------------------------------------------------------------
 $pwshFound = Get-App 'pwsh'
 $pwshApps = $pwshFound.apps
+$script:pkgInfo['pwsh'] = @{ where = $pwshFound.where; path = ''; version = '' }
 if ($pwshFound.where -eq 'none') {
     Add-Item 'S2' 'recommended' 'pwsh' 'warn' (T 'PowerShell 7 이 없습니다(없어도 동작합니다)' 'PowerShell 7 not found (gatekit works without it)') (T '허락하면 설치합니다 (-Install pwsh)' 'installed if you allow it (-Install pwsh)')
 } elseif ($pwshFound.where -eq 'registry') {
@@ -759,6 +859,7 @@ if ($pwshFound.where -eq 'none') {
         $index++
     }
     $where = $found -join '; '
+    $script:pkgInfo['pwsh'] = @{ where = 'session'; path = $primaryPath; version = $(if ($primaryText -ne '?') { $primaryText } else { '' }) }
     $uacHint = @()
     if (Test-PwshMsiPath $primaryPath) {
         $uacHint = @(T '기존 MSI 설치본이라 업데이트할 때 관리자 확인 창(UAC)이 뜰 수 있습니다.' 'this is an older MSI install, so the update may show a Windows administrator prompt (UAC).')
@@ -781,6 +882,7 @@ $uvFound = Get-App 'uv'
 $uvApps = $uvFound.apps
 $uvOk = $false
 $uvPath = ''
+$script:pkgInfo['uv'] = @{ where = $uvFound.where; path = ''; version = ''; method = '' }
 if ($uvFound.where -eq 'none') {
     Set-Flag 'needs'
     Add-Item 'S4' 'required' 'uv' 'fail' (T 'uv 를 찾을 수 없습니다. gatekit 은 uv 가 필요합니다(Python 은 uv 가 알아서 받습니다).' 'uv not found. gatekit needs uv (it fetches Python by itself).') `
@@ -793,6 +895,7 @@ if ($uvFound.where -eq 'none') {
     $uvProbe = Invoke-Proc $uvPath @('--version') 20
     $uvVer = Get-VersionFrom $uvProbe.Out
     $m = Get-UvMethod $uvPath
+    $script:pkgInfo['uv'] = @{ where = 'session'; path = $uvPath; version = $(if ($uvVer) { $uvVer.ToString() } else { '' }); method = $m.method }
     if (-not $uvVer) {
         Set-Flag 'needs'
         Add-Item 'S4' 'required' 'uv' 'fail' ((T '실행해서 버전을 읽지 못했습니다: ' 'could not run it to read the version: ') + $uvPath) (T '허락하면 다시 설치합니다 (-Install uv 또는 -Update uv)' 'reinstalled if you allow it (-Install uv or -Update uv)')
@@ -846,7 +949,10 @@ function Test-VenvHealth {
 
 $venvReady = $false
 $wantVenv = ($installList -contains 'venv')
-if (-not $uvOk) {
+$script:currentAction = 'install'
+if ($Status) {
+    Say 'info' 'S5' '.venv' (T '-Status 는 .venv, 설정, 닥터를 건너뜁니다' '-Status skips the .venv, the config and doctor')
+} elseif (-not $uvOk) {
     Add-Item 'S5' 'required' '.venv' 'unverified' (T 'uv 가 준비되지 않아 확인하지 못했습니다' 'not checked because uv is not ready')
 } else {
     $health = Test-VenvHealth
@@ -905,7 +1011,17 @@ if (-not $uvOk) {
     }
 }
 
+if ($wantVenv -and -not $Status) {
+    if ($venvReady) { Remove-FailureRecord 'venv' }
+    elseif ($uvOk) {
+        $venvCls = 'unknown'
+        if ($script:flags.blocked) { $venvCls = 'network' }
+        Add-FailureRecord 'venv' 'install' $venvCls '' (T '.venv 를 만들지 못했습니다' 'the .venv could not be built')
+    }
+}
+
 # S12 config and settings --------------------------------------------------------
+if (-not $Status) {
 $cfg = Join-Path $projectRoot '.gatekit\config.json'
 if (Test-Path -LiteralPath $cfg) {
     Add-Item 'S12-config' 'required' '.gatekit/config.json' 'ok' (T '이미 있어 그대로 둡니다' 'exists, left as is')
@@ -969,9 +1085,12 @@ if (-not (Test-Path -LiteralPath $settingsFile)) {
     }
 }
 
+}
+
 # S6 claude ---------------------------------------------------------------------
 $claudeFound = Get-App 'claude'
 $claudeApps = $claudeFound.apps
+$script:pkgInfo['claude'] = @{ where = $claudeFound.where; path = ''; version = '' }
 if ($claudeFound.where -eq 'none') {
     Set-Flag 'needs'
     Add-Item 'S6' 'required' 'claude CLI' 'fail' (T 'PATH 에 claude 가 없습니다(데스크톱 앱만으로는 CLI 가 없습니다). 워커를 실행할 수 없습니다.' 'claude is not on PATH (the desktop app alone does not include the CLI). Workers cannot start.') (T '허락하면 설치합니다 (-Install claude)' 'installed if you allow it (-Install claude)')
@@ -980,6 +1099,7 @@ if ($claudeFound.where -eq 'none') {
 } else {
     $cp = Invoke-Proc $claudeApps[0].Source @('--version') 30
     $cv = Get-VersionFrom $cp.Out
+    $script:pkgInfo['claude'] = @{ where = 'session'; path = $claudeApps[0].Source; version = $(if ($cv) { $cv.ToString() } else { '' }) }
     if (-not $cv) {
         Add-Item 'S6' 'required' 'claude CLI' 'unverified' ((T 'PATH 에 있으나 버전을 읽지 못했습니다: ' 'on PATH but the version could not be read: ') + $claudeApps[0].Source)
     } elseif ($cv -lt $claudeRecommended) {
@@ -992,13 +1112,123 @@ if ($claudeFound.where -eq 'none') {
 # S7 git ------------------------------------------------------------------------
 $gitFound = Get-App 'git'
 $gitApps = $gitFound.apps
+$script:pkgInfo['git'] = @{ where = $gitFound.where; path = ''; version = '' }
 if ($gitFound.where -eq 'none') {
     Add-Item 'S7' 'info' 'git' 'info' (T 'Git for Windows 가 없습니다. Claude Code 는 PowerShell 도구로 동작합니다.' 'Git for Windows not found. Claude Code works through its PowerShell tool.') (T '필요하면 직접 설치하세요(관리자 권한이 필요할 수 있음)' 'install it yourself if you want it (it may need administrator rights)')
 } elseif ($gitFound.where -eq 'registry') {
     Add-RestartItem 'S7' 'info' 'git' $gitApps[0].Source
 } else {
     $gp = Invoke-Proc $gitApps[0].Source @('--version') 15
+    $gv = Get-VersionFrom $gp.Out
+    $script:pkgInfo['git'] = @{ where = 'session'; path = $gitApps[0].Source; version = $(if ($gv) { $gv.ToString() } else { '' }) }
     Add-Item 'S7' 'info' 'git' 'info' $gp.Out.Trim()
+}
+
+# S19 package table (winget-managed programs) --------------------------------------
+# Parses `winget list --id <id> -e` without relying on the (localized) header: the data line
+# is the one that holds the id; the words after it are version, [available], [source].
+function Get-WingetListInfo([string]$id) {
+    $res = @{ state = 'error'; version = ''; available = ''; source = '' }
+    $w = Find-App 'winget' $script:sessionPath
+    if ($w.Count -eq 0) { return $res }
+    $r = Invoke-Proc $w[0].Source @('list', '--id', $id, '-e', '--disable-interactivity') $listTimeout
+    if ($r.TimedOut -or -not $r.Started) { $res.state = 'timeout'; return $res }
+    foreach ($line in ($r.Out -split "`r?`n")) {
+        $m = [regex]::Match($line, '(?i)(^|\s)' + [regex]::Escape($id) + '(\s+(.*))?$')
+        if (-not $m.Success) { continue }
+        $tokens = @(("$($m.Groups[3].Value)".Trim()) -split '\s+' | Where-Object { $_ })
+        if ($tokens.Count -gt 0 -and ($tokens[-1] -eq 'winget' -or $tokens[-1] -eq 'msstore')) {
+            $res.source = $tokens[-1]
+            $tokens = @($tokens | Select-Object -First ($tokens.Count - 1))
+        }
+        if ($tokens.Count -gt 0 -and $tokens[0] -match '^[<>~]+$' -and $tokens.Count -gt 1) { $tokens = @($tokens | Select-Object -Skip 1) }
+        if ($tokens.Count -ge 1) { $res.version = ($tokens[0] -replace '^[<>~]+', '') }
+        if ($tokens.Count -ge 2) { $res.available = ($tokens[1] -replace '^[<>~]+', '') }
+        $res.state = 'found'
+        return $res
+    }
+    if ($r.Code -ne 0) { $res.state = 'notfound' }
+    return $res
+}
+
+function Get-PkgMethodText([string]$key, $info, [string]$wingetSource) {
+    if ($wingetSource -eq 'winget') { return 'winget' }
+    $p = "$($info.path)"
+    if ($key -eq 'uv') {
+        switch ($info.method) {
+            'winget' { return 'winget' }
+            'standalone' { return (T '공식 스크립트' 'official script') }
+            'scoop' { return (T '기타(scoop)' 'other (scoop)') }
+            'pip' { return (T '기타(pip)' 'other (pip)') }
+        }
+        return (T '기타(알 수 없음)' 'other (unknown)')
+    }
+    if ($p -match '(?i)\\WinGet\\') { return 'winget' }
+    if ($key -eq 'claude') {
+        if ($p -match '(?i)\\\.local\\bin\\') { return (T '공식 스크립트' 'official script') }
+        if ($p -match '(?i)\\npm\\') { return (T '기타(npm)' 'other (npm)') }
+    }
+    if ($key -eq 'pwsh') {
+        if (Test-PwshMsiPath $p) { return (T '기타(MSI)' 'other (MSI)') }
+        if ($p -match '(?i)\\WindowsApps\\') { return (T 'MSIX(winget 또는 스토어)' 'MSIX (winget or Store)') }
+    }
+    return (T '기타' 'other')
+}
+
+if ($script:pkgs.Count -ge 4) {
+    $wingetOkForList = ($wingetFound.where -eq 'session' -and $script:agreementOk)
+    $noListReason = T 'winget 약관 동의가 확인되지 않아 업데이트 조회를 하지 않았습니다' 'winget agreements are not confirmed, so the update lookup was not run'
+    if ($wingetFound.where -eq 'none') { $noListReason = T 'winget 이 없어 업데이트 조회를 하지 않았습니다' 'winget is missing, so the update lookup was not run' }
+    foreach ($key in @('pwsh', 'uv', 'claude', 'git')) {
+        $pkg = $script:pkgs[$key]
+        $info = $script:pkgInfo[$key]
+        $lvl = 'info'
+        if ($pkg.level -eq '필수') { $lvl = 'required' } elseif ($pkg.level -eq '권장') { $lvl = 'recommended' }
+        $rowName = (T '패키지 ' 'package ') + $key
+        if (-not $info -or $info.where -eq 'none') {
+            Add-Item ('P-' + $key) $lvl $rowName 'info' ((T '설치 안 됨' 'not installed') + ' (winget ' + $pkg.winget_id + ')')
+            continue
+        }
+        if ($info.where -eq 'registry') {
+            Add-Item ('P-' + $key) $lvl $rowName 'info' (T '설치되어 있지만 이 창에서는 보이지 않음(재시작 필요)' 'installed but not visible in this session (restart needed)')
+            continue
+        }
+        $verText = $info.version
+        if (-not $verText) { $verText = T '버전 모름' 'version unknown' }
+        $verdict = 'unverified'
+        $upd = $noListReason
+        $wsrc = ''
+        $action = ''
+        if ($wingetOkForList) {
+            $wl = Get-WingetListInfo $pkg.winget_id
+            $wsrc = $wl.source
+            if ($wl.state -eq 'found' -and $wl.available) {
+                $verdict = 'warn'
+                $upd = (T '업데이트 가능: ' 'update available: ') + $wl.available
+                if ($key -eq 'git') { $action = T '관리자 권한이 필요할 수 있어 직접 업데이트하세요' 'it may need administrator rights, so update it yourself' }
+                else { $action = T ('허락하면 업데이트합니다 (-Update ' + $key + ')') ('updated if you allow it (-Update ' + $key + ')') }
+            } elseif ($wl.state -eq 'found') {
+                $verdict = 'ok'
+                $upd = T '최신입니다(winget 확인)' 'up to date (checked with winget)'
+            } elseif ($wl.state -eq 'notfound') {
+                $upd = T 'winget 이 관리하는 설치가 아니어서 업데이트 여부를 확인하지 못했습니다' 'not a winget-managed install, so the update state could not be checked'
+            } elseif ($wl.state -eq 'timeout') {
+                $upd = T '제한 시간 안에 확인하지 못했습니다' 'could not be checked in time'
+            } else {
+                $upd = T '업데이트 여부를 확인하지 못했습니다' 'the update state could not be checked'
+            }
+        }
+        $method = Get-PkgMethodText $key $info $wsrc
+        Add-Item ('P-' + $key) $lvl $rowName $verdict ((T '설치됨 ' 'installed ') + $verText + ' | ' + (T '설치 방법: ' 'method: ') + $method + ' | ' + $upd) $action
+    }
+    $recorded = @(Read-FailureRecords)
+    if ($recorded.Count -gt 0) {
+        $lines = @()
+        foreach ($f in $recorded) { $lines += ("$($f.item) $($f.action): $($f.class), 0x" + ('{0:X8}' -f [int]$f.exit_code) + ' ' + "$($f.time)") }
+        Add-Item 'P-failures' 'info' (T '지난 실패 기록' 'recorded failures') 'warn' ($lines -join '; ') (T '허락하면 같은 동작만 다시 시도합니다 (-RetryFailed)' 'retried with the same action if you allow it (-RetryFailed)')
+    } else {
+        Add-Item 'P-failures' 'info' (T '지난 실패 기록' 'recorded failures') 'ok' (T '없음' 'none')
+    }
 }
 
 # S18 node (only with a package.json) ---------------------------------------------
@@ -1019,7 +1249,9 @@ if ($pyApp.Count -gt 0 -and $pyApp[0].Source -match '(?i)\\WindowsApps\\') {
 }
 
 # S15 doctor --------------------------------------------------------------------
-if (-not $venvReady) {
+if ($Status) {
+    Say 'info' 'S15' 'doctor' (T '-Status 는 닥터를 건너뜁니다' '-Status skips doctor')
+} elseif (-not $venvReady) {
     Add-Item 'S15' 'required' 'doctor' 'unverified' (T '.venv 가 없어 실행하지 못했습니다' 'not run because .venv is not ready')
 } else {
     $dr = Invoke-Proc $venvPy @($launcher, 'doctor', '--root', $projectRoot, '--lang', $script:langMode) 120
