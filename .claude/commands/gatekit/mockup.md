@@ -2,7 +2,7 @@
 name: mockup
 description: Read a Figma file, HTML, or screenshots and derive spec/02-screens.md plus spec/tokens.json, recording every screen state the mockup does not evidence as an assumption.
 argument-hint: "[Figma URL | path to HTML | path to screenshots]"
-allowed-tools: Read, Write, Edit, Glob, Grep, Bash, mcp__figma__get_design_context, mcp__figma__get_variable_defs, mcp__figma__get_screenshot, mcp__figma__get_metadata
+allowed-tools: Read, Write, Edit, Glob, Grep, Bash, PowerShell, mcp__figma__get_design_context, mcp__figma__get_variable_defs, mcp__figma__get_screenshot, mcp__figma__get_metadata
 ---
 
 # /gatekit:mockup
@@ -17,8 +17,11 @@ and both merge rather than overwrite.
    `questioning.md`, `assumptions.md`, `verification.md`.
 2. Detect the language:
 
+Write `$ARGUMENTS` verbatim (it may hold quotes, `$` or backticks, so it never goes
+through a shell argument) to `.gatekit/runs/lang-input.txt` with the Write tool, then run:
+
 ```
-".claude/gatekit/bin/gatekit" lang "$ARGUMENTS"
+uv run --project .claude/gatekit --frozen python .claude/gatekit/bin/gatekit.py lang --file .gatekit/runs/lang-input.txt
 ```
 
 If `$ARGUMENTS` is only a URL or path, detect from the user's surrounding
@@ -52,8 +55,7 @@ path, then fall through only if there truly is none.
 **New-design branch.** List
 `.claude/gatekit/spec-kit/presets/design/*.json` and offer them as
 one `AskUserQuestion`, describing each from its own `patterns` (density,
-palette warmth, feel) rather than its filename. Run `python3
-".claude/gatekit/bin/gatekit" design merge-preset <name>` on the
+palette warmth, feel) rather than its filename. Run `uv run --project .claude/gatekit --frozen python .claude/gatekit/bin/gatekit.py design merge-preset <name>` on the
 pick. If the catalog is somehow empty, ask for a style direction in the
 user's own terms and write it into `spec/tokens.json` instead. Either way
 that direction becomes Step 2's input: go to Step 3 with placeholder
@@ -119,7 +121,7 @@ interviewed" — and tell the user to run `/gatekit:interview`.
 ## Step 6 — validate
 
 ```
-".claude/gatekit/bin/gatekit" spec validate --json
+uv run --project .claude/gatekit --frozen python .claude/gatekit/bin/gatekit.py spec validate --json
 ```
 
 On `fail`, rewrite the offending file from the template rather than

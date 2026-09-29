@@ -2,7 +2,7 @@
 name: interview
 description: Turn a chosen problem into spec/01-prd.md and spec/03-architecture.md through a deep, free-ranging interview on implementation shape — pages, what each page does, what data it needs — laying the groundwork for design and tasks.
 argument-hint: "[what you want to build, in your own words]"
-allowed-tools: Read, Write, Edit, Glob, Grep, Bash, WebSearch
+allowed-tools: Read, Write, Edit, Glob, Grep, Bash, PowerShell, WebSearch
 ---
 
 # /gatekit:interview
@@ -26,8 +26,11 @@ something concrete to design for.
    `assumptions.md` (the ledger Step 3 writes), `verification.md`.
 2. Detect the output language from the user's own words:
 
+Write `$ARGUMENTS` verbatim (it may hold quotes, `$` or backticks, so it never goes
+through a shell argument) to `.gatekit/runs/lang-input.txt` with the Write tool, then run:
+
 ```
-".claude/gatekit/bin/gatekit" lang "$ARGUMENTS"
+uv run --project .claude/gatekit --frozen python .claude/gatekit/bin/gatekit.py lang --file .gatekit/runs/lang-input.txt
 ```
 
 Call it `output_lang`; every user-facing string below is in it, and
@@ -116,7 +119,7 @@ than letting the user hit the block later at `/gatekit:gate`.
 ## Step 4 — validate
 
 ```
-".claude/gatekit/bin/gatekit" spec validate --json
+uv run --project .claude/gatekit --frozen python .claude/gatekit/bin/gatekit.py spec validate --json
 ```
 
 On `fail`: read the findings, **discard the failing file and rewrite it**

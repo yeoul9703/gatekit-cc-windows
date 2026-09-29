@@ -2,7 +2,7 @@
 name: tasks
 description: Derive vertical-slice tasks from the spec into spec/04-tasks.md as gatekit-task fences, with non-overlapping write scopes and at least one gate each.
 argument-hint: "[optional: constraints, e.g. 'round 1 only' or 'backend first']"
-allowed-tools: Read, Write, Edit, Glob, Grep, Bash
+allowed-tools: Read, Write, Edit, Glob, Grep, Bash, PowerShell
 ---
 
 # /gatekit:tasks
@@ -16,7 +16,7 @@ Input: `$ARGUMENTS` — optional constraints on scope or ordering.
 2. Detect the language from `spec/01-prd.md`:
 
 ```
-".claude/gatekit/bin/gatekit" lang "$(head -40 spec/01-prd.md)"
+uv run --project .claude/gatekit --frozen python .claude/gatekit/bin/gatekit.py lang --file spec/01-prd.md --lines 40
 ```
 
 Call it `output_lang`.
@@ -126,7 +126,7 @@ execution-order table so a human can see the rounds at a glance.
 ## Step 6 — validate
 
 ```
-".claude/gatekit/bin/gatekit" spec validate --json
+uv run --project .claude/gatekit --frozen python .claude/gatekit/bin/gatekit.py spec validate --json
 ```
 
 On `fail`, fix the specific finding. Scope collisions are re-cut, never

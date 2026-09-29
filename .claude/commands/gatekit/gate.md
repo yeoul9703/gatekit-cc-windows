@@ -2,7 +2,7 @@
 name: gate
 description: Derive executable completion criteria into spec/05-gate.md, show them for approval, and on approval pin the hash so the build gate opens.
 argument-hint: "[optional: extra criteria to include]"
-allowed-tools: Read, Write, Edit, Glob, Grep, Bash
+allowed-tools: Read, Write, Edit, Glob, Grep, Bash, PowerShell
 ---
 
 # /gatekit:gate
@@ -16,7 +16,7 @@ Input: `$ARGUMENTS` — optional additional criteria the user wants enforced.
 2. Detect the language:
 
 ```
-".claude/gatekit/bin/gatekit" lang "$(head -40 spec/01-prd.md)"
+uv run --project .claude/gatekit --frozen python .claude/gatekit/bin/gatekit.py lang --file spec/01-prd.md --lines 40
 ```
 
 Call it `output_lang`.
@@ -117,8 +117,8 @@ Add project-specific ones from the constraints in `spec/03-architecture.md`.
 ## Step 4 — validate and derive the contract
 
 ```
-".claude/gatekit/bin/gatekit" spec validate --json
-".claude/gatekit/bin/gatekit" contract derive
+uv run --project .claude/gatekit --frozen python .claude/gatekit/bin/gatekit.py spec validate --json
+uv run --project .claude/gatekit --frozen python .claude/gatekit/bin/gatekit.py contract derive
 ```
 
 `spec validate` must not be `fail` before you continue. `contract derive` writes `.gatekit/contract.json` with the source hash of `05-gate.md`.
@@ -142,8 +142,8 @@ change, re-run Step 4, and ask again.
 On approve:
 
 ```
-".claude/gatekit/bin/gatekit" approve spec/05-gate.md
-".claude/gatekit/bin/gatekit" approve check spec/05-gate.md
+uv run --project .claude/gatekit --frozen python .claude/gatekit/bin/gatekit.py approve spec/05-gate.md
+uv run --project .claude/gatekit --frozen python .claude/gatekit/bin/gatekit.py approve check spec/05-gate.md
 ```
 
 The check must print `ok`. Never edit the file to make a hash match.

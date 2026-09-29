@@ -111,9 +111,62 @@ def detect(text: Optional[str]) -> str:
     return KO if (hangul / letters) >= HANGUL_THRESHOLD else EN
 
 
+def _read_lines(stream, limit: Optional[int]) -> str:
+    lines = []
+    for line in stream:
+        if limit is not None and len(lines) >= limit:
+            break
+        lines.append(line)
+    return "".join(lines)
+
+
 def run(argv: List[str]) -> int:
-    """``python3 -m gatekit lang <text...>`` — print the detected language."""
-    text = " ".join(argv)
+    """``gatekit lang [--file PATH | --stdin] [--lines N] [text...]``.
+
+    Prints the detected language. ``--file`` / ``--stdin`` read the text from a
+    UTF-8 file or from stdin instead of the command line, so callers never have
+    to push arbitrary text (quotes, ``$``, backticks, newlines) through a shell
+    argument; ``--lines N`` keeps only the first N lines of that input.
+    Positional words are still accepted and joined with spaces.
+    """
+    file_path = None
+    use_stdin = False
+    limit: Optional[int] = None
+    words: List[str] = []
+    i = 0
+    while i < len(argv):
+        arg = argv[i]
+        if arg == "--file" and i + 1 < len(argv):
+            file_path = argv[i + 1]
+            i += 2
+        elif arg == "--lines" and i + 1 < len(argv):
+            try:
+                limit = int(argv[i + 1])
+            except ValueError:
+                print("lang: --lines needs an integer", file=sys.stderr)
+                return 2
+            if limit < 0:
+                print("lang: --lines must not be negative", file=sys.stderr)
+                return 2
+            i += 2
+        elif arg == "--stdin":
+            use_stdin = True
+            i += 1
+        else:
+            words.append(arg)
+            i += 1
+
+    if file_path is not None:
+        try:
+            with open(file_path, "r", encoding="utf-8-sig", errors="replace") as handle:
+                text = _read_lines(handle, limit)
+        except OSError as exc:
+            print("lang: cannot read %s: %s" % (file_path, exc), file=sys.stderr)
+            return 2
+    elif use_stdin:
+        text = _read_lines(sys.stdin, limit)
+    else:
+        text = " ".join(words)
     print(detect(text))
     return 0
 

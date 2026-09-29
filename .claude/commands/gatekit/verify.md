@@ -2,7 +2,7 @@
 name: verify
 description: Verify the build against the completion contract with an independent evaluator — a read-only agent runs the criteria and the E2E steps, then the main session re-runs the contract and reports per-criterion verdicts.
 argument-hint: "[optional: criterion id to focus on]"
-allowed-tools: Read, Write, Edit, Glob, Grep, Bash, Agent
+allowed-tools: Read, Write, Edit, Glob, Grep, Bash, PowerShell, Agent
 ---
 
 # /gatekit:verify
@@ -21,13 +21,13 @@ and calling that verification.
 2. Detect the language and call it `output_lang`:
 
 ```
-".claude/gatekit/bin/gatekit" lang "$(head -40 spec/01-prd.md)"
+uv run --project .claude/gatekit --frozen python .claude/gatekit/bin/gatekit.py lang --file spec/01-prd.md --lines 40
 ```
 
 ## Step 1 — preconditions
 
 ```
-".claude/gatekit/bin/gatekit" contract derive
+uv run --project .claude/gatekit --frozen python .claude/gatekit/bin/gatekit.py contract derive
 ```
 
 Re-derive first: the contract must match the current `spec/05-gate.md`, or every
@@ -55,7 +55,7 @@ second backend enabled to grade instead, unless the user configures one).
 After the evaluator returns:
 
 ```
-".claude/gatekit/bin/gatekit" contract run --json
+uv run --project .claude/gatekit --frozen python .claude/gatekit/bin/gatekit.py contract run --json
 ```
 
 Run it once, in the main session. Two independent runs that disagree is itself a
@@ -101,5 +101,5 @@ Rules for the report:
 Confirm `spec/PROGRESS.md` carries the evaluator's result under the
 last-verification heading for `output_lang`. If the evaluator could not write
 it, write it yourself from its reply and say that you did. Then run
-`".claude/gatekit/bin/gatekit" spec validate` and fix any
+`uv run --project .claude/gatekit --frozen python .claude/gatekit/bin/gatekit.py spec validate` and fix any
 PROGRESS.md finding before reporting.

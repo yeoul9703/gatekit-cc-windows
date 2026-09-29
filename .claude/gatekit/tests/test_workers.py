@@ -126,6 +126,26 @@ class TestCli(WorkerTestCase):
         by_name = {b["name"]: b for b in payload["backends"]}
         self.assertTrue(by_name["claude"]["enabled"])
 
+    def test_default_prints_only_the_default_name(self) -> None:
+        import contextlib
+        import io
+
+        write_config(self.root, {"worker": {"default": "other", "backends": {
+            "other": {"argv": ["other"], "enabled": True}}}})
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            self.assertEqual(workers.run(["default", "--root", str(self.root)]), 0)
+        self.assertEqual(out.getvalue(), "other\n")
+
+    def test_default_without_config_is_claude(self) -> None:
+        import contextlib
+        import io
+
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            self.assertEqual(workers.run(["default", "--root", str(self.root)]), 0)
+        self.assertEqual(out.getvalue(), "claude\n")
+
     def test_enable_then_set_default_persists(self) -> None:
         import contextlib
         import io

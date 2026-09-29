@@ -2,7 +2,7 @@
 name: discover
 description: Find a problem worth building through a free-ranging conversation, no fixed question slots — surface pains, summarize the improvement opportunities that emerge, confirm the summary, then hand off to interview.
 argument-hint: "[optional: a rough idea, or nothing at all]"
-allowed-tools: Read, Write, Edit, Glob, Grep, Bash
+allowed-tools: Read, Write, Edit, Glob, Grep, Bash, PowerShell
 ---
 
 # /gatekit:discover
@@ -34,8 +34,11 @@ long as it keeps surfacing something new.
    message when `$ARGUMENTS` is empty) and call it `output_lang`. Every
    question and every line of the file is in it.
 
+Write `$ARGUMENTS` verbatim (it may hold quotes, `$` or backticks, so it never goes
+through a shell argument) to `.gatekit/runs/lang-input.txt` with the Write tool, then run:
+
 ```
-".claude/gatekit/bin/gatekit" lang "$ARGUMENTS"
+uv run --project .claude/gatekit --frozen python .claude/gatekit/bin/gatekit.py lang --file .gatekit/runs/lang-input.txt
 ```
 
 3. Read `.claude/gatekit/spec-kit/templates/<output_lang>/00-discovery.md`.
@@ -129,7 +132,7 @@ it**. Only once all three questions have real answers, write
 ## Step 5 — validate
 
 ```
-".claude/gatekit/bin/gatekit" spec validate --json
+uv run --project .claude/gatekit --frozen python .claude/gatekit/bin/gatekit.py spec validate --json
 ```
 
 `fail` means a malformed fence, a missing or empty chosen-opportunity

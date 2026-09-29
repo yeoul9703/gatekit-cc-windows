@@ -111,6 +111,85 @@ class TestRun(unittest.TestCase):
         self.assertEqual(buf.getvalue().strip(), "en")
 
 
+class TestRunFromFileAndStdin(unittest.TestCase):
+    """`lang --file/--stdin/--lines` replace `lang "$(head -40 file)"`."""
+
+    def setUp(self) -> None:
+        import tempfile
+
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.dir = pathlib.Path(self._tmp.name)
+
+    def detect_cli(self, argv, stdin_text=None) -> str:
+        import io
+        from contextlib import redirect_stdout
+
+        buf = io.StringIO()
+        old_stdin = sys.stdin
+        if stdin_text is not None:
+            sys.stdin = io.StringIO(stdin_text)
+        try:
+            with redirect_stdout(buf):
+                self.assertEqual(lang.run(argv), 0)
+        finally:
+            sys.stdin = old_stdin
+        return buf.getvalue().strip()
+
+    def test_file_is_read_as_utf8(self) -> None:
+        path = self.dir / "prd.md"
+        path.write_text("# 제품 기획서\n사용자가 겪는 문제를 정리합니다\n", encoding="utf-8")
+        self.assertEqual(self.detect_cli(["--file", str(path)]), "ko")
+
+    def test_file_with_bom_and_crlf(self) -> None:
+        path = self.dir / "prd.md"
+        path.write_bytes("안녕하세요 기획서\r\n".encode("utf-8-sig"))
+        self.assertEqual(self.detect_cli(["--file", str(path)]), "ko")
+
+    def test_lines_limit_ignores_later_lines(self) -> None:
+        path = self.dir / "mixed.md"
+        path.write_text("hello world of english text\n" + "한글 " * 200 + "\n", encoding="utf-8")
+        self.assertEqual(self.detect_cli(["--file", str(path), "--lines", "1"]), "en")
+        self.assertEqual(self.detect_cli(["--file", str(path), "--lines", "2"]), "ko")
+        self.assertEqual(self.detect_cli(["--file", str(path)]), "ko")
+
+    def test_text_with_quotes_dollar_and_backticks_passes_through_a_file(self) -> None:
+        path = self.dir / "args.txt"
+        path.write_text('그는 "안녕" 이라고 말했다 $HOME `date` \'끝\'', encoding="utf-8")
+        self.assertEqual(self.detect_cli(["--file", str(path)]), "ko")
+
+    def test_stdin(self) -> None:
+        self.assertEqual(self.detect_cli(["--stdin"], "이 문서는 한국어입니다\n"), "ko")
+        self.assertEqual(self.detect_cli(["--stdin"], "plain english\n"), "en")
+
+    def test_missing_file_is_exit_2(self) -> None:
+        import io
+        from contextlib import redirect_stderr
+
+        err = io.StringIO()
+        with redirect_stderr(err):
+            self.assertEqual(lang.run(["--file", str(self.dir / "nope.md")]), 2)
+        self.assertIn("cannot read", err.getvalue())
+
+    def test_bad_lines_value_is_exit_2(self) -> None:
+        import io
+        from contextlib import redirect_stderr
+
+        with redirect_stderr(io.StringIO()):
+            self.assertEqual(lang.run(["--file", "x", "--lines", "many"]), 2)
+            self.assertEqual(lang.run(["--file", "x", "--lines", "-3"]), 2)
+
+    def test_cli_entry_point_from_foreign_cwd(self) -> None:
+        path = self.dir / "prd.md"
+        path.write_text("한국어 문서입니다\n", encoding="utf-8")
+        launcher = PLUGIN_DIR / "bin" / "gatekit.py"
+        proc = subprocess.run(
+            [sys.executable, str(launcher), "lang", "--file", str(path), "--lines", "40"],
+            cwd=str(self.dir), capture_output=True, text=True, timeout=30)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(proc.stdout.strip(), "ko")
+
+
 class TestModuleEntryPoint(unittest.TestCase):
     """`python3 -m gatekit lang ...` must work with cwd=plugin and no PYTHONPATH."""
 

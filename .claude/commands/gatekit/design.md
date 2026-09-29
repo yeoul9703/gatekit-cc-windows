@@ -2,7 +2,7 @@
 name: design
 description: Read a Figma file, screenshots, HTML files, a live site URL, a preset, or a user pattern file and derive spec/02-design.md plus spec/tokens.json, recording every gap the source does not evidence as an assumption.
 argument-hint: "[Figma URL | screenshot/HTML paths | live site URL | preset name | pattern file]"
-allowed-tools: Read, Write, Edit, Glob, Grep, Bash, mcp__figma__get_design_context, mcp__figma__get_variable_defs, mcp__figma__get_screenshot, mcp__figma__get_metadata, WebFetch, mcp__claude-in-chrome__tabs_context_mcp, mcp__claude-in-chrome__tabs_create_mcp, mcp__claude-in-chrome__navigate, mcp__claude-in-chrome__get_page_text, mcp__claude-in-chrome__computer, mcp__claude-in-chrome__tabs_close_mcp
+allowed-tools: Read, Write, Edit, Glob, Grep, Bash, PowerShell, mcp__figma__get_design_context, mcp__figma__get_variable_defs, mcp__figma__get_screenshot, mcp__figma__get_metadata, WebFetch, mcp__claude-in-chrome__tabs_context_mcp, mcp__claude-in-chrome__tabs_create_mcp, mcp__claude-in-chrome__navigate, mcp__claude-in-chrome__get_page_text, mcp__claude-in-chrome__computer, mcp__claude-in-chrome__tabs_close_mcp
 ---
 
 # /gatekit:design
@@ -20,8 +20,8 @@ including mid-build.
 
 Read `.claude/gatekit/policy/language.md`,
 `.claude/gatekit/policy/questioning.md`, and
-`.claude/gatekit/policy/verification.md`. Detect the language with
-`".claude/gatekit/bin/gatekit" lang "$ARGUMENTS"` — if
+`.claude/gatekit/policy/verification.md`. Detect the language: write `$ARGUMENTS` verbatim to `.gatekit/runs/lang-input.txt` (Write tool) and run
+`uv run --project .claude/gatekit --frozen python .claude/gatekit/bin/gatekit.py lang --file .gatekit/runs/lang-input.txt` — if
 `$ARGUMENTS` is only a URL or a path, detect from the user's surrounding
 message instead. Call the result `output_lang`. Read
 `.claude/gatekit/spec-kit/heading-map.json` and
@@ -38,10 +38,9 @@ ledger (Step 5), noting the supersession next to the row it replaces.
 
 ## Step 2 — mid-build check
 
-Check the session ledger (`".claude/gatekit/bin/gatekit"
-ledger show --session <session_id>`, using the current `session_id`). If
+Check the session ledger (`uv run --project .claude/gatekit --frozen python .claude/gatekit/bin/gatekit.py ledger show --session <session_id>`, using the current `session_id`). If
 `active_pipeline` is `build`, run
-`".claude/gatekit/bin/gatekit" design impact --json`,
+`uv run --project .claude/gatekit --frozen python .claude/gatekit/bin/gatekit.py design impact --json`,
 report every task it lists grouped by id, and tell the user those tasks need
 redelegation once `/gatekit:tasks` and `/gatekit:gate` bring the contract
 current again. **Do not edit `spec/04-tasks.md` or `spec/05-gate.md`** —
@@ -62,7 +61,7 @@ corroborate itself (ADR-0011). Say so and ask for a real source.
 | Screenshot files | Read each image; record which file each observation came from. |
 | HTML files | Read each file; extract repeated class or component patterns and CSS custom properties for tokens. |
 | Live site URL | `WebFetch` the page and any linked CSS first for routes, repeated patterns, and CSS custom properties. If the fetched HTML is a client-rendered shell (little more than a script tag and an empty root element), use the Chrome tools instead: `navigate` to the URL, `get_page_text` for rendered content, `computer` to capture a screenshot. Save every capture — HTML, CSS, screenshots — under `spec/design/` and cite the saved file, never the URL, as evidence; a screenshot over 1 MB (CI's repo-wide limit) must be downsized or refused, never committed oversized. If `WebFetch` or the Chrome tools are unavailable, say so and ask for local captures instead of guessing from the URL. |
-| Preset name | Run `".claude/gatekit/bin/gatekit" design merge-preset <name>`. Project values win; every row the preset added carries `"evidence": "preset:<name>"`. Cite the preset name as the source. |
+| Preset name | Run `uv run --project .claude/gatekit --frozen python .claude/gatekit/bin/gatekit.py design merge-preset <name>`. Project values win; every row the preset added carries `"evidence": "preset:<name>"`. Cite the preset name as the source. |
 | User pattern file | Read the Markdown or JSON file; extract each rule as a `P<n>` row citing the file as evidence. |
 
 ## Step 4 — write spec/02-design.md
@@ -108,7 +107,7 @@ like any other.
 
 ## Step 7 — validate
 
-Run `".claude/gatekit/bin/gatekit" spec validate --json`.
+Run `uv run --project .claude/gatekit --frozen python .claude/gatekit/bin/gatekit.py spec validate --json`.
 On `fail`, rewrite the offending file from the template rather than
 patching — never deliver a failing file. Missing 03, 04, 05 are expected
 `warn` here.

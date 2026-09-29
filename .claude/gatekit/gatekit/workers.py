@@ -273,6 +273,7 @@ def _usage() -> str:
     return (
         "usage: python3 -m gatekit workers <command>\n"
         "  list [--json]          show every backend, its argv and state\n"
+        "  default                print the default backend name\n"
         "  check <name> [--probe] probe the executable; --probe also sends one prompt through it\n"
         "  set-default <name>     make <name> the default worker backend\n"
         "  enable <name>          enable a backend\n"
@@ -334,6 +335,11 @@ def run(argv: list) -> int:
             if why:
                 # ADR-0013: never let a same-model grader pass unremarked.
                 print("  warn: %s" % why)
+        return 0
+
+    if cmd == "default":
+        # Just the name, so a caller can use it without parsing `list --json`.
+        print(default_name(root))
         return 0
 
     if cmd == "check":

@@ -2,7 +2,7 @@
 name: build
 description: Run spec/04-tasks.md as worker jobs behind the gates — spawn workers per task, let the gates decide pass or fail, redelegate failures, and hand off to verify.
 argument-hint: "[optional: task ids to build, comma-separated]"
-allowed-tools: Read, Write, Edit, Glob, Grep, Bash
+allowed-tools: Read, Write, Edit, Glob, Grep, Bash, PowerShell
 ---
 
 # /gatekit:build
@@ -24,7 +24,7 @@ verification) or a round holds three or more independent tasks.
 2. Detect the language and call it `output_lang`:
 
 ```
-".claude/gatekit/bin/gatekit" lang "$(head -40 spec/01-prd.md)"
+uv run --project .claude/gatekit --frozen python .claude/gatekit/bin/gatekit.py lang --file spec/01-prd.md --lines 40
 ```
 
 Every user-facing string below is written in `output_lang`.
@@ -32,8 +32,8 @@ Every user-facing string below is written in `output_lang`.
 ## Step 1 — preconditions (both must hold)
 
 ```
-".claude/gatekit/bin/gatekit" spec validate
-".claude/gatekit/bin/gatekit" approve check spec/05-gate.md
+uv run --project .claude/gatekit --frozen python .claude/gatekit/bin/gatekit.py spec validate
+uv run --project .claude/gatekit --frozen python .claude/gatekit/bin/gatekit.py approve check spec/05-gate.md
 ```
 
 - `spec validate` must not print `fail`. If it does, show the findings and
@@ -49,7 +49,8 @@ Every user-facing string below is written in `output_lang`.
 under `host` there is nothing to probe:
 
 ```
-".claude/gatekit/bin/gatekit" workers check "$(".claude/gatekit/bin/gatekit" workers list --json | python3 -c 'import json,sys; print(json.load(sys.stdin)["default"])')" --probe
+uv run --project .claude/gatekit --frozen python .claude/gatekit/bin/gatekit.py workers default
+uv run --project .claude/gatekit --frozen python .claude/gatekit/bin/gatekit.py workers check <name printed above> --probe
 ```
 
 `--probe` sends one trivial prompt through the backend's read-only argv — the
@@ -62,7 +63,7 @@ continue.
 ## Step 2 — start the job
 
 ```
-".claude/gatekit/bin/gatekit" jobs start
+uv run --project .claude/gatekit --frozen python .claude/gatekit/bin/gatekit.py jobs start
 ```
 
 Add `--tasks <ids>` when `$ARGUMENTS` named specific tasks, `--backend <name>`
@@ -87,7 +88,7 @@ scope, gates, design, screens — implement it, then record the verdict with
 ## Step 3 — poll
 
 ```
-".claude/gatekit/bin/gatekit" jobs status
+uv run --project .claude/gatekit --frozen python .claude/gatekit/bin/gatekit.py jobs status
 ```
 
 **Never read `output.txt` or `stderr.txt` into context.** They hold whole worker
@@ -95,7 +96,7 @@ transcripts and will swamp the session. (Under `host` they do not exist.) Use
 the status table and:
 
 ```
-".claude/gatekit/bin/gatekit" jobs results --compact
+uv run --project .claude/gatekit --frozen python .claude/gatekit/bin/gatekit.py jobs results --compact
 ```
 
 which prints `id state gates_passed/total`, one line per task. Read a task's
@@ -146,7 +147,7 @@ backend, and whether the build is done; one line per task (id, final state,
 gates passed of total); every redelegated task with the gate that failed and
 what changed; tasks left blocked with the failing gate named; the timestamp.
 
-Then run `".claude/gatekit/bin/gatekit" spec validate` and fix
+Then run `uv run --project .claude/gatekit --frozen python .claude/gatekit/bin/gatekit.py spec validate` and fix
 any PROGRESS.md finding before reporting. Report the same table in chat, with
 verdicts as they are: a `timeout` is not a pass, and a task whose gates never
 ran is `unverified`, not done.
