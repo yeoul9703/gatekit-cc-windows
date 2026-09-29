@@ -8,3 +8,6 @@ __pycache__/
 
 # Claude Code local overrides (not shared)
 .claude/settings.local.json
+
+# Scratch notes (tasks, eval criteria)
+tmp/
