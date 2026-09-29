@@ -89,10 +89,8 @@ class TestLanguageDetection(PromptProject):
     def test_answering_a_numbered_list_keeps_the_language(self) -> None:
         """A bare "1" is the same keystroke in either language.
 
-        Under Codex this is the normal way to answer a command's options —
-        there is no `AskUserQuestion`, so they arrive as numbered plain chat.
-        Treating the reply as English evidence flipped a real Korean
-        interview to English and kept it there (observed 2026-09-27).
+        Treating a short numbered reply as English evidence would flip a
+        Korean interview to English and keep it there.
         """
         prompt_gate.handle(self.event("로그인 화면을 만들어줘"))
         for reply in ("1", "2.", "3 ", "1 2"):
@@ -320,28 +318,6 @@ class TestLanguageFromSlashCommand(PromptProject):
         prompt_gate.handle(self.event("러닝크루"))
         prompt_gate.handle(self.event(self.tagged("interview", "an attendance app for my running crew")))
         self.assertEqual(self.led().output_lang, "en")
-
-
-class TestCodexSkillInvocation(PromptProject):
-    def test_dollar_skill_syntax_sets_pipeline(self) -> None:
-        prompt_gate.handle(self.event("$gatekit-build"))
-        self.assertEqual(self.led().data["active_pipeline"], "build")
-
-    def test_dollar_skill_with_args(self) -> None:
-        prompt_gate.handle(self.event("$gatekit-interview 출석 앱"))
-        self.assertEqual(self.led().data["active_pipeline"], "interview")
-        self.assertEqual(self.led().output_lang, "ko")
-
-    def test_dollar_mid_sentence_is_not_invocation(self) -> None:
-        prompt_gate.handle(self.event("$gatekit-build"))
-        prompt_gate.handle(self.event("later maybe $gatekit-verify"))
-        self.assertEqual(self.led().data["active_pipeline"], "build")
-
-
-class TestHeadingSkillForm(PromptProject):
-    def test_heading_with_dollar_form_sets_pipeline(self) -> None:
-        prompt_gate.handle(self.event("---\nname: build\n---\n\n# $gatekit-build\n"))
-        self.assertEqual(self.led().data["active_pipeline"], "build")
 
 
 class TestQuestionFlagsInContext(unittest.TestCase):

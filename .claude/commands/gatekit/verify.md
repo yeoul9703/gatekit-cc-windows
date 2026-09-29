@@ -46,14 +46,9 @@ contract, carry out every E2E step in `spec/05-gate.md` by hand, one verdict
 each from `ok / warn / fail / unverified`, plus the `-visual` judgement on
 every screenshot criterion.
 
-Two things the command must surface rather than swallow:
-
-- an `evaluator_warning` means the producer is grading itself — **report it
-  to the user**; the fix is `/gatekit:setup codex`.
-- a Codex evaluator refused with `EvaluatorSandboxError` means this
-  project's Codex hooks are not trusted yet — **show that message
-  verbatim** and do not retry with `--force-read-only-evaluator` on the
-  user's behalf.
+One thing the command must surface rather than swallow: an `evaluator_warning`
+means the producer is grading itself — **report it to the user** (there is no
+second backend enabled to grade instead, unless the user configures one).
 
 ## Step 3 — re-run the contract yourself
 

@@ -2250,58 +2250,14 @@ class TestHostExecutionFinishesJob(JobTestCase):
         self.assertEqual(first, second)
 
 
-# --------------------------------------------- ADR-0015: evaluator sandbox
+# --------------------------------------------- evaluator sandbox
 
 
 class TestEvaluatorSandbox(JobTestCase):
-    """A Codex evaluator needs `workspace-write` to run test suites at all —
-    `--sandbox read-only` blocks Vitest/Playwright's own scratch writes, not
-    just source edits — but switching to it is only safe once the write gate
-    (a project hook) is actually trusted; an untrusted hook is skipped by
-    Codex silently, not refused."""
+    """`evaluate()` always runs the backend's read-only sandbox — the write
+    gate is the real protection, so a backend never gets a writable argv."""
 
-    def write_codex_config(self, evaluator="codex") -> None:
-        cfg = {
-            "worker": {"default": "claude", "backends": {
-                "claude": {"argv": ["claude"], "read_only_argv": ["claude", "--plan"],
-                          "enabled": True},
-                "codex": {"argv": ["codex", "exec", "--sandbox", "workspace-write"],
-                         "read_only_argv": ["codex", "exec", "--sandbox", "read-only"],
-                         "enabled": True},
-            }},
-            "build": {"task_timeout_s": 60},
-            "verify": {"evaluator": evaluator},
-        }
-        (self.root / ".gatekit" / "config.json").write_text(json.dumps(cfg), encoding="utf-8")
-
-    def test_untrusted_codex_hooks_refuse_before_spawning(self) -> None:
-        self.write_codex_config()
-        with self.assertRaises(jobs.EvaluatorSandboxError) as ctx:
-            jobs.evaluate(self.root)
-        self.assertIn("workspace-write", str(ctx.exception))
-        self.assertIn("trust", str(ctx.exception).lower())
-
-    def test_the_refusal_names_the_fix(self) -> None:
-        self.write_codex_config()
-        with self.assertRaises(jobs.EvaluatorSandboxError) as ctx:
-            jobs.evaluate(self.root)
-        self.assertIn("codex exec --sandbox workspace-write", str(ctx.exception))
-
-    def test_force_read_only_bypasses_the_refusal(self) -> None:
-        self.write_codex_config()
-        self.set_env(FAKE_WORKER_EXIT=0)
-        # No real codex binary is invoked in this test tree; the read-only
-        # argv is `codex exec --sandbox read-only`, which will fail to spawn
-        # (codex is not installed in the test sandbox) — that is a normal
-        # `_spawn_worker` OSError path, not the refusal this test checks for.
-        try:
-            jobs.evaluate(self.root, force_read_only_evaluator=True)
-        except jobs.EvaluatorSandboxError:
-            self.fail("--force-read-only-evaluator must not raise the sandbox refusal")
-        except Exception:
-            pass  # spawn failure from a missing `codex` binary is expected here
-
-    def test_a_non_codex_backend_is_never_checked(self) -> None:
+    def test_a_configured_backend_runs_read_only(self) -> None:
         cfg = {
             "worker": {"default": "fake", "backends": {"fake": {
                 "argv": [sys.executable, "/nonexistent"],
@@ -2312,41 +2268,9 @@ class TestEvaluatorSandbox(JobTestCase):
         }
         (self.root / ".gatekit" / "config.json").write_text(json.dumps(cfg), encoding="utf-8")
         self.set_env(FAKE_WORKER_EXIT=0)
-        result = jobs.evaluate(self.root)  # must not raise EvaluatorSandboxError
+        result = jobs.evaluate(self.root)
         self.assertEqual(result["state"], "passed")
-
-    def test_trusted_codex_hooks_use_workspace_write(self) -> None:
-        import tempfile as _tempfile
-        from gatekit import hosts
-
-        self.write_codex_config()
-        codex_home = _tempfile.TemporaryDirectory()
-        old_env = os.environ.get("CODEX_HOME")
-        os.environ["CODEX_HOME"] = codex_home.name
-        try:
-            hosts.install(self.root, "codex")
-            hooks_path = str((self.root / ".codex" / "hooks.json").resolve())
-            pathlib.Path(codex_home.name, "config.toml").write_text(
-                '[hooks.state."%s:pre_tool_use:0:0"]\n'
-                'trusted_hash = "sha256:deadbeef"\n' % hooks_path,
-                encoding="utf-8",
-            )
-            # codex isn't actually installed in the sandbox; the spawn itself
-            # will fail, but the argv chosen is observable from the job dir
-            # before that, since job.json is written first.
-            try:
-                jobs.evaluate(self.root)
-            except jobs.EvaluatorSandboxError:
-                self.fail("hooks are trusted; must not raise the sandbox refusal")
-            except Exception:
-                pass
-            job_id = jobs.latest_job_id(self.root)
-            saved = json.loads(
-                (self.root / ".gatekit" / "jobs" / job_id / "job.json").read_text())
-            self.assertIn("workspace-write", saved["backend"]["argv"])
-        finally:
-            if old_env is None:
-                os.environ.pop("CODEX_HOME", None)
-            else:
-                os.environ["CODEX_HOME"] = old_env
-            codex_home.cleanup()
+        job_id = jobs.latest_job_id(self.root)
+        saved = json.loads(
+            (self.root / ".gatekit" / "jobs" / job_id / "job.json").read_text())
+        self.assertTrue(saved["backend"]["read_only"])

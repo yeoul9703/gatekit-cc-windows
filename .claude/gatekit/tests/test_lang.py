@@ -58,8 +58,8 @@ class TestDetect(unittest.TestCase):
         self.assertEqual(lang.detect("v1.2.3 / 100% -- 고쳐줘 now"), "ko")
 
     def test_path_tokens_do_not_count(self) -> None:
-        # Observed in a Codex session: "src/hello.ts 만들어줘" flipped the
-        # session to English. Paths and identifiers are named, not written.
+        # "src/hello.ts 만들어줘" must not flip to English. Paths and
+        # identifiers are named, not written.
         self.assertEqual(lang.detect("src/auth/token.ts 를 고쳐줘"), "ko")
         self.assertEqual(lang.detect("src/hello.ts 만들어줘"), "ko")
         self.assertEqual(lang.detect("README.md 읽어줘"), "ko")

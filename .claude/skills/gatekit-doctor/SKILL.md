@@ -8,7 +8,7 @@ description: Diagnose the gatekit install across seven axes — plugin files, ho
 Invoke `/gatekit:doctor`, passing `--json` through when the user asked for
 machine output.
 
-Do not diagnose by reading files yourself. `plugin/commands/doctor.md` is the
+Do not diagnose by reading files yourself. `.claude/commands/gatekit/doctor.md` is the
 execution instruction; this file only routes to it.
 
 Exit code 0 means nothing failed, not that everything was checked. An

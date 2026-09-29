@@ -53,9 +53,9 @@ GATE_TIMEOUT_S = 60.0
 #:              per task pays a fresh project discovery each time and buys a
 #:              second opinion from the model that is already here.
 #: ``worker`` — spawn the configured backend per task, as before. Correct when
-#:              the model must differ (adversarial verification, a Codex host
-#:              delegating to Claude) or when a round is wide enough that real
-#:              parallelism beats the spawn cost.
+#:              the model must differ (adversarial verification) or when a
+#:              round is wide enough that real parallelism beats the spawn
+#:              cost.
 EXECUTION_MODES = ("host", "worker")
 DEFAULT_EXECUTION = "host"
 #: A round with at least this many independent tasks is worth spawning for even
@@ -895,19 +895,6 @@ def evaluator_brief(root, lang: str = "en") -> str:
     return EVALUATOR_BRIEF.format(launcher=paths.cli_invocation(), lang=lang)
 
 
-#: The one backend whose read-only sandbox is known to block more than source
-#: edits (ADR-0015): `codex exec --sandbox read-only` also blocks the test
-#: runners it invokes from writing their own scratch output (Vitest's config
-#: cache, Playwright's `test-results/`), so most criteria come back
-#: `unverified` for a reason that has nothing to do with the code under test.
-_SANDBOX_NEEDS_TRUST = ("codex",)
-
-
-class EvaluatorSandboxError(ValueError):
-    """A Codex evaluator would run `workspace-write` with no write gate
-    watching it, because this project's Codex hooks are not yet trusted."""
-
-
 def evaluate(root, backend_name=None, prompt_path=None, timeout_s=None, lang: str = "en",
              force_read_only_evaluator: bool = False) -> dict:
     """Run one worker as the independent evaluator.
@@ -917,18 +904,11 @@ def evaluate(root, backend_name=None, prompt_path=None, timeout_s=None, lang: st
     gets ``GATEKIT_TASK_ID=evaluate`` with a read-only ``task.json`` so the
     write gate refuses writes inside its session.
 
-    ADR-0015: for most backends that write-gate protection sits *under* the
-    backend's own read-only sandbox, which is stricter still. Codex is the
-    exception — its ``read-only`` sandbox blocks a test runner's own scratch
-    writes, not just source edits, so most criteria come back ``unverified``
-    for a reason unrelated to the code being graded. For Codex specifically,
-    this runs the **writable** sandbox instead and relies on the write gate as
-    the real protection — but only once Codex has actually recorded trust for
-    this project's ``.codex/hooks.json`` (`hosts.codex_hooks_trusted`),
-    because an untrusted project hook is silently skipped by Codex, not
-    refused, and running `workspace-write` under that condition would be a
-    code-writing session with nothing watching it. ``force_read_only_evaluator``
-    keeps the stricter, more limited sandbox regardless.
+    Always runs the backend's read-only sandbox: the write gate is the real
+    protection, and running the writable sandbox would be a code-writing
+    session with nothing watching it. ``force_read_only_evaluator`` is kept
+    for callers that pass it explicitly; it is a no-op today since read-only
+    is already the only mode.
     """
     name = backend_name or workers.evaluator_name(root)
     if name == "agent":
@@ -938,25 +918,6 @@ def evaluate(root, backend_name=None, prompt_path=None, timeout_s=None, lang: st
         )
 
     use_read_only = True
-    if name in _SANDBOX_NEEDS_TRUST and not force_read_only_evaluator:
-        from gatekit import hosts
-
-        hooks_path = root / ".codex" / "hooks.json"
-        if not hooks_path.is_file():
-            hosts.install(root, "codex")
-        if hosts.codex_hooks_trusted(root):
-            use_read_only = False
-        else:
-            raise EvaluatorSandboxError(
-                "Codex hooks are not trusted for this project yet, so "
-                "workspace-write would run with no write gate watching it. "
-                "Run `codex exec --sandbox workspace-write \"echo trust-check\"` "
-                "once by hand in this project and approve the hook trust "
-                "prompt, then re-run /gatekit:verify. Or pass "
-                "--force-read-only-evaluator to keep the stricter sandbox "
-                "(most criteria will read unverified)."
-            )
-
     backend = workers.resolve(root, name, read_only=use_read_only)
     cfg = config.load(root)
     if timeout_s is None:
@@ -1943,10 +1904,7 @@ def _usage() -> str:
         "                         no worker, no new job (ADR-0013)\n"
         "  redelegate <task_id> [--job ID]\n"
         "  stop [--job ID]\n"
-        "  evaluate [--backend name] [--prompt FILE] [--lang ko|en]\n"
-        "                         [--force-read-only-evaluator] [--json]\n"
-        "                         Codex evaluator needs trusted project hooks\n"
-        "                         for workspace-write; see ADR-0015\n"
+        "  evaluate [--backend name] [--prompt FILE] [--lang ko|en] [--json]\n"
         "  clean [--all]\n"
     )
 

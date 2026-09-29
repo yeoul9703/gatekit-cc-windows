@@ -5,6 +5,14 @@ vocabulary. Every module, command, hook and test must agree with it. If an
 implementation needs to deviate, change this file first (with an ADR in
 `docs/decisions/`) and then the code.
 
+**This repository runs gatekit standalone, for Claude Code only.** There is no
+plugin manager and no second host (see ADR-0006, not adopted here): opening
+this folder in Claude Code is enough — hooks are registered directly in the
+project's own `.claude/settings.json`, and commands live under
+`.claude/commands/gatekit/`. Sections below describe that standalone layout;
+where an ADR still describes the old plugin-distributed, multi-host design,
+this file's description of the current layout wins.
+
 gatekit is a **clean-room** implementation. It borrows *patterns* that are
 common engineering practice (hook-enforced gates, assumption ledgers,
 hash-anchored approvals, executable completion contracts, worker job
@@ -15,12 +23,12 @@ directories) but contains no code copied from any other project.
 | Rule | Why |
 |---|---|
 | Python 3.9+ standard library only, everywhere | must run on a fresh machine with only `python3` |
-| One plugin (`plugin/`), one package (`plugin/gatekit/`) | cross-plugin paths do not exist in Claude Code; single plugin means `${CLAUDE_PLUGIN_ROOT}` reaches everything |
+| One kernel package (`.claude/gatekit/gatekit/`), reached via `.claude/gatekit/bin/gatekit` | no plugin manager in standalone mode; the wrapper resolves a working Python and calls `bin/gatekit.py` |
 | Gates are hooks, not prose | prose instructions fire nondeterministically; hooks fire every time |
 | Every hook exits 0 on any internal error and writes a one-line diagnostic to `.gatekit/runs/hook-errors.log` | a broken hook must never break the user's session |
 | Verdict vocabulary is exactly `ok / warn / fail / unverified` | "not checked" must never be rounded to pass or fail |
-| No absolute personal paths anywhere in the repo | CI gate `tools/gate_no_abs_paths.py` fails the build |
-| `SKILL.md` ≤ 40 lines: trigger shim only. `commands/*.md` is the execution instruction | prevents the command/skill split from becoming two products |
+| No absolute personal paths anywhere in the repo | keeps the checkout portable across machines |
+| `SKILL.md` ≤ 40 lines: trigger shim only. `.claude/commands/gatekit/*.md` is the execution instruction | prevents the command/skill split from becoming two products |
 | Data (templates, heading maps, presets, schemas) lives in JSON/Markdown files, not in prompt prose | keeps prompts small and data diffable |
 | Any file > 1 MB fails CI | no committed corpora |
 | Output language follows `output_lang` (see §8); Korean is never a default | open-source posture |
@@ -28,11 +36,10 @@ directories) but contains no code copied from any other project.
 ## 1. Repository layout
 
 ```
-gatekit/
-├── .claude-plugin/marketplace.json     # one plugin: ./plugin
-├── plugin/                              # the installable plugin
-│   ├── .claude-plugin/plugin.json
-│   ├── commands/                        # execution instructions (one per pipeline)
+<project root>/
+├── .claude/
+│   ├── settings.json                    # 7 hook registrations (see §3), via bin/gatekit
+│   ├── commands/gatekit/                # execution instructions (one per pipeline), /gatekit:<name>
 │   │   ├── discover.md    /gatekit:discover    → spec/00-discovery.md (optional first step)
 │   │   ├── interview.md   /gatekit:interview   → spec/01-prd.md, spec/03-architecture.md
 │   │   ├── mockup.md      /gatekit:mockup      → spec/02-screens.md, spec/tokens.json, ledger gaps, optional preview (ADR-0011)
@@ -42,34 +49,34 @@ gatekit/
 │   │   ├── build.md       /gatekit:build       → worker jobs over spec/04-tasks.md
 │   │   ├── verify.md      /gatekit:verify      → independent E2E + report check
 │   │   ├── doctor.md      /gatekit:doctor
-│   │   └── setup.md       /gatekit:setup       → optional Codex backend, config
-│   ├── skills/<name>/SKILL.md           # ≤ 40-line NL trigger shims that point at the command
-│   ├── hooks/hooks.json                 # 7 hook registrations (see §3); auto-loaded, never listed in plugin.json
-│   ├── gatekit/                         # kernel package (stdlib only)
-│   │   ├── cli.py         dispatcher: python3 -m gatekit <sub>
-│   │   ├── hookio.py      hook stdin/stdout contract, safe wrapper, host dialects (§3)
-│   │   ├── hosts.py       generated host layers: `gatekit install --host codex` (§15)
-│   │   ├── ledger.py      per-session run ledger
-│   │   ├── lang.py        output_lang detection
-│   │   ├── verdict.py     4-state vocabulary + aggregation
-│   │   ├── contract.py    completion contract derive/validate/run
-│   │   ├── approval.py    hash-anchored approvals
-│   │   ├── spec.py        spec set validation
-│   │   ├── jobs.py        job runner (job dir, atomic writes, spawn, gates, redelegate)
-│   │   ├── workers.py     worker backends (claude default, codex optional, custom)
-│   │   ├── doctor.py      8-axis diagnosis
-│   │   ├── config.py      .gatekit/config.json loader with defaults
-│   │   ├── paths.py       project root / state dir resolution
-│   │   └── gates/         hook entry points: prompt.py write.py bash.py spawn.py question.py compact.py stop.py
-│   ├── spec-kit/
-│   │   ├── templates/{ko,en}/01-prd.md … 05-gate.md, RECOVERY.md, PROGRESS.md
-│   │   └── heading-map.json             # canonical headings per file per language
-│   ├── policy/language.md questioning.md verification.md   # loaded at runtime by commands
-│   └── tests/                           # unittest, run with: cd plugin && python3 -m unittest discover -s tests
-├── tools/                               # CI gates (stdlib)
-├── docs/ARCHITECTURE.md (this), decisions/ADR-*.md
-├── .github/workflows/ci.yml
-├── README.md, README.ko.md, CHANGELOG.md, CONTRIBUTING.md, SECURITY.md, LICENSE, CLAUDE.md
+│   │   └── setup.md       /gatekit:setup       → config, default worker check
+│   ├── skills/gatekit-<name>/SKILL.md   # ≤ 40-line NL trigger shims that point at the command
+│   └── gatekit/                         # the standalone kernel checkout
+│       ├── bin/
+│       │   ├── gatekit                  # POSIX sh launcher: finds a working Python, execs gatekit.py
+│       │   └── gatekit.py               # `python3 -m gatekit` equivalent, sys.path bootstrap
+│       ├── gatekit/                     # kernel package (stdlib only)
+│       │   ├── cli.py         dispatcher: `bin/gatekit <sub>`; `_gate <name>` dispatches to a gate module
+│       │   ├── hookio.py      hook stdin/stdout contract, safe wrapper (§3)
+│       │   ├── ledger.py      per-session run ledger
+│       │   ├── lang.py        output_lang detection
+│       │   ├── verdict.py     4-state vocabulary + aggregation
+│       │   ├── contract.py    completion contract derive/validate/run
+│       │   ├── approval.py    hash-anchored approvals
+│       │   ├── spec.py        spec set validation
+│       │   ├── jobs.py        job runner (job dir, atomic writes, spawn, gates, redelegate)
+│       │   ├── workers.py     worker backends (claude default; a project may add more)
+│       │   ├── doctor.py      7-axis diagnosis
+│       │   ├── config.py      .gatekit/config.json loader with defaults
+│       │   ├── paths.py       project root / gatekit root resolution
+│       │   └── gates/         hook entry points: prompt.py write.py bash.py spawn.py question.py compact.py stop.py
+│       ├── spec-kit/
+│       │   ├── templates/{ko,en}/01-prd.md … 05-gate.md, RECOVERY.md, PROGRESS.md
+│       │   └── heading-map.json         # canonical headings per file per language
+│       ├── policy/language.md questioning.md verification.md   # loaded at runtime by commands
+│       └── tests/                       # unittest, run with: cd .claude/gatekit && python3 -m unittest discover -s tests
+├── docs/ARCHITECTURE.md (this), decisions/ADR-*.md, USAGE.md
+└── .gitignore                           # ignores .gatekit/runs, .gatekit/jobs
 ```
 
 ## 2. Project state layout (inside the user's project)
@@ -117,17 +124,14 @@ cannot be evidence for the spec.
 
 ## 3. Hook I/O contract (`hookio.py`)
 
-Claude Code passes a JSON object on stdin. Codex CLI passes the same object
-(same field names) to hooks registered in `.codex/hooks.json`; the gates
-serve both hosts from one script, learning the host from `--host <name>` on
-their own argv (`hookio.host_from_argv`, default `claude`). Only the Stop
-block differs between the two dialects and `hookio.adapt_output` renders it
-(`{"decision":"block","reason"}` for Claude Code, `{"continue":false,"stopReason"}`
-for Codex); deny and additionalContext payloads are identical. Codex edits
-files through `apply_patch`, whose `tool_input.command` is the patch text;
-the write gate takes every `*** Add/Update/Delete File:` and `*** Move to:`
-header as a target and refuses a patch that names none while a rule is
-active. Fields used:
+Claude Code passes a JSON object on stdin to the hook command from
+`.claude/settings.json`. Every command in this project routes through
+`.claude/gatekit/bin/gatekit _gate <name>`: the wrapper resolves a working
+Python once and forwards to `bin/gatekit.py`, whose `_gate` dispatch imports
+the named gate module and runs it against this same process's stdin — so a
+gate reads its event exactly as it would running as a standalone script
+(`python3 .../gatekit/gates/write.py`), which `gates/_bootstrap.py` also still
+supports directly. Fields used:
 `session_id`, `hook_event_name`, `cwd`, `tool_name`, `tool_input`, `tool_response`,
 `prompt` (UserPromptSubmit), `stop_hook_active` (Stop).
 
@@ -153,11 +157,13 @@ cut is reported as `unverified` — honest, where a hook killed by Claude Code
 would record no verdict and no log line. Tests pin `hooks.json` to
 `STOP_HOOK_TIMEOUT_S` and the cap to at least 30 s below it.
 
-Registered hooks (plugin/hooks/hooks.json): UserPromptSubmit→`gates/prompt.py`,
-PreToolUse `Write|Edit|MultiEdit|NotebookEdit`→`gates/write.py`,
-PreToolUse `Bash`→`gates/bash.py` (ADR-0004),
-PreToolUse `Agent|Task`→`gates/spawn.py`, PostToolUse `AskUserQuestion`→`gates/question.py`,
-Stop→`gates/stop.py`.
+Registered hooks (`.claude/settings.json`, each `command` calling
+`bin/gatekit _gate <name>`): UserPromptSubmit→`prompt`,
+PreToolUse `Write|Edit|MultiEdit|NotebookEdit`→`write`,
+PreToolUse `Bash`→`bash` (ADR-0004),
+PreToolUse `Agent|Task`→`spawn`, PostToolUse `AskUserQuestion`→`question`,
+PostToolUse `Write|Edit|MultiEdit|NotebookEdit`→`question` (clears
+`awaiting_write`), PreCompact→`compact`, Stop→`stop`.
 
 Gate behaviour:
 
@@ -169,9 +175,9 @@ never asked to be governed. Such a gate allows without reading further and
 `compact`, which already writes nothing when no job exists.
 
 - **prompt**: ensure ledger exists for `session_id`; detect `output_lang` from `prompt` (§8) and store it — for a slash command only the `<command-args>` content is the user's words, and empty args keep the stored language; **set `active_pipeline`** when the prompt invokes `/gatekit:<pipeline>`. Claude Code delivers a slash command as the tagged body `<command-message>…</command-message>` / `<command-name>/gatekit:<name></command-name>` / `<command-args>…</command-args>`; that tag, a bare `/gatekit:<name>` at the start of the prompt, and the `# /gatekit:<name>` title line of an expanded command body are recognised within the first 12 lines. A mid-sentence mention is not an invocation. `doctor` and `setup` clear it; an unknown name leaves it alone; a plain prompt keeps it. Entering a different pipeline resets `questions` to its defaults. This is the **only** production writer of `active_pipeline` — commands never set it by prose. Inject `additionalContext` (≤ 600 chars) with `output_lang`, question budget state, active pipeline, and unresolved gate count, plus `build=<job> n/m passed, next: <task>` while a job is unfinished (ADR-0013 decision 1a: the session that returns from a compaction is told a build is live and reads `spec/PROGRESS.md` for the rest). The question field is `questions=<asked>/<max>`, followed by the ADR-0012 signals when any is non-zero — `questions=6/2 (2 unjustified, 1 repeat, impl-choice)` — printing only what is set so the 600-char budget holds. Never blocks.
-- **write**: for `apply_patch`, apply the rules below to every file the patch header names (a patch naming no file is denied while a rule is active). Otherwise deny when (a) `config.enforce_spec_before_code` is true, `spec/` exists, `.gatekit/approvals.json` has no valid approval for `spec/05-gate.md`, and the target path is outside the allowlist `spec/**, .gatekit/**, docs/**, README*, *.md at root`; or (b) env `GATEKIT_TASK_ID` is set and the target is outside that task's `write_scope` (from the job's `task.json`). Reason text is in `output_lang`.
+- **write**: deny when (a) `config.enforce_spec_before_code` is true, `spec/` exists, `.gatekit/approvals.json` has no valid approval for `spec/05-gate.md`, and the target path is outside the allowlist `spec/**, .gatekit/**, docs/**, README*, *.md at root`; or (b) env `GATEKIT_TASK_ID` is set and the target is outside that task's `write_scope` (from the job's `task.json`). Reason text is in `output_lang`.
 - **bash**: apply the write rules (a) and (b) to every file a Bash command would write, read statically from the command text: redirections (`>`, `>>`, `&>`, `>|`, `N>`), `tee`, `sed -i`/`perl -i`, `cp`/`mv`/`ln`/`install`/`rsync` destinations, `touch`/`rm`/`mkdir`/`truncate`/`chmod`/`chown` operands, `dd of=`, `sort -o`, `curl -o`, `wget -O`, `tar -C`/`-f`, `unzip -d`, `zip`, with `cd` tracked across `;`/`&&`/`||`/`|`/newlines, `VAR=`/`sudo`/`env`/`nohup` prefixes stripped, here-document bodies ignored, `/dev/*` targets ignored and `sh|bash|zsh -c "…"` parsed recursively. Fast path: when no rule could deny anything (no `GATEKIT_TASK_ID`, spec gate approved or absent) the command is allowed without parsing. When a rule is active and a write's target **cannot be determined** — `$VAR` or backticks in a path, `cd` to an unknown directory, `eval`, `xargs`, `patch`, `trap`, `find -exec/-delete`, working-tree `git` subcommands (`apply`, `checkout`, `restore`, `reset`, `merge`, `stash`, `init`, `clone`, …), inline interpreter code (`python3 -c`, `node -e`, `perl -e`, stdin scripts), `awk`, command-line editors (`ed`, `ex`, `vim`, `nano`), `busybox`, downloads that choose their own file name (`curl -O`, bare `wget`), process substitution, unbalanced quotes — **deny** with reason `opaque`: "could not tell" is never rounded to "allowed". Programs invoked by name (`npm run build`, `python3 script.py`) are outside its reach by design. Reason text is in `output_lang`.
-- **spawn**: under Codex the tool is `collaborationspawn_agent` and its payload carries only a task name and an encrypted message, so the fence cannot be read: allow, record `spawn_unscoped` in the ledger, and rely on the write/bash gates that the subagent's own tool calls meet (they carry `agent_id`). Otherwise the spawn prompt must contain a fenced block ` ```gatekit-scope ` with JSON `{"write_scope": [globs] | "read-only", "stop_when": "…", "tools": [...] | "inherit"}`. Deny if missing/invalid, or if `write_scope` intersects any scope already recorded in the ledger for this session. On allow, record the scope in the ledger. No regex over prose: parse the fence as JSON.
+- **spawn**: the spawn prompt must contain a fenced block ` ```gatekit-scope ` with JSON `{"write_scope": [globs] | "read-only", "stop_when": "…", "tools": [...] | "inherit"}`. Deny if missing/invalid, or if `write_scope` intersects any scope already recorded in the ledger for this session. On allow, record the scope in the ledger. No regex over prose: parse the fence as JSON.
 - **compact** (PreCompact, ADR-0013): stamp the latest job's state — job id, execution mode, backend, and every task's state, gate tally and detail — into `spec/PROGRESS.md` between `<!-- gatekit:build-state -->` and its closing marker, replacing that block in place so repeated compactions leave one stamp and nothing outside it is touched. The heading belongs to neither language's canonical set, so `spec validate` is unaffected. Writes nothing when no job exists; an unwritable file is swallowed, since the job dir still holds every fact. Under host execution a build lives in one session, so a compaction is routine: this hook records the narrative, which is the only thing the files did not already hold.
 - **question**: increment `ledger.questions.asked`; if `asked > budget.max_calls` (default 2 for interview, unlimited otherwise) record `budget_exceeded=true` (informational; commands read it). ADR-0012 adds four signals, all informational and all confined to the budgeted pipeline, because a raw count permits waste inside the budget and forbids value outside it. Past `max_calls` a call must arrive with `questions.justification` — one line naming what the command would write differently depending on the answer — which the call **consumes** (set to `null`); a call without one raises `unjustified`. A justified call sets `awaiting_write`, and if the next `AskUserQuestion` arrives with it still set, `unrealized` is raised: the claim that the answer changes what gets written did not come true. The same gate is therefore also registered on **PostToolUse for `Write|Edit|MultiEdit|NotebookEdit`**, where it only calls `note_write` (clearing `awaiting_write`) and never counts a question — PreToolUse could not serve, since a write it sees may still be denied. Independently of the budget, each question's `header` + `question` is reduced to a content-word fingerprint (noise words dropped, ≥ `REPEAT_MIN_WORDS` 3 words) and compared against `questions.asked_topics` (last 50): overlap ≥ `REPEAT_OVERLAP` (0.7) of the smaller set raises `repeated` and records `repeat_of`. A call whose options are **all** code tokens (path, `call()`, dotted filename, `snake_case`, `camelCase`) sets `implementation_choice` — a `warn`-grade signature of handing the user a decision the command owned, never a verdict, since a question about implementation is sometimes right.
 - **stop**: if `.gatekit/contract.json` exists and the ledger's `active_pipeline` is `build` or `verify`: run the contract (§5). On any `fail` or `unverified` criterion and `block_count < 3` and not `stop_hook_active`: block with a reason listing failing criteria; increment `block_count`. Otherwise allow and record `final_verdict` in the ledger (never a blank).
@@ -284,9 +290,9 @@ finished.
 
 A task gate is an `argv` command like any other in `gates`, run by
 `jobs.py` after the worker exits (§10) — distinct from the hook-driven gates
-in §3, which fire during the session rather than after a task. One ships in
-the plugin: `plugin/gatekit/gates/tokens.py [--root DIR] [--lang ko|en]
-[--json] GLOB...` (ADR-0008), which scans the files matching the given
+in §3, which fire during the session rather than after a task. One ships
+with gatekit: `.claude/gatekit/bin/gatekit _gate tokens [--root DIR]
+[--lang ko|en] [--json] GLOB...` (ADR-0008), which scans the files matching the given
 globs (typically the task's own `write_scope`) for colour literals not
 present in `spec/tokens.json`. Its exit code is the task-gate convention,
 not the hook convention: `0` (`ok`, every literal found matches a token),
@@ -423,20 +429,20 @@ must say so once.
  "enforce_spec_before_code": true,
  "worker": {"default": "claude", "backends": {
    "claude": {"argv": ["claude", "-p", "--output-format", "json", "--permission-mode", "acceptEdits"],
-              "read_only_argv": ["claude", "-p", "--output-format", "json", "--permission-mode", "plan"], "enabled": true},
-   "codex":  {"argv": ["codex", "exec", "--sandbox", "workspace-write"],
-              "read_only_argv": ["codex", "exec", "--sandbox", "read-only"], "enabled": false}
+              "read_only_argv": ["claude", "-p", "--output-format", "json", "--permission-mode", "plan"], "enabled": true}
  }},
  "build": {"max_retries": 2, "parallel": 3, "task_timeout_s": 900},
  "questions": {"interview_max_calls": 2, "items_per_call": 4},
- "verify": {"evaluator": "agent"}}
+ "verify": {"evaluator": ""}}
 ```
 
 Sandboxing is never disabled by default; a backend with a bypass flag must set
 `"unsafe": true` and the job receipt records it. `read_only_argv` is the
 backend as an evaluator and must not be able to write; a backend without one
 cannot grade, and its writable `argv` is never substituted. `verify.evaluator`
-is `agent` (the host's own read-only subagent) or a backend name (ADR-0007).
+is `agent` (the host's own read-only subagent) or a backend name (ADR-0007). A
+project may add its own backend entries to `worker.backends` in
+`.gatekit/config.json` for another CLI.
 
 ## 10. Jobs and workers (`jobs.py`, `workers.py`)
 
@@ -506,7 +512,7 @@ worker exit code to weigh, so the gates alone decide. Passing `--backend`
 forces `worker`: naming a model is a request for that model. A worker is a
 cold session of the same model, so spawning one per task buys a second opinion
 from the model already present; reserve it for a differing model (adversarial
-verification, a Codex host delegating to Claude) or a genuinely wide round.
+verification) or a genuinely wide round.
 Under `host`, `start` never calls `_finalise_job` — nothing drains a loop the
 way `worker` mode's does — so `status()` stamps `job.json.finished_at` itself,
 the first time every task in the job reads as terminal; found on a real
@@ -598,30 +604,11 @@ the evaluator's own session regardless of backend. `state` ∈
 criterion. Its stdout ends with the evaluator's reply tail, which is the
 verdict table.
 
-**ADR-0015 — the Codex evaluator's own sandbox.** For every backend except
-Codex, `evaluate` resolves with `read_only=True` (the backend's
-`read_only_argv`), which is the real protection beneath the write gate. Codex
-is checked instead: `codex exec --sandbox read-only` blocks a test runner's
-own scratch writes (Vitest's config cache, Playwright's `test-results/`) along
-with source edits, so most criteria come back `unverified` for a reason
-unrelated to the code under test. `evaluate` runs Codex's normal `argv`
-(`--sandbox workspace-write`) instead, but only when
-`hosts.codex_hooks_trusted(root)` confirms this project's `.codex/hooks.json`
-has a matching `hooks.state` entry in Codex's own `$CODEX_HOME/config.toml`
-(default `~/.codex`) — a project's own `trust_level` is a separate record and
-does not imply hook trust, and an untrusted project hook is skipped by Codex
-silently rather than refused, so a stray write from an untrusted hook would go
-unwatched. When `.codex/hooks.json` is missing, `evaluate` installs it
-(`hosts.install`, idempotent) before checking; installing a file never grants
-trust, which only a human can do interactively. Untrusted and unforced raises
-`jobs.EvaluatorSandboxError` (subclass of `ValueError`, CLI exit 2) naming the
-one-time fix: run `codex exec --sandbox workspace-write "echo trust-check"` by
-hand and approve the hook-trust prompt. `--force-read-only-evaluator` keeps
-the stricter sandbox regardless. `hosts.codex_hooks_trusted` parses
-`config.toml` with `tomllib` (3.11+) or a narrow hand-rolled reader scoped to
-`[hooks.state."<key>"]` table headers only (3.9/3.10); any parse failure or
-missing file reads as **not trusted** — "could not tell" never rounds to
-"trusted".
+`evaluate` always resolves with `read_only=True` (the backend's
+`read_only_argv`), which is the real protection beneath the write gate — a
+backend is never handed a writable sandbox as the evaluator.
+`force_read_only_evaluator` is accepted for backward compatibility and is a
+no-op, since read-only is already the only mode.
 
 `workers.py`: `list`, `check <name> [--probe]` (`shutil.which` on argv[0] →
 ok/fail, `--version` probe → ok/unverified; with `--probe`, one trivial
@@ -630,8 +617,8 @@ the output tail, since a binary that cannot run a prompt here — not logged
 in, or sandboxed away from its credentials — will fail every task; timed out
 → unverified), `set-default <name>`, `enable <name>`, `set-evaluator
 <agent|name>`. `/gatekit:build` runs the live probe before `jobs start`.
-`claude` is enabled by default; `codex` is disabled until `/gatekit:setup codex`
-runs `check` and the user confirms.
+`claude` is the only backend enabled by default; a project may add and enable
+more in `.gatekit/config.json`.
 
 ## 11. Verdicts (`verdict.py`)
 
@@ -639,54 +626,24 @@ runs `check` and the user confirms.
 `unverified` → `unverified`; else any `warn` → `warn`; else `ok`. Rendering:
 `render(v, lang)` gives the localized label; JSON always uses the English token.
 
-## 12. Doctor (`doctor.py`) — 8 axes
+## 12. Doctor (`doctor.py`) — 7 axes
 
-1 plugin files present (plugin.json, hooks.json, all gate scripts exist and are non-empty);
-2 hooks registered in the running install (compare `~/.claude/plugins/…` cache when present, else `unverified`);
+1 plugin files present (`bin/gatekit`, `bin/gatekit.py`, all gate scripts exist and are non-empty);
+2 hooks registered (the project's own `.claude/settings.json` has all 4 events, each routed through `bin/gatekit`);
 3 project state (`.gatekit/config.json` valid, approvals valid JSON);
 4 spec set (`spec.validate` verdict, or `unverified` when no `spec/`);
 5 contract freshness (`source_sha256` matches);
 6 workers (default backend `check`);
-7 python version ≥ 3.9;
-8 host layer: a generated `.codex/hooks.json` (§15), when present, must point at gate scripts that exist (`fail` otherwise); absent is `ok`, since a Claude Code project needs none. Each axis returns `{axis, verdict, detail, fix}` where
+7 python version ≥ 3.9. Each axis returns `{axis, verdict, detail, fix}` where
 `fix` is a copy-pasteable command or empty. Exit 1 iff any `fail`.
-
-## 15. Host layers (`hosts.py`, ADR-0006)
-
-Claude Code loads gatekit as a plugin. Codex CLI reads three things from a
-project instead — `.codex/hooks.json`, `.agents/skills/<name>/SKILL.md`,
-`AGENTS.md` — and `gatekit install --host codex` generates all three **from
-`plugin/`**, which stays the single source:
-
-- `.codex/hooks.json`: the six gates with `--host codex`; `apply_patch`
-  joins the write matcher; the Stop timeout is copied from
-  `plugin/hooks/hooks.json`.
-- one skill per `commands/<name>.md`: `SKILL.md` is a ≤ 40-line shim (the
-  plugin skill's trigger text plus the Codex differences: no
-  `AskUserQuestion`, `$gatekit-<name>` invocation, project trust) and
-  `command.md` is the command body with `${CLAUDE_PLUGIN_ROOT}` replaced by
-  the checkout path and `/gatekit:<name>` rewritten to `$gatekit-<name>`.
-- `AGENTS.md`: a managed block between `<!-- gatekit:begin -->` and
-  `<!-- gatekit:end -->`; text outside it is never touched.
-
-Writes are atomic, reinstalling is idempotent, `--dry-run` lists without
-writing. `hosts.status` is `unverified` when absent, `fail` when a
-registered gate script does not exist, `ok` otherwise — and says that whether
-Codex loads project hooks depends on the user trusting `.codex/`, which is
-not readable from here. Observed in a Codex 0.154 session (parity table in
-the README): `apply_patch` and shell commands arrive as their own events and
-are gated; `collaborationspawn_agent` hides the prompt, so the spawn gate
-allows and records `spawn_unscoped` (the subagent's own writes are still
-gated); there is no `AskUserQuestion`, so the question gate has nothing to
-count.
 
 ## 13. Testing convention
 
-`cd plugin && python3 -m unittest discover -s tests -v` must pass with no network
-and no external binaries. Tests that need a binary (`claude`, `codex`) use a
+`cd .claude/gatekit && python3 -m unittest discover -s tests -v` must pass with
+no network and no external binaries. Tests that need a binary (`claude`) use a
 fake executable created in a temp dir and prepended to `PATH`. Every gate has at
 least three tests: allow, deny/block, internal-error-still-exits-0. Fixtures
-under `plugin/tests/fixtures/` are small text files only.
+under `.claude/gatekit/tests/fixtures/` are small text files only.
 
 `jobs.py` (ADR-0009) additionally covers: preflight classification (already
 passing → no worker; command error → `GatePreflightError` and CLI exit 4 with
@@ -707,18 +664,7 @@ task id refused; `--backend` forcing worker mode; a config without
 `build.execution` still spawning; `recheck` passing a task whose gate was
 narrowed, leaving a still-failing one `failed`, reading the current task file
 rather than the job snapshot, naming tasks missing from it, and being
-idempotent; and `_positionals` not mistaking an option's value for a task id. `shape` counting tasks and rounds, sharing a round between independent tasks, flagging a dependency with no evidence in the instruction while sparing one named there or named by id, and reporting the pruned round total; a task warned as verification-shaped when it writes only test paths and its **transitive** dependency reach is two or more, and not warned on one direct dependency, a source path in scope, a `read-only` scope, or a cycle; the finding staying a `warn`. The PreCompact hook: recording every task's state, naming the job, creating PROGRESS.md when absent, leaving human content intact, replacing its own block on a second compaction, writing nothing with no job, surviving a corrupt status file and an unwritable spec dir, exiting 0 as a subprocess, and leaving `spec validate` findings unchanged. ADR-0014: a failure incrementing the attempt ledger and a pass clearing it; `blocked`/`stopped` leaving it alone; `redelegate` and `start` both refusing at the budget with exit 3; `--force-retry` clearing exactly one task; `recheck` not counting while `complete_task` does; a corrupt or missing `attempts.json` reading as empty; the status row and table showing the carried count. Host execution: `finished_at` absent right after `start`, stamped by `status()` once the last task turns terminal, not stamped while one is still queued, and stamped once (idempotent on repeated calls). ADR-0015: `codex_hooks_trusted`
-true for a matching `hooks.state` entry (any event, not only `pre_tool_use`),
-false with no config file, no matching entry, malformed TOML, an empty
-`[hooks.state]` table, or project-level `trust_level` alone with no
-`hooks.state` entry (the real `gk-trial2` shape) — each pinned through both
-`tomllib` and the 3.9/3.10 fallback parser, including one case with an escaped
-quote in the key; `evaluate` refusing with `EvaluatorSandboxError` naming
-`workspace-write` and the trust-check command when Codex hooks are untrusted;
-installing the host layer first when `.codex/hooks.json` is absent;
-proceeding with the writable `argv` once trusted; `--force-read-only-evaluator`
-bypassing the refusal and keeping `read_only_argv`; a non-Codex backend never
-triggering the check at all.
+idempotent; and `_positionals` not mistaking an option's value for a task id. `shape` counting tasks and rounds, sharing a round between independent tasks, flagging a dependency with no evidence in the instruction while sparing one named there or named by id, and reporting the pruned round total; a task warned as verification-shaped when it writes only test paths and its **transitive** dependency reach is two or more, and not warned on one direct dependency, a source path in scope, a `read-only` scope, or a cycle; the finding staying a `warn`. The PreCompact hook: recording every task's state, naming the job, creating PROGRESS.md when absent, leaving human content intact, replacing its own block on a second compaction, writing nothing with no job, surviving a corrupt status file and an unwritable spec dir, exiting 0 as a subprocess, and leaving `spec validate` findings unchanged. ADR-0014: a failure incrementing the attempt ledger and a pass clearing it; `blocked`/`stopped` leaving it alone; `redelegate` and `start` both refusing at the budget with exit 3; `--force-retry` clearing exactly one task; `recheck` not counting while `complete_task` does; a corrupt or missing `attempts.json` reading as empty; the status row and table showing the carried count. Host execution: `finished_at` absent right after `start`, stamped by `status()` once the last task turns terminal, not stamped while one is still queued, and stamped once (idempotent on repeated calls). `evaluate` always resolving `read_only=True` regardless of backend.
 
 ADR-0012 adds, in `gates/question.py`: a justified over-budget call consuming
 its line and raising nothing; an unjustified one raising `unjustified`; the
@@ -779,11 +725,8 @@ class Ledger:
 def run(argv: list[str]) -> int
 
 # hookio.py
-HOSTS: tuple[str, ...]                                 # ("claude", "codex")
 def read_event() -> dict
-def host_from_argv(argv: list[str] | None = None) -> str   # "--host <name>", default "claude"
-def adapt_output(payload: dict | None, host: str) -> dict | None   # render the Stop block / command names per host
-def run(handler, stdin=None, exit_process=True, host: str | None = None) -> int   # never raises; always exit 0
+def run(handler, stdin=None, exit_process=True) -> int   # never raises; always exit 0
 def deny(reason: str) -> dict                          # PreToolUse deny payload
 def block_stop(reason: str) -> dict                    # Stop block payload
 def add_context(text: str) -> dict                     # UserPromptSubmit payload
@@ -816,8 +759,7 @@ def preflight(root, jdir, tasks: list[dict]) -> dict   # {"passed": [ids], "warn
 def classify_gate_result(gate: dict, argv=None) -> str  # "command_error" | "suspicious" | "expected" (ADR-0009 decision 1)
 def looks_like_command_error(gate: dict, argv=None) -> bool   # classify_gate_result(...) == "command_error"
 def stop(root, job_id: str | None = None) -> dict      # {"job_id", "stopped", "signalled", "skipped"}
-def evaluate(root, backend_name=None, prompt_path=None, timeout_s=None, lang="en", force_read_only_evaluator=False) -> dict   # raises EvaluatorSandboxError (ADR-0015)
-class EvaluatorSandboxError(ValueError)                # untrusted Codex hooks refuse workspace-write (ADR-0015)
+def evaluate(root, backend_name=None, prompt_path=None, timeout_s=None, lang="en", force_read_only_evaluator=False) -> dict   # always read-only sandbox
 def load_tasks(root: pathlib.Path) -> list[dict]       # from spec/04-tasks.md via spec.parse_fences
 def parse_screens(text: str) -> dict                   # {"S2": {"name","layout","states"}} from 02-screens.md (ADR-0011)
 def execution_mode(cfg: dict) -> str                   # "host" | "worker" (ADR-0013)
@@ -838,15 +780,4 @@ def run(argv: list[str]) -> int
 
 # doctor.py
 def diagnose(root: pathlib.Path) -> dict               # {"verdict","axes":[{"axis","verdict","detail","fix"}]}
-
-# hosts.py
-INSTALLABLE_HOSTS: tuple[str, ...]                     # ("codex",)
-def install(root: pathlib.Path, host: str, plugin_root: pathlib.Path | None = None, dry_run: bool = False) -> dict   # {"host","written":[relpaths]}
-def status(root: pathlib.Path, host: str, plugin_root: pathlib.Path | None = None) -> dict   # {"verdict","detail","fix"}
-def codex_hooks(plugin_root: pathlib.Path) -> dict     # the .codex/hooks.json document
-def codex_hooks_trusted(root: pathlib.Path) -> bool    # ADR-0015: hooks.state entry present, not just project trust_level
-def rewrite_command(text: str, plugin_root: pathlib.Path) -> str
-def merged_agents_md(existing: str | None, plugin_root: pathlib.Path) -> str
-def run(argv: list[str]) -> int
-def run(argv: list[str]) -> int
 ```

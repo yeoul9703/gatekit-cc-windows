@@ -9,7 +9,7 @@ Invoke `/gatekit:design` with the user's Figma URL, screenshot or HTML paths,
 live site URL, preset name, or pattern file as the argument.
 
 Do not read the source or extract anything here.
-`plugin/commands/design.md` is the execution instruction; this file only
+`.claude/commands/gatekit/design.md` is the execution instruction; this file only
 routes to it.
 
 If the user wants a screen-by-screen spec with flows and per-screen states,

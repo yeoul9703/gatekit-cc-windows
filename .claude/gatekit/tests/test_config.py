@@ -38,7 +38,6 @@ class TestDefaults(TempProject):
         self.assertTrue(cfg["enforce_spec_before_code"])
         self.assertEqual(cfg["worker"]["default"], "claude")
         self.assertTrue(cfg["worker"]["backends"]["claude"]["enabled"])
-        self.assertFalse(cfg["worker"]["backends"]["codex"]["enabled"])
         self.assertEqual(cfg["build"]["max_retries"], 2)
         self.assertEqual(cfg["build"]["parallel"], 3)
         self.assertEqual(cfg["build"]["task_timeout_s"], 900)
@@ -69,16 +68,15 @@ class TestDeepMerge(TempProject):
 
     def test_nested_backend_override(self) -> None:
         self.write_config(
-            {"worker": {"backends": {"codex": {"enabled": True}}}}
+            {"worker": {"backends": {"claude": {"enabled": False}}}}
         )
         cfg = config.load(self.root)
-        self.assertTrue(cfg["worker"]["backends"]["codex"]["enabled"])
+        self.assertFalse(cfg["worker"]["backends"]["claude"]["enabled"])
         # argv default survives the partial override
         self.assertEqual(
-            cfg["worker"]["backends"]["codex"]["argv"],
-            config.DEFAULTS["worker"]["backends"]["codex"]["argv"],
+            cfg["worker"]["backends"]["claude"]["argv"],
+            config.DEFAULTS["worker"]["backends"]["claude"]["argv"],
         )
-        self.assertTrue(cfg["worker"]["backends"]["claude"]["enabled"])
 
     def test_user_backend_is_added(self) -> None:
         self.write_config(

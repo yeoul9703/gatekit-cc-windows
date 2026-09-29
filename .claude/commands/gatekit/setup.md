@@ -1,19 +1,16 @@
 ---
 name: setup
-description: Initialize .gatekit/config.json and check worker backends — verify the Claude CLI, and on request explain and enable the optional sandboxed Codex backend after the user confirms.
-argument-hint: "[optional: codex]"
+description: Initialize .gatekit/config.json and check the Claude worker backend.
 allowed-tools: Read, Write, Edit, Glob, Grep, Bash
 ---
 
 # /gatekit:setup
 
-Input: `$ARGUMENTS` — `codex` to set up the optional Codex backend. Empty means
-the default setup.
+Input: `$ARGUMENTS` — unused; reserved for future backend configuration.
 
 ## Step 0 — load policy and language
 
-1. Read `.claude/gatekit/policy/language.md`. Step 5 asks the user a
-   question, so read `.claude/gatekit/policy/questioning.md` too.
+1. Read `.claude/gatekit/policy/language.md`.
 2. Detect the language:
 
 ```
@@ -51,60 +48,7 @@ Read the verdict:
   put it on PATH. Do not offer to install it for them, and do not work around it
   by enabling a bypass flag.
 
-## Step 3 — the default setup ends here
-
-Show the backend table and stop:
-
-```
-".claude/gatekit/bin/gatekit" workers list
-```
-
-Continue to Step 4 only when `$ARGUMENTS` is `codex`.
-
-## Step 4 — Codex: check first
-
-```
-".claude/gatekit/bin/gatekit" workers check codex
-```
-
-If this is `fail`, the Codex CLI is not installed. Say so and stop; there is
-nothing to enable.
-
-## Step 5 — Codex: explain, then ask
-
-Codex is disabled by default and stays that way until the user says otherwise.
-Before asking, tell them plainly, in `output_lang`, what enabling it does:
-
-- gatekit will run `codex exec --sandbox workspace-write` as a worker backend.
-- `workspace-write` lets it edit files in the project workspace and nothing
-  outside it. The sandbox stays on.
-- gatekit will not pass a bypass flag. A backend whose argv contains a bypass,
-  dangerous or yolo switch is refused unless its config entry sets
-  `"unsafe": true`, and gatekit never sets that for the user.
-- Enabling only makes the backend available. It does not become the default
-  unless they also ask for that.
-- It is reversible: set `enabled` back to `false` in `.gatekit/config.json`.
-
-Then ask for confirmation with `AskUserQuestion`, in `output_lang`, one question
-with two options: enable Codex, or leave it disabled. **Do not enable anything
-before the answer comes back.** If they decline, say nothing changed and stop.
-
-## Step 6 — Codex: enable
-
-Only after an explicit yes:
-
-```
-".claude/gatekit/bin/gatekit" workers enable codex
-```
-
-Then ask, again with `AskUserQuestion`, whether Codex should also become the
-default backend for new jobs. Only on yes:
-
-```
-".claude/gatekit/bin/gatekit" workers set-default codex
-```
-
-## Step 7 — confirm
+## Step 3 — confirm
 
 ```
 ".claude/gatekit/bin/gatekit" workers list
@@ -113,3 +57,7 @@ default backend for new jobs. Only on yes:
 
 Show the backend table and the doctor's worker axis. Report what changed in
 `output_lang`, and name the config file the change landed in.
+
+A project that wants an additional worker backend can add one to
+`.gatekit/config.json`'s `worker.backends` by hand (see `docs/USAGE.md`), then
+enable it with `workers enable <name>`.

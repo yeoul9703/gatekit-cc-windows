@@ -8,7 +8,7 @@ description: Verify the build against the completion contract using an independe
 Invoke `/gatekit:verify`, passing any criterion id the user named as the
 argument.
 
-Do not run the criteria and call that verification. `plugin/commands/verify.md`
+Do not run the criteria and call that verification. `.claude/commands/gatekit/verify.md`
 is the execution instruction; this file only routes to it.
 
 Producer is never evaluator: the command spawns a separate read-only agent, and

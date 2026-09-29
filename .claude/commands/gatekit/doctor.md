@@ -1,6 +1,6 @@
 ---
 name: doctor
-description: Diagnose the gatekit install across eight axes — plugin files, hook registration, project state, spec set, contract freshness, workers, python and the Codex host layer — then show the table and offer the printed fixes.
+description: Diagnose the gatekit install across seven axes — plugin files, hook registration, project state, spec set, contract freshness, workers, python — then show the table and offer the printed fixes.
 argument-hint: "[optional: --json]"
 allowed-tools: Read, Glob, Grep, Bash
 ---

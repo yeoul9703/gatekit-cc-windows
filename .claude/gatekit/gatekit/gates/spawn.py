@@ -34,11 +34,6 @@ from gatekit import hookio, ledger, paths  # noqa: E402
 
 FENCE_NAME = "gatekit-scope"
 
-#: Codex spawns subagents through this tool. Its hook payload carries only a
-#: task name and an encrypted message, so the scope fence cannot be read.
-#: Observed in a Codex 0.154 session; see ADR-0006.
-CODEX_SPAWN_TOOLS = ("collaborationspawn_agent",)
-
 READ_ONLY = "read-only"
 
 _FENCE_RE = re.compile(
@@ -160,17 +155,6 @@ def handle(event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
 
     led = ledger.Ledger.load(root, session)
     lang = led.output_lang
-
-    # The prompt is not visible to the hook under Codex: allow, and record
-    # that this subagent runs unscoped. Its own writes still meet the write
-    # and bash gates, which is where the scope is enforced for it.
-    if event.get("tool_name") in CODEX_SPAWN_TOOLS and "prompt" not in tool_input:
-        led.append_event(
-            "spawn_unscoped",
-            {"tool": event.get("tool_name"), "task": str(tool_input.get("task_name", ""))[:80]},
-        )
-        led.save()
-        return hookio.allow()
 
     declaration, problem = parse_scope(prompt)
     if declaration is None:

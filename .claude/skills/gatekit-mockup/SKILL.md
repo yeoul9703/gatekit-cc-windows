@@ -9,7 +9,7 @@ Invoke `/gatekit:mockup` with the user's Figma URL, file path, or screenshot
 paths as the argument.
 
 Do not read the mockup or extract anything here.
-`plugin/commands/mockup.md` is the execution instruction; this file only routes
+`.claude/commands/gatekit/mockup.md` is the execution instruction; this file only routes
 to it.
 
 If the user wants the design implemented as working code rather than specified,

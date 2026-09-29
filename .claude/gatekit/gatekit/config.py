@@ -45,11 +45,6 @@ DEFAULTS: Dict[str, Any] = {
                 ],
                 "enabled": True,
             },
-            "codex": {
-                "argv": ["codex", "exec", "--sandbox", "workspace-write"],
-                "read_only_argv": ["codex", "exec", "--sandbox", "read-only"],
-                "enabled": False,
-            },
         },
     },
     # ADR-0013: `execution` names who implements a task — "host" (the
@@ -58,11 +53,10 @@ DEFAULTS: Dict[str, Any] = {
     # fresh project discovery per task to buy a second opinion from the
     # model already present. On the `gk-trial2` run that measured this, 26
     # minutes of real work took 4.5 hours across 35 spawns. Spawn a worker
-    # when the model must actually differ (adversarial verification, a
-    # Codex host delegating to Claude) or when a round holds enough
-    # independent tasks for parallelism to pay — both decided per round,
-    # not by this default. A project that wants the old behaviour sets
-    # `"execution": "worker"` explicitly.
+    # when the model must actually differ (adversarial verification) or
+    # when a round holds enough independent tasks for parallelism to pay —
+    # both decided per round, not by this default. A project that wants the
+    # old behaviour sets `"execution": "worker"` explicitly.
     "build": {"max_retries": 2, "parallel": 3, "task_timeout_s": 900,
               "execution": "host"},
     "questions": {"interview_max_calls": 2, "items_per_call": 4},

@@ -7,7 +7,7 @@ description: Turn acceptance criteria and tasks into executable completion crite
 
 Invoke `/gatekit:gate` with any extra criteria the user named as the argument.
 
-Do not derive or approve criteria here. `plugin/commands/gate.md` is the
+Do not derive or approve criteria here. `.claude/commands/gatekit/gate.md` is the
 execution instruction; this file only routes to it.
 
 Approval is always the user's action, taken through the command's

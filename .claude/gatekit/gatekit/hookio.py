@@ -20,7 +20,6 @@ from __future__ import annotations
 import datetime
 import json
 import pathlib
-import re
 import sys
 from typing import Any, Callable, Dict, Optional, TextIO
 
@@ -28,14 +27,6 @@ from . import paths
 
 #: Upper bound on injected UserPromptSubmit context (ARCHITECTURE.md section 3).
 MAX_CONTEXT_CHARS = 600
-
-#: Hosts whose hook protocol the gates can speak. Codex CLI sends the same
-#: stdin JSON as Claude Code (session_id, cwd, tool_name, tool_input, prompt)
-#: and accepts the same deny and additionalContext payloads; only its Stop
-#: block differs. A gate learns its host from ``--host <name>`` on its own
-#: argv; anything unknown is treated as Claude Code.
-HOSTS = ("claude", "codex")
-DEFAULT_HOST = "claude"
 
 Event = Dict[str, Any]
 Handler = Callable[[Event], Optional[Dict[str, Any]]]
@@ -118,51 +109,6 @@ def add_context(text: str) -> Optional[Dict[str, Any]]:
 
 
 # --------------------------------------------------------------------------
-# host adaptation
-# --------------------------------------------------------------------------
-def host_from_argv(argv: Optional[list] = None) -> str:
-    """Read ``--host <name>`` from *argv* (default: the process argv)."""
-    args = list(sys.argv[1:] if argv is None else argv)
-    for index, item in enumerate(args):
-        if item == "--host" and index + 1 < len(args):
-            return args[index + 1] if args[index + 1] in HOSTS else DEFAULT_HOST
-        if item.startswith("--host="):
-            value = item.split("=", 1)[1]
-            return value if value in HOSTS else DEFAULT_HOST
-    return DEFAULT_HOST
-
-
-def adapt_output(payload: Optional[Dict[str, Any]], host: str) -> Optional[Dict[str, Any]]:
-    """Render a gate payload in *host*'s dialect.
-
-    Only the Stop block differs today: Claude Code reads a top-level
-    ``decision: block``; Codex reads ``continue: false`` with ``stopReason``.
-    """
-    if payload is None or host == DEFAULT_HOST:
-        return payload
-    if host == "codex":
-        if payload.get("decision") == "block" and "hookSpecificOutput" not in payload:
-            return {"continue": False, "stopReason": _codex_names(str(payload.get("reason", "")))}
-        inner = payload.get("hookSpecificOutput")
-        if isinstance(inner, dict):
-            inner = dict(inner)
-            for key in ("permissionDecisionReason", "additionalContext"):
-                if isinstance(inner.get(key), str):
-                    inner[key] = _codex_names(inner[key])
-            payload = dict(payload)
-            payload["hookSpecificOutput"] = inner
-    return payload
-
-
-_COMMAND_NAME_RE = re.compile(r"/gatekit:([a-z-]+)")
-
-
-def _codex_names(text: str) -> str:
-    """Commands are skills under Codex: ``/gatekit:x`` reads as ``$gatekit-x``."""
-    return _COMMAND_NAME_RE.sub(r"$gatekit-\1", text)
-
-
-# --------------------------------------------------------------------------
 # error logging
 # --------------------------------------------------------------------------
 def log_error(root: pathlib.Path, event_name: str, err: BaseException) -> None:
@@ -190,12 +136,8 @@ def run(
     handler: Handler,
     stdin: Optional[TextIO] = None,
     exit_process: bool = True,
-    host: Optional[str] = None,
 ) -> int:
     """Read the event, call *handler*, print its payload, and exit 0.
-
-    *host* selects the output dialect (:func:`adapt_output`); when omitted it
-    is read from ``--host`` on the process argv.
 
     Never raises. Any exception from the handler (including
     ``KeyboardInterrupt`` and a payload that will not serialize) is logged and
@@ -208,7 +150,7 @@ def run(
     code = 0
     try:
         event = read_event(stdin)
-        payload = adapt_output(handler(event), host or host_from_argv())
+        payload = handler(event)
         if payload:
             sys.stdout.write(json.dumps(payload, ensure_ascii=False))
             sys.stdout.write("\n")

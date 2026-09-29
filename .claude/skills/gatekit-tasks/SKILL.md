@@ -8,7 +8,7 @@ description: Break an existing spec into vertical-slice tasks with non-overlappi
 Invoke `/gatekit:tasks` with any constraints the user mentioned as the
 argument.
 
-Do not decompose anything here. `plugin/commands/tasks.md` is the execution
+Do not decompose anything here. `.claude/commands/gatekit/tasks.md` is the execution
 instruction; this file only routes to it.
 
 The command requires `spec/01-prd.md` to exist. If it does not, route to

@@ -9,8 +9,8 @@ Detection counts letters only: Hangul syllables and jamo against Latin letters.
 Digits and punctuation are ignored, and so are whitespace-delimited tokens that
 are paths or code identifiers (they contain ``/``, ``.``, ``_``, ``\\`` or a
 backtick inside them), so ``src/auth/token.ts 를 고쳐줘`` is Korean even though
-most of its characters are ASCII. A session observed in Codex switched to
-English on ``src/hello.ts 만들어줘`` before this rule existed.
+most of its characters are ASCII. Without this rule, ``src/hello.ts 만들어줘``
+would misdetect as English.
 """
 from __future__ import annotations
 
@@ -87,11 +87,9 @@ def carries_signal(text: Optional[str]) -> bool:
     """Whether *text* says anything about which language the user is writing in.
 
     `"1"`, `"2."`, `"ok 3"` and a bare path carry none: they are the same
-    keystrokes in either language. Answering a numbered list that way is the
-    *normal* path under Codex, which has no `AskUserQuestion` and asks its
-    options as plain-chat numbers — so treating those replies as an English
-    signal silently switched a Korean session to English mid-interview
-    (observed on a real Codex run, 2026-09-27).
+    keystrokes in either language. Treating a short numbered reply (e.g. an
+    `AskUserQuestion` option) as an English signal would silently switch a
+    Korean session to English mid-interview.
 
     A caller that refreshes a stored language must ask this first; `detect`
     alone cannot tell "no evidence" from "evidence of English", because it

@@ -43,14 +43,12 @@ NON_PIPELINE_COMMANDS = ("doctor", "setup")
 #: it. For a slash command the prompt body is the tagged form
 #: ``<command-message>…</command-message>\n<command-name>/gatekit:<name></command-name>\n<command-args>…``
 #: (observed in session transcripts); the bare ``/gatekit:<name>`` at the
-#: start of a prompt, the ``# /gatekit:<name>`` title line of an expanded
-#: command body, and Codex's ``$gatekit-<name>`` skill invocation are
-#: accepted too. A mention mid-sentence is conversation, not
+#: start of a prompt and the ``# /gatekit:<name>`` title line of an expanded
+#: command body are accepted too. A mention mid-sentence is conversation, not
 #: an invocation.
 _INVOCATION_RE = re.compile(
     r"(?:<command-name>\s*/gatekit:([a-z-]+)\s*</command-name>)"
-    r"|(?:^\s*(?:#\s+)?/gatekit:([a-z-]+)\b)"
-    r"|(?:^\s*(?:#\s+)?\$gatekit-([a-z-]+)\b)",
+    r"|(?:^\s*(?:#\s+)?/gatekit:([a-z-]+)\b)",
     re.MULTILINE,
 )
 #: Only the leading lines of the prompt are inspected.
@@ -58,7 +56,6 @@ _HEAD_LINES = 12
 
 
 _ARGS_RE = re.compile(r"<command-args>(.*?)</command-args>", re.DOTALL)
-_SKILL_PREFIX_RE = re.compile(r"^\s*\$gatekit-[a-z-]+\b")
 
 
 def language_signal(text: str) -> str:
@@ -71,8 +68,7 @@ def language_signal(text: str) -> str:
     if "<command-name>" in text:
         match = _ARGS_RE.search(text)
         return match.group(1) if match else ""
-    # Codex skill syntax: the name is an identifier, the rest is the user's.
-    return _SKILL_PREFIX_RE.sub("", text, count=1)
+    return text
 
 
 def detect_command(text: str) -> Optional[str]:
@@ -81,7 +77,7 @@ def detect_command(text: str) -> Optional[str]:
     match = _INVOCATION_RE.search(head)
     if not match:
         return None
-    return match.group(1) or match.group(2) or match.group(3)
+    return match.group(1) or match.group(2)
 
 
 def apply_command(led: "ledger.Ledger", text: str) -> None:
@@ -210,12 +206,9 @@ def handle(event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     # Keep the stored language unless this prompt actually says something
     # about which language the user is writing in. An empty prompt carries no
     # signal; neither does "1", "2." or a bare path, which are the same
-    # keystrokes in either language. That last case is not an edge case under
-    # Codex: with no `AskUserQuestion` there, commands ask their options as
-    # numbered plain chat, so a Korean interview answered "1" used to flip to
-    # English and stay there (observed on a real Codex run, 2026-09-27).
-    # A slash command's tag body is not the user's words either: only the
-    # <command-args> content counts.
+    # keystrokes in either language — a Korean interview answered "1" must
+    # not flip the session to English. A slash command's tag body is not the
+    # user's words either: only the <command-args> content counts.
     signal = language_signal(text)
     if lang.carries_signal(signal):
         led.set_output_lang(lang.detect(signal))

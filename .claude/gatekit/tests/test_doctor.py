@@ -1,8 +1,6 @@
-"""Tests for gatekit.doctor — 8 axes, fault-injected one at a time.
+"""Tests for gatekit.doctor — 7 axes, fault-injected one at a time.
 
-HOME is redirected to a temp directory in every test so axis 2 never reads the
-developer's real Claude install, and `unverified` is asserted as itself rather
-than rounded to ok or fail.
+`unverified` is asserted as itself rather than rounded to ok or fail.
 """
 from __future__ import annotations
 
@@ -29,40 +27,31 @@ class DoctorTestCase(unittest.TestCase):
         self.root = pathlib.Path(os.path.realpath(self._tmp.name))
         (self.root / ".gatekit").mkdir()
 
-        self._home = tempfile.TemporaryDirectory()
-        self.home = pathlib.Path(os.path.realpath(self._home.name))
-        self._old_home = os.environ.get("HOME")
-        os.environ["HOME"] = str(self.home)
-
         self._old_path = os.environ.get("PATH", "")
         self._bin = tempfile.TemporaryDirectory()
         self.bindir = pathlib.Path(os.path.realpath(self._bin.name))
         os.environ["PATH"] = str(self.bindir)
 
     def tearDown(self) -> None:
-        if self._old_home is None:
-            os.environ.pop("HOME", None)
-        else:
-            os.environ["HOME"] = self._old_home
         os.environ["PATH"] = self._old_path
         self._bin.cleanup()
-        self._home.cleanup()
         self._tmp.cleanup()
 
     # -- helpers ---------------------------------------------------------
 
-    def install_manifest(self, contains_gatekit: bool = True, enabled=True, nested: bool = True,
-                         extra=None) -> None:
-        directory = self.home / ".claude" / "plugins"
+    def write_project_settings(self, hooks) -> None:
+        directory = self.root / ".claude"
         directory.mkdir(parents=True, exist_ok=True)
-        table = {"gatekit@gatekit": {"version": "0.1.0"}} if contains_gatekit else {"other@x": {}}
-        if extra:
-            table.update(extra)
-        payload = {"version": 2, "plugins": table} if nested else table
-        (directory / "installed_plugins.json").write_text(json.dumps(payload), encoding="utf-8")
-        if enabled is not None:
-            settings = {"enabledPlugins": {"gatekit@gatekit": bool(enabled)}}
-            (self.home / ".claude" / "settings.json").write_text(json.dumps(settings), encoding="utf-8")
+        (directory / "settings.json").write_text(
+            json.dumps({"hooks": hooks}), encoding="utf-8"
+        )
+
+    def standalone_hooks(self) -> dict:
+        """A minimal hooks object shaped like the real .claude/settings.json,
+        with every expected event routed through bin/gatekit."""
+        entry = {"hooks": [{"type": "command",
+                            "command": "\"$CLAUDE_PROJECT_DIR/.claude/gatekit/bin/gatekit\" _gate write"}]}
+        return {event: [entry] for event in doctor.EXPECTED_HOOK_EVENTS}
 
     def stub_claude(self) -> None:
         path = self.bindir / "claude"
@@ -77,9 +66,9 @@ class DoctorTestCase(unittest.TestCase):
 
 
 class TestReportShape(DoctorTestCase):
-    def test_eight_axes_each_with_the_required_keys(self) -> None:
+    def test_seven_axes_each_with_the_required_keys(self) -> None:
         report = doctor.diagnose(self.root)
-        self.assertEqual(len(report["axes"]), 8)
+        self.assertEqual(len(report["axes"]), 7)
         for axis in report["axes"]:
             for key in ("axis", "verdict", "detail", "fix"):
                 self.assertIn(key, axis)
@@ -110,10 +99,9 @@ class TestAxisPluginFiles(DoctorTestCase):
 
     def test_missing_gate_script_fails_axis_1(self) -> None:
         fake_plugin = self.root / "fakeplugin"
-        (fake_plugin / ".claude-plugin").mkdir(parents=True)
-        (fake_plugin / ".claude-plugin" / "plugin.json").write_text("{}", encoding="utf-8")
-        (fake_plugin / "hooks").mkdir()
-        (fake_plugin / "hooks" / "hooks.json").write_text("{}", encoding="utf-8")
+        (fake_plugin / "bin").mkdir(parents=True)
+        (fake_plugin / "bin" / "gatekit").write_text("#!/usr/bin/env sh\n", encoding="utf-8")
+        (fake_plugin / "bin" / "gatekit.py").write_text("# launcher\n", encoding="utf-8")
         gates = fake_plugin / "gatekit" / "gates"
         gates.mkdir(parents=True)
         for name in doctor.GATE_SCRIPTS[:-1]:
@@ -131,10 +119,9 @@ class TestAxisPluginFiles(DoctorTestCase):
 
     def test_empty_gate_script_fails_axis_1(self) -> None:
         fake_plugin = self.root / "fakeplugin2"
-        (fake_plugin / ".claude-plugin").mkdir(parents=True)
-        (fake_plugin / ".claude-plugin" / "plugin.json").write_text("{}", encoding="utf-8")
-        (fake_plugin / "hooks").mkdir()
-        (fake_plugin / "hooks" / "hooks.json").write_text("{}", encoding="utf-8")
+        (fake_plugin / "bin").mkdir(parents=True)
+        (fake_plugin / "bin" / "gatekit").write_text("#!/usr/bin/env sh\n", encoding="utf-8")
+        (fake_plugin / "bin" / "gatekit.py").write_text("# launcher\n", encoding="utf-8")
         gates = fake_plugin / "gatekit" / "gates"
         gates.mkdir(parents=True)
         for name in doctor.GATE_SCRIPTS:
@@ -154,52 +141,40 @@ class TestAxisPluginFiles(DoctorTestCase):
 
 
 class TestAxisHooksRegistered(DoctorTestCase):
-    def test_no_install_manifest_is_unverified_not_fail(self) -> None:
-        result = doctor.axis_hooks_registered(self.root)
-        self.assertEqual(result["verdict"], verdict.UNVERIFIED)
-
-    def test_manifest_listing_gatekit_is_ok(self) -> None:
-        self.install_manifest(True)
-        self.assertEqual(doctor.axis_hooks_registered(self.root)["verdict"], verdict.OK)
-
-    def test_flat_legacy_manifest_is_ok(self) -> None:
-        self.install_manifest(True, nested=False)
-        self.assertEqual(doctor.axis_hooks_registered(self.root)["verdict"], verdict.OK)
-
-    def test_installed_but_disabled_fails(self) -> None:
-        self.install_manifest(True, enabled=False)
+    def test_no_project_settings_fails(self) -> None:
         result = doctor.axis_hooks_registered(self.root)
         self.assertEqual(result["verdict"], verdict.FAIL)
-        self.assertIn("disabled", result["detail"])
-        self.assertIn("enable", result["fix"])
 
-    def test_installed_without_enabled_entry_is_unverified(self) -> None:
-        self.install_manifest(True, enabled=None)
-        self.assertEqual(doctor.axis_hooks_registered(self.root)["verdict"], verdict.UNVERIFIED)
+    def test_full_registration_is_ok(self) -> None:
+        self.write_project_settings(self.standalone_hooks())
+        self.assertEqual(doctor.axis_hooks_registered(self.root)["verdict"], verdict.OK)
 
-    def test_substring_mention_in_other_plugin_is_not_installed(self) -> None:
-        self.install_manifest(False, extra={"other@x": {"description": "works with gatekit"}})
+    def test_missing_event_fails(self) -> None:
+        hooks = self.standalone_hooks()
+        del hooks["Stop"]
+        self.write_project_settings(hooks)
+        result = doctor.axis_hooks_registered(self.root)
+        self.assertEqual(result["verdict"], verdict.FAIL)
+        self.assertIn("Stop", result["detail"])
+
+    def test_hooks_not_routed_through_wrapper_fails(self) -> None:
+        hooks = {event: [{"hooks": [{"type": "command", "command": "python3 somewhere.py"}]}]
+                 for event in doctor.EXPECTED_HOOK_EVENTS}
+        self.write_project_settings(hooks)
+        result = doctor.axis_hooks_registered(self.root)
+        self.assertEqual(result["verdict"], verdict.FAIL)
+
+    def test_no_hooks_object_fails(self) -> None:
+        directory = self.root / ".claude"
+        directory.mkdir(parents=True, exist_ok=True)
+        (directory / "settings.json").write_text(json.dumps({}), encoding="utf-8")
         self.assertEqual(doctor.axis_hooks_registered(self.root)["verdict"], verdict.FAIL)
 
-    def test_manifest_without_gatekit_fails(self) -> None:
-        self.install_manifest(False)
-        result = doctor.axis_hooks_registered(self.root)
-        self.assertEqual(result["verdict"], verdict.FAIL)
-        self.assertIn("install", result["fix"])
-
-    def test_unparseable_manifest_is_unverified(self) -> None:
-        directory = self.home / ".claude" / "plugins"
-        directory.mkdir(parents=True)
-        (directory / "installed_plugins.json").write_text("{not json", encoding="utf-8")
+    def test_unparseable_settings_is_unverified(self) -> None:
+        directory = self.root / ".claude"
+        directory.mkdir(parents=True, exist_ok=True)
+        (directory / "settings.json").write_text("{not json", encoding="utf-8")
         self.assertEqual(doctor.axis_hooks_registered(self.root)["verdict"], verdict.UNVERIFIED)
-
-    def test_missing_home_is_unverified(self) -> None:
-        os.environ.pop("HOME", None)
-        try:
-            result = doctor.axis_hooks_registered(self.root)
-        finally:
-            os.environ["HOME"] = str(self.home)
-        self.assertEqual(result["verdict"], verdict.UNVERIFIED)
 
 
 # ------------------------------------------------------------------- axis 3
@@ -362,7 +337,7 @@ class TestCli(DoctorTestCase):
         with contextlib.redirect_stdout(buf):
             doctor.run(["--json", "--root", str(self.root)])
         report = json.loads(buf.getvalue())
-        self.assertEqual(len(report["axes"]), 8)
+        self.assertEqual(len(report["axes"]), 7)
 
     def test_exit_1_when_any_axis_fails(self) -> None:
         import contextlib

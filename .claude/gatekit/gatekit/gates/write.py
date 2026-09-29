@@ -8,12 +8,6 @@ Two independent rules, either of which can deny a write:
 Documentation and the spec set itself stay writable throughout, otherwise there
 would be no way to produce the spec that unlocks the gate.
 
-Codex edits files through ``apply_patch``; its ``tool_input.command`` is the
-patch text, whose ``*** Add File:`` / ``*** Update File:`` / ``*** Delete
-File:`` / ``*** Move to:`` lines name every file touched. Each named file is
-judged exactly like a Write call, and a patch that names no file is refused
-while a rule is active — "could not tell" is not rounded to "allowed".
-
 **(b) task write scope.** When ``GATEKIT_TASK_ID`` is set — which happens only
 inside a worker session spawned by :mod:`gatekit.jobs` — the write must fall
 inside that task's declared ``write_scope``. This is what stops two parallel
@@ -29,7 +23,6 @@ import fnmatch
 import json
 import os
 import pathlib
-import re
 from typing import Any, Dict, List, Optional
 
 if __name__ == "__main__" or __package__ in (None, ""):  # pragma: no cover
@@ -53,13 +46,6 @@ SPEC_ALLOWLIST = (
 )
 
 GATE_TARGET = "spec/05-gate.md"
-
-#: Codex's file-editing tool; the patch text carries the file names.
-PATCH_TOOL = "apply_patch"
-_PATCH_FILE_RE = re.compile(
-    r"^\*\*\*\s+(?:Add File|Update File|Delete File|Move to):\s*(?P<path>.+?)\s*$",
-    re.MULTILINE,
-)
 
 _MESSAGES = {
     "en": {
@@ -85,11 +71,6 @@ _MESSAGES = {
             "gatekit: task '{task}' may not write outside the project root. "
             "Blocked path: {path}"
         ),
-        "patch_opaque": (
-            "gatekit: cannot determine which files this patch touches (no "
-            "*** Add/Update/Delete File lines), and writes are currently "
-            "restricted. Rewrite the patch with explicit file headers."
-        ),
     },
     "ko": {
         "spec_first": (
@@ -113,11 +94,6 @@ _MESSAGES = {
             "gatekit: '{task}' 작업은 프로젝트 루트 밖에 쓸 수 없습니다. "
             "차단된 경로: {path}"
         ),
-        "patch_opaque": (
-            "gatekit: 이 패치가 어떤 파일을 건드리는지 판별할 수 없고(*** Add/Update/"
-            "Delete File 줄 없음) 현재 쓰기가 제한된 상태입니다. 파일 헤더를 명시한 "
-            "패치로 다시 쓰세요."
-        ),
     },
 }
 
@@ -139,16 +115,6 @@ def target_path(tool_input: Dict[str, Any]) -> str:
         if isinstance(value, str) and value.strip():
             return value
     return ""
-
-
-def patch_targets(patch_text: str) -> List[str]:
-    """Every file an ``apply_patch`` body names, in order, without duplicates."""
-    seen: List[str] = []
-    for match in _PATCH_FILE_RE.finditer(patch_text or ""):
-        path = match.group("path").strip()
-        if path and path not in seen:
-            seen.append(path)
-    return seen
 
 
 def relative_target(root: pathlib.Path, raw_path: str) -> Optional[str]:
@@ -325,20 +291,6 @@ def handle(event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """Decide whether this write may proceed."""
     root = hookio.event_root(event)
     tool_input = event.get("tool_input") or {}
-
-    if event.get("tool_name") == PATCH_TOOL:
-        if not restrictions_active(root):
-            return hookio.allow()
-        lang = session_lang(root, event)
-        text = tool_input.get("command") if isinstance(tool_input, dict) else ""
-        targets = patch_targets(text if isinstance(text, str) else "")
-        if not targets:
-            return hookio.deny(_message(lang, "patch_opaque"))
-        for target in targets:
-            decision = decide_path(root, target, lang)
-            if decision is not None:
-                return decision
-        return hookio.allow()
 
     raw_path = target_path(tool_input)
     if not raw_path:

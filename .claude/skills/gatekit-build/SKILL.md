@@ -7,7 +7,7 @@ description: Run the tasks in spec/04-tasks.md as gated worker jobs — spawn a 
 
 Invoke `/gatekit:build`, passing any task ids the user named as the argument.
 
-Do not implement tasks here. `plugin/commands/build.md` is the execution
+Do not implement tasks here. `.claude/commands/gatekit/build.md` is the execution
 instruction; this file only routes to it.
 
 Two things the command enforces and this shim must not undercut: the main

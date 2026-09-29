@@ -3,7 +3,8 @@
 A backend is a named argv prefix that runs an agent non-interactively; the
 prompt arrives on stdin. Backends come from `.gatekit/config.json`
 (`worker.backends`) deep-merged over `config.DEFAULTS`, so a fresh project has
-`claude` enabled and `codex` disabled without any file on disk.
+`claude` enabled without any file on disk. A project may add its own backend
+entries (e.g. for another CLI) in `.gatekit/config.json`.
 
 Unsafe-flag rule: an argv that contains any of UNSAFE_MARKERS (a bypass /
 dangerous / yolo switch) must opt in explicitly with `"unsafe": true`. `resolve`
@@ -88,7 +89,7 @@ def evaluator_choice(root, host: Optional[str] = None) -> tuple:
         return name, ""
     return "agent", (
         "no enabled backend differs from the host (%s), so the grader is the "
-        "same model that wrote the code; enable one with `/gatekit:setup codex`"
+        "same model that wrote the code"
         % (host_name or "unknown")
     )
 
@@ -274,7 +275,7 @@ def _usage() -> str:
         "  list [--json]          show every backend, its argv and state\n"
         "  check <name> [--probe] probe the executable; --probe also sends one prompt through it\n"
         "  set-default <name>     make <name> the default worker backend\n"
-        "  enable <name>          enable a backend (e.g. codex)\n"
+        "  enable <name>          enable a backend\n"
         "  set-evaluator <name>   who grades in verify: agent (default) or a backend name\n"
     )
 

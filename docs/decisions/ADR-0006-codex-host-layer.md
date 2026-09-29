@@ -1,3 +1,7 @@
+> **Not adopted in this fork.** This repository runs gatekit as a standalone,
+> Claude-Code-only install (no plugin manager, no other host). Codex support
+> described below was removed; kept here for history only.
+
 # ADR-0006: Codex CLI as a second host, served by a generated layer, not a second source
 
 ## Context

@@ -30,16 +30,20 @@ def _axis(name, v, detail, fix=""):
 
 
 def axis_plugin_files(root) -> dict:
+    """Standalone layout check: bin/gatekit, bin/gatekit.py and the gate
+    scripts must exist under ``<root>/.claude/gatekit``. There is no plugin
+    manager in standalone mode, so nothing is "installed" — the files simply
+    have to be present on disk, checked out with the rest of the project."""
     try:
         proot = paths.gatekit_root()
     except Exception as exc:
         return _axis("plugin files", verdict.FAIL,
-                     "could not locate the plugin root: %s" % exc, "")
+                     "could not locate the gatekit root: %s" % exc, "")
     missing = []
-    if not (proot / ".claude-plugin" / "plugin.json").is_file():
-        missing.append(".claude-plugin/plugin.json")
-    if not (proot / "hooks" / "hooks.json").is_file():
-        missing.append("hooks/hooks.json")
+    if not (proot / "bin" / "gatekit").is_file():
+        missing.append("bin/gatekit")
+    if not (proot / "bin" / "gatekit.py").is_file():
+        missing.append("bin/gatekit.py")
     gates = proot / "gatekit" / "gates"
     for script in GATE_SCRIPTS:
         path = gates / script
@@ -51,27 +55,17 @@ def axis_plugin_files(root) -> dict:
         return _axis(
             "plugin files", verdict.FAIL,
             "missing or empty: %s" % ", ".join(missing),
-            "reinstall the plugin: /plugin install gatekit",
+            "restore the missing files from git (git checkout .claude/gatekit)",
         )
     return _axis("plugin files", verdict.OK,
-                 "plugin.json, hooks.json and %d gate scripts present" % len(GATE_SCRIPTS))
+                 "bin/gatekit, bin/gatekit.py and %d gate scripts present" % len(GATE_SCRIPTS))
 
 
 # ------------------------------------------------------------------- axis 2
 
 
-def _installed_plugins_path():
-    home = os.environ.get("HOME")
-    if not home:
-        return None
-    return os.path.join(home, ".claude", "plugins", "installed_plugins.json")
-
-
-def _settings_path():
-    home = os.environ.get("HOME")
-    if not home:
-        return None
-    return os.path.join(home, ".claude", "settings.json")
+def _project_settings_path(root):
+    return os.path.join(str(root), ".claude", "settings.json")
 
 
 def _read_json(path):
@@ -79,73 +73,38 @@ def _read_json(path):
         return json.load(handle)
 
 
-def _installed_keys(data) -> list:
-    """Return the plugin keys (``name@marketplace``) that name gatekit.
-
-    ``installed_plugins.json`` nests entries under ``plugins`` in current
-    Claude Code releases; older layouts kept them at the top level. Both are
-    read structurally — never by searching the serialized text — so a plugin
-    whose description merely mentions gatekit does not count as installed.
-    """
-    if not isinstance(data, dict):
-        return []
-    table = data.get("plugins") if isinstance(data.get("plugins"), dict) else data
-    keys = []
-    for key in table:
-        if not isinstance(key, str):
-            continue
-        name = key.split("@", 1)[0]
-        if name == "gatekit":
-            keys.append(key)
-    return keys
-
-
 def axis_hooks_registered(root) -> dict:
-    path = _installed_plugins_path()
-    if not path:
-        return _axis("hooks registered", verdict.UNVERIFIED,
-                     "HOME is not set; cannot inspect the running install", "")
+    """Standalone mode registers hooks in the project's own
+    ``.claude/settings.json`` (no plugin manager, so nothing to enable/disable
+    globally) — this axis just checks that every expected hook event routes
+    through ``bin/gatekit``."""
+    path = _project_settings_path(root)
     if not os.path.isfile(path):
-        return _axis("hooks registered", verdict.UNVERIFIED,
-                     "no installed_plugins.json under ~/.claude/plugins; "
-                     "running from a source checkout?",
-                     "/plugin install gatekit")
+        return _axis("hooks registered", verdict.FAIL,
+                     "no .claude/settings.json in this project; hooks will not fire",
+                     "restore .claude/settings.json from git")
     try:
-        data = _read_json(path)
+        settings = _read_json(path)
     except (OSError, ValueError) as exc:
         return _axis("hooks registered", verdict.UNVERIFIED,
-                     "installed_plugins.json unreadable: %s" % exc, "")
-    keys = _installed_keys(data)
-    if not keys:
+                     ".claude/settings.json unreadable: %s" % exc, "")
+    hooks = settings.get("hooks") if isinstance(settings, dict) else None
+    if not isinstance(hooks, dict):
         return _axis("hooks registered", verdict.FAIL,
-                     "gatekit is not listed in installed_plugins.json; "
-                     "hooks will not fire",
-                     "/plugin install gatekit")
-
-    # Installed is not enabled. A disabled plugin has files on disk and no
-    # hooks firing — the state that looks healthy while enforcing nothing.
-    settings_path = _settings_path()
-    enabled = None
-    if settings_path and os.path.isfile(settings_path):
-        try:
-            settings = _read_json(settings_path)
-        except (OSError, ValueError) as exc:
-            return _axis("hooks registered", verdict.UNVERIFIED,
-                         "installed as %s but settings.json unreadable: %s" % (keys[0], exc), "")
-        table = settings.get("enabledPlugins") if isinstance(settings, dict) else None
-        if isinstance(table, dict):
-            enabled = any(table.get(k) is True for k in keys)
-    if enabled is None:
-        return _axis("hooks registered", verdict.UNVERIFIED,
-                     "installed as %s but no enabledPlugins entry found in settings.json" % keys[0],
-                     "/plugin enable %s" % keys[0])
-    if not enabled:
+                     ".claude/settings.json has no \"hooks\" object; hooks will not fire",
+                     "restore .claude/settings.json from git")
+    missing = [event for event in EXPECTED_HOOK_EVENTS if not hooks.get(event)]
+    if missing:
         return _axis("hooks registered", verdict.FAIL,
-                     "installed as %s but disabled in settings.json enabledPlugins; "
-                     "hooks will not fire" % keys[0],
-                     "/plugin enable %s" % keys[0])
+                     "missing hook registration(s): %s" % ", ".join(missing),
+                     "restore .claude/settings.json from git")
+    as_text = json.dumps(hooks)
+    if "bin/gatekit" not in as_text:
+        return _axis("hooks registered", verdict.FAIL,
+                     "hooks are registered but do not call bin/gatekit",
+                     "restore .claude/settings.json from git")
     return _axis("hooks registered", verdict.OK,
-                 "gatekit installed and enabled as %s" % keys[0])
+                 "all %d hook events registered via bin/gatekit" % len(EXPECTED_HOOK_EVENTS))
 
 
 # ------------------------------------------------------------------- axis 3
@@ -267,24 +226,6 @@ def axis_python(root) -> dict:
     return _axis("python", verdict.OK, "python %s" % current)
 
 
-# ------------------------------------------------------------------- axis 8
-
-
-def axis_host_layer(root) -> dict:
-    """A generated Codex host layer, when present, must point at real gates.
-
-    Absent is ``ok``: a Claude Code project needs none. Present but broken is
-    ``fail``. Whether Codex trusts the project and loads the hooks cannot be
-    read from here, and the detail says so.
-    """
-    from gatekit import hosts
-
-    result = hosts.status(root, "codex")
-    if result["verdict"] == verdict.UNVERIFIED:
-        return _axis("host layer", verdict.OK, "no Codex host layer (Claude Code plugin serves this project)", "")
-    return _axis("host layer", result["verdict"], "codex: " + result["detail"], result.get("fix", ""))
-
-
 AXES = (
     axis_plugin_files,
     axis_hooks_registered,
@@ -293,7 +234,6 @@ AXES = (
     axis_contract_freshness,
     axis_workers,
     axis_python,
-    axis_host_layer,
 )
 
 

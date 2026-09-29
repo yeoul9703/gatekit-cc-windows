@@ -14,9 +14,8 @@ Input: `$ARGUMENTS` — optional comma-separated task ids. Empty means every tas
 session of the same model, paying a fresh project discovery per task to buy
 a second opinion from the model already here. Under `worker` workers do and
 you never edit a task's files. Either way **the gates decide, never your own
-report.** Hand a task to a worker only when the model must differ (Codex for
-verification, a Codex host delegating to Claude) or a round holds three or
-more independent tasks.
+report.** Hand a task to a worker only when the model must differ (adversarial
+verification) or a round holds three or more independent tasks.
 
 ## Step 0 — load policy and language
 

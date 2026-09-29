@@ -7,7 +7,7 @@ description: Turn a rough product idea into a validated PRD and architecture spe
 
 Invoke `/gatekit:interview` with the user's text as the argument.
 
-Do not run the interview steps here. `plugin/commands/interview.md` is the
+Do not run the interview steps here. `.claude/commands/gatekit/interview.md` is the
 execution instruction; this file only routes to it.
 
 Pass the user's own wording through, unparaphrased — the command detects the

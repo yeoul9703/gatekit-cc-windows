@@ -255,40 +255,6 @@ if __name__ == "__main__":  # pragma: no cover
     unittest.main()
 
 
-class TestCodexSpawnTool(unittest.TestCase):
-    """Codex's collaborationspawn_agent hides the prompt; the gate allows and
-    records that the subagent is unscoped instead of denying every spawn."""
-
-    def setUp(self) -> None:
-        import tempfile
-        self._tmp = tempfile.TemporaryDirectory()
-        self.root = pathlib.Path(os.path.realpath(self._tmp.name))
-        (self.root / ".gatekit").mkdir()
-
-    def tearDown(self) -> None:
-        self._tmp.cleanup()
-
-    def test_codex_spawn_without_prompt_is_allowed_and_recorded(self) -> None:
-        event = {
-            "session_id": "cx", "hook_event_name": "PreToolUse", "cwd": str(self.root),
-            "tool_name": "collaborationspawn_agent",
-            "tool_input": {"task_name": "folder_summary", "message": "gAAAA-encrypted"},
-        }
-        self.assertIsNone(spawn_gate.handle(event))
-        led = ledger.Ledger.load(self.root, "cx")
-        kinds = [e["kind"] for e in led.data["events"]]
-        self.assertIn("spawn_unscoped", kinds)
-        self.assertEqual(led.data["scopes"], [])
-
-    def test_codex_spawn_with_prompt_is_still_checked(self) -> None:
-        event = {
-            "session_id": "cx", "hook_event_name": "PreToolUse", "cwd": str(self.root),
-            "tool_name": "collaborationspawn_agent",
-            "tool_input": {"prompt": "no fence here"},
-        }
-        self.assertIsNotNone(spawn_gate.handle(event))
-
-
 class TestUnmanagedProject(unittest.TestCase):
     """A project gatekit does not manage is none of the gate's business.
 
