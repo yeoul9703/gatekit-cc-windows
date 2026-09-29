@@ -29,7 +29,32 @@ SUBCOMMANDS = {
 GATES = ("prompt", "write", "bash", "spawn", "question", "compact", "stop", "tokens")
 
 
+def _force_utf8_stdio() -> None:
+    """Make stdin/stdout/stderr UTF-8 regardless of the console code page.
+
+    Hooks receive JSON on stdin and answer JSON on stdout, and Claude Code
+    speaks UTF-8 both ways. Python on Windows otherwise uses the ANSI code
+    page (cp1252/cp949) for pipes, which turns Korean prompts into mojibake and
+    writes non-UTF-8 bytes (e.g. an em dash as 0x97) that the reader decodes as
+    U+FFFD. On macOS/Linux the streams are already UTF-8, so this is a no-op
+    there. Streams without ``reconfigure`` (test doubles) are left alone.
+    """
+    for name, errors in (("stdin", "replace"), ("stdout", "replace"), ("stderr", "replace")):
+        stream = getattr(sys, name, None)
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is None:
+            continue
+        try:
+            if name == "stdin":
+                reconfigure(encoding="utf-8", errors=errors)
+            else:
+                reconfigure(encoding="utf-8", errors=errors, newline="\n")
+        except (ValueError, OSError):  # pragma: no cover - detached/closed stream
+            pass
+
+
 def main(argv: list[str] | None = None) -> int:
+    _force_utf8_stdio()
     argv = list(sys.argv[1:] if argv is None else argv)
     if not argv or argv[0] in ("-h", "--help", "help"):
         print("usage: python3 -m gatekit <subcommand> [args]\n")
