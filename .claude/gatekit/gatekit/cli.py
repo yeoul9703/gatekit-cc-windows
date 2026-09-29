@@ -22,10 +22,9 @@ SUBCOMMANDS = {
 }
 
 #: Gate modules that `_gate <name>` may dispatch to. This is how
-#: `.claude/settings.json` hooks reach a gate through the single `bin/gatekit`
-#: wrapper instead of needing their own Python-detection logic: the wrapper
-#: finds a working interpreter once and forwards here, and the gate module
-#: reads the hook event JSON from this same process's stdin.
+#: `.claude/settings.json` hooks reach a gate through `bin/gatekit.py _gate
+#: <name>` (exec form, run by the project venv's python): the gate module reads
+#: the hook event JSON from this same process's stdin.
 GATES = ("prompt", "write", "bash", "spawn", "question", "compact", "stop", "tokens")
 
 

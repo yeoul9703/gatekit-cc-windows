@@ -83,10 +83,22 @@ class TestDerivedDirs(TempProject):
     def test_jobs_dir(self) -> None:
         self.assertEqual(paths.jobs_dir(self.root), self.root / ".gatekit" / "jobs")
 
-    def test_gatekit_root_contains_bin_gatekit(self) -> None:
+    def test_gatekit_root_contains_launcher_and_no_sh_wrapper(self) -> None:
         found = paths.gatekit_root()
-        self.assertTrue((found / "bin" / "gatekit").is_file())
         self.assertTrue((found / "bin" / "gatekit.py").is_file())
+        # The POSIX sh wrapper is gone: hooks and commands go through uv/venv python.
+        self.assertFalse((found / "bin" / "gatekit").exists())
+
+    def test_cli_invocation_is_shell_neutral_uv_form(self) -> None:
+        inv = paths.cli_invocation()
+        self.assertEqual(
+            inv,
+            "uv run --project .claude/gatekit --frozen python .claude/gatekit/bin/gatekit.py")
+        # Pastes unchanged into PowerShell and Git Bash: no quotes, no $VAR,
+        # no backslashes, no absolute (personal) path.
+        for bad in ('"', "'", "$", "\\", "C:", str(paths.gatekit_root())):
+            self.assertNotIn(bad, inv)
+        self.assertIn(inv, paths.CLI_INVOCATION)
 
     def test_gatekit_root_is_derived_from_file_not_env(self) -> None:
         # Standalone mode has no plugin manager, so CLAUDE_PLUGIN_ROOT must

@@ -50,9 +50,11 @@ class DoctorTestCase(unittest.TestCase):
 
     def standalone_hooks(self) -> dict:
         """A minimal hooks object shaped like the real .claude/settings.json,
-        with every expected event routed through bin/gatekit."""
+        with every expected event routed through bin/gatekit.py (exec form)."""
         entry = {"hooks": [{"type": "command",
-                            "command": "\"$CLAUDE_PROJECT_DIR/.claude/gatekit/bin/gatekit\" _gate write"}]}
+                            "command": "${CLAUDE_PROJECT_DIR}/.claude/gatekit/.venv/Scripts/python.exe",
+                            "args": ["${CLAUDE_PROJECT_DIR}/.claude/gatekit/bin/gatekit.py",
+                                     "_gate", "write"]}]}
         return {event: [entry] for event in doctor.EXPECTED_HOOK_EVENTS}
 
     def stub_claude(self) -> None:
@@ -100,7 +102,6 @@ class TestAxisPluginFiles(DoctorTestCase):
     def test_missing_gate_script_fails_axis_1(self) -> None:
         fake_plugin = self.root / "fakeplugin"
         (fake_plugin / "bin").mkdir(parents=True)
-        (fake_plugin / "bin" / "gatekit").write_text("#!/usr/bin/env sh\n", encoding="utf-8")
         (fake_plugin / "bin" / "gatekit.py").write_text("# launcher\n", encoding="utf-8")
         gates = fake_plugin / "gatekit" / "gates"
         gates.mkdir(parents=True)
@@ -120,7 +121,6 @@ class TestAxisPluginFiles(DoctorTestCase):
     def test_empty_gate_script_fails_axis_1(self) -> None:
         fake_plugin = self.root / "fakeplugin2"
         (fake_plugin / "bin").mkdir(parents=True)
-        (fake_plugin / "bin" / "gatekit").write_text("#!/usr/bin/env sh\n", encoding="utf-8")
         (fake_plugin / "bin" / "gatekit.py").write_text("# launcher\n", encoding="utf-8")
         gates = fake_plugin / "gatekit" / "gates"
         gates.mkdir(parents=True)
@@ -161,7 +161,9 @@ class TestAxisHooksRegistered(DoctorTestCase):
         # Spelled out (not derived from doctor.EXPECTED_HOOK_EVENTS) so the
         # test fails if doctor stops checking PreCompact.
         entry = {"hooks": [{"type": "command",
-                            "command": "\"$CLAUDE_PROJECT_DIR/.claude/gatekit/bin/gatekit\" _gate write"}]}
+                            "command": "${CLAUDE_PROJECT_DIR}/.claude/gatekit/.venv/Scripts/python.exe",
+                            "args": ["${CLAUDE_PROJECT_DIR}/.claude/gatekit/bin/gatekit.py",
+                                     "_gate", "write"]}]}
         hooks = {event: [entry] for event in
                  ("UserPromptSubmit", "PreToolUse", "PostToolUse", "Stop")}
         self.write_project_settings(hooks)

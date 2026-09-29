@@ -2,7 +2,7 @@
 
 A gate can still be run as a plain script directly —
 ``python3 ".../gatekit/gates/write.py"`` — even though the standard path is
-through ``bin/gatekit _gate write``. In script mode Python puts
+through ``bin/gatekit.py _gate write``. In script mode Python puts
 ``gatekit/gates/`` on ``sys.path`` — not the gatekit root — so ``import
 gatekit`` fails and there is no PYTHONPATH to rely on.
 

@@ -31,7 +31,7 @@ def _axis(name, v, detail, fix=""):
 
 
 def axis_plugin_files(root) -> dict:
-    """Standalone layout check: bin/gatekit, bin/gatekit.py and the gate
+    """Standalone layout check: bin/gatekit.py and the gate
     scripts must exist under ``<root>/.claude/gatekit``. There is no plugin
     manager in standalone mode, so nothing is "installed" — the files simply
     have to be present on disk, checked out with the rest of the project."""
@@ -41,8 +41,6 @@ def axis_plugin_files(root) -> dict:
         return _axis("plugin files", verdict.FAIL,
                      "could not locate the gatekit root: %s" % exc, "")
     missing = []
-    if not (proot / "bin" / "gatekit").is_file():
-        missing.append("bin/gatekit")
     if not (proot / "bin" / "gatekit.py").is_file():
         missing.append("bin/gatekit.py")
     gates = proot / "gatekit" / "gates"
@@ -59,7 +57,7 @@ def axis_plugin_files(root) -> dict:
             "restore the missing files from git (git checkout .claude/gatekit)",
         )
     return _axis("plugin files", verdict.OK,
-                 "bin/gatekit, bin/gatekit.py and %d gate scripts present" % len(GATE_SCRIPTS))
+                 "bin/gatekit.py and %d gate scripts present" % len(GATE_SCRIPTS))
 
 
 # ------------------------------------------------------------------- axis 2
@@ -78,7 +76,7 @@ def axis_hooks_registered(root) -> dict:
     """Standalone mode registers hooks in the project's own
     ``.claude/settings.json`` (no plugin manager, so nothing to enable/disable
     globally) — this axis just checks that every expected hook event routes
-    through ``bin/gatekit``."""
+    through ``bin/gatekit.py``."""
     path = _project_settings_path(root)
     if not os.path.isfile(path):
         return _axis("hooks registered", verdict.FAIL,
@@ -100,12 +98,12 @@ def axis_hooks_registered(root) -> dict:
                      "missing hook registration(s): %s" % ", ".join(missing),
                      "restore .claude/settings.json from git")
     as_text = json.dumps(hooks)
-    if "bin/gatekit" not in as_text:
+    if "bin/gatekit.py" not in as_text:
         return _axis("hooks registered", verdict.FAIL,
-                     "hooks are registered but do not call bin/gatekit",
+                     "hooks are registered but do not call bin/gatekit.py",
                      "restore .claude/settings.json from git")
     return _axis("hooks registered", verdict.OK,
-                 "all %d hook events registered via bin/gatekit" % len(EXPECTED_HOOK_EVENTS))
+                 "all %d hook events registered via bin/gatekit.py" % len(EXPECTED_HOOK_EVENTS))
 
 
 # ------------------------------------------------------------------- axis 3

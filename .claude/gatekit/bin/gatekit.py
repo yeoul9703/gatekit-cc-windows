@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 """Launcher for the gatekit CLI from any working directory.
 
-Normally invoked through the ``bin/gatekit`` shell wrapper, which finds a
-working Python interpreter and execs this script as
-``<python> ".../.claude/gatekit/bin/gatekit.py" <subcommand> ...`` with the
-user's project as the current directory. The ``gatekit`` package lives next to
+Run with the project venv's interpreter, as hooks do (exec form, no shell)
+and as users do through ``uv run --project .claude/gatekit --frozen python
+.claude/gatekit/bin/gatekit.py <subcommand> ...`` from the project root. The ``gatekit`` package lives next to
 this file's parent, which is never on ``sys.path`` in a user's project, so the
 launcher adds the gatekit root itself before dispatching. Nothing else about
 the CLI differs from ``python3 -m gatekit``.

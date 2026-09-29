@@ -1,11 +1,37 @@
 {
+  "env": {
+    "CLAUDE_CODE_USE_POWERSHELL_TOOL": "1"
+  },
   "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "powershell.exe",
+            "args": [
+              "-NoProfile",
+              "-ExecutionPolicy",
+              "Bypass",
+              "-File",
+              "${CLAUDE_PROJECT_DIR}/.claude/gatekit/scripts/session-check.ps1"
+            ],
+            "timeout": 20
+          }
+        ]
+      }
+    ],
     "UserPromptSubmit": [
       {
         "hooks": [
           {
             "type": "command",
-            "command": "\"$CLAUDE_PROJECT_DIR/.claude/gatekit/bin/gatekit\" _gate prompt",
+            "command": "${CLAUDE_PROJECT_DIR}/.claude/gatekit/.venv/Scripts/python.exe",
+            "args": [
+              "${CLAUDE_PROJECT_DIR}/.claude/gatekit/bin/gatekit.py",
+              "_gate",
+              "prompt"
+            ],
             "timeout": 10
           }
         ]
@@ -17,7 +43,12 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"$CLAUDE_PROJECT_DIR/.claude/gatekit/bin/gatekit\" _gate write",
+            "command": "${CLAUDE_PROJECT_DIR}/.claude/gatekit/.venv/Scripts/python.exe",
+            "args": [
+              "${CLAUDE_PROJECT_DIR}/.claude/gatekit/bin/gatekit.py",
+              "_gate",
+              "write"
+            ],
             "timeout": 10
           }
         ]
@@ -27,7 +58,12 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"$CLAUDE_PROJECT_DIR/.claude/gatekit/bin/gatekit\" _gate bash",
+            "command": "${CLAUDE_PROJECT_DIR}/.claude/gatekit/.venv/Scripts/python.exe",
+            "args": [
+              "${CLAUDE_PROJECT_DIR}/.claude/gatekit/bin/gatekit.py",
+              "_gate",
+              "bash"
+            ],
             "timeout": 10
           }
         ]
@@ -37,7 +73,12 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"$CLAUDE_PROJECT_DIR/.claude/gatekit/bin/gatekit\" _gate spawn",
+            "command": "${CLAUDE_PROJECT_DIR}/.claude/gatekit/.venv/Scripts/python.exe",
+            "args": [
+              "${CLAUDE_PROJECT_DIR}/.claude/gatekit/bin/gatekit.py",
+              "_gate",
+              "spawn"
+            ],
             "timeout": 10
           }
         ]
@@ -49,7 +90,12 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"$CLAUDE_PROJECT_DIR/.claude/gatekit/bin/gatekit\" _gate question",
+            "command": "${CLAUDE_PROJECT_DIR}/.claude/gatekit/.venv/Scripts/python.exe",
+            "args": [
+              "${CLAUDE_PROJECT_DIR}/.claude/gatekit/bin/gatekit.py",
+              "_gate",
+              "question"
+            ],
             "timeout": 10
           }
         ]
@@ -59,7 +105,12 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"$CLAUDE_PROJECT_DIR/.claude/gatekit/bin/gatekit\" _gate question",
+            "command": "${CLAUDE_PROJECT_DIR}/.claude/gatekit/.venv/Scripts/python.exe",
+            "args": [
+              "${CLAUDE_PROJECT_DIR}/.claude/gatekit/bin/gatekit.py",
+              "_gate",
+              "question"
+            ],
             "timeout": 10
           }
         ]
@@ -70,7 +121,12 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"$CLAUDE_PROJECT_DIR/.claude/gatekit/bin/gatekit\" _gate compact",
+            "command": "${CLAUDE_PROJECT_DIR}/.claude/gatekit/.venv/Scripts/python.exe",
+            "args": [
+              "${CLAUDE_PROJECT_DIR}/.claude/gatekit/bin/gatekit.py",
+              "_gate",
+              "compact"
+            ],
             "timeout": 10
           }
         ]
@@ -81,7 +137,12 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"$CLAUDE_PROJECT_DIR/.claude/gatekit/bin/gatekit\" _gate stop",
+            "command": "${CLAUDE_PROJECT_DIR}/.claude/gatekit/.venv/Scripts/python.exe",
+            "args": [
+              "${CLAUDE_PROJECT_DIR}/.claude/gatekit/bin/gatekit.py",
+              "_gate",
+              "stop"
+            ],
             "timeout": 600
           }
         ]

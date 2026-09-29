@@ -15,7 +15,6 @@ import copy
 import json
 import os
 import pathlib
-import tempfile
 from typing import Any, Dict
 
 from . import paths
@@ -125,6 +124,7 @@ def write_text_atomic(target: pathlib.Path, text: str) -> None:
     """Write *text* to *target* via a temp file plus ``os.replace``."""
     target = pathlib.Path(target)
     paths.ensure_dir(target.parent)
+    import tempfile  # lazy: keeps the hot hook path off tempfile/shutil/random imports
     handle, tmp_name = tempfile.mkstemp(
         dir=str(target.parent), prefix=f".{target.name}.", suffix=".tmp"
     )

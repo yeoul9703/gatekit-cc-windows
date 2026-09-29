@@ -159,11 +159,17 @@ def relative_to_root(root: pathlib.Path, target: pathlib.Path) -> Optional[str]:
 
 
 def cli_invocation() -> str:
-    """The one CLI form that works from a user's project directory.
+    """The one CLI form users paste into a terminal, run from the project root.
 
-    Used for every user-facing fix string so a copy-pasted remedy runs
-    without PYTHONPATH and without the caller needing to know which Python
-    interpreter is available: ``"<gatekit_root>/bin/gatekit"``. That wrapper
-    finds a working Python itself and forwards to ``bin/gatekit.py``.
+    Used for every user-facing fix string. It runs unchanged in PowerShell and
+    Git Bash (no quoting, no ``$VAR``, forward slashes only) and needs only uv:
+    ``uv`` resolves the project venv (creating it from ``uv.lock`` if absent)
+    and runs ``bin/gatekit.py`` with that interpreter.
     """
-    return '"%s"' % (gatekit_root() / "bin" / "gatekit")
+    return CLI_INVOCATION
+
+
+#: See :func:`cli_invocation`. Relative to the project root on purpose: no
+#: absolute personal path may appear in messages or in the repo.
+CLI_INVOCATION = ("uv run --project .claude/gatekit --frozen python "
+                  ".claude/gatekit/bin/gatekit.py")

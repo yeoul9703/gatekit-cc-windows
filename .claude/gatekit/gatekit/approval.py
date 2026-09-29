@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import argparse
 import datetime
-import hashlib
 import json
 import pathlib
 import sys
@@ -47,6 +46,7 @@ def _normalize(relpath: str) -> str:
 
 def sha256_file(path: pathlib.Path) -> str:
     """Hex SHA-256 of *path*, or ``""`` when it is unreadable or absent."""
+    import hashlib  # lazy: OpenSSL load costs ~8 ms on the hot hook path
     digest = hashlib.sha256()
     try:
         with open(path, "rb") as stream:
