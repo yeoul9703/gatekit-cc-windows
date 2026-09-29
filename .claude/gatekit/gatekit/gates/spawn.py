@@ -19,7 +19,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 if __name__ == "__main__" or __package__ in (None, ""):  # pragma: no cover
     from _bootstrap import ensure_package_path

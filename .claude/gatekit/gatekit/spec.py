@@ -23,12 +23,11 @@ Findings never round `unverified` to either side; see verdict.py.
 from __future__ import annotations
 
 import argparse
-import fnmatch
 import json
 import pathlib
 import re
 import sys
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, List, Optional, TypeGuard, Union
 
 from gatekit import lang as lang_mod
 from gatekit import paths
@@ -44,11 +43,12 @@ _HEADING_MAP_CACHE: Optional[Dict[str, Any]] = None
 def heading_map() -> Dict[str, Any]:
     """Load `plugin/spec-kit/heading-map.json` (cached)."""
     global _HEADING_MAP_CACHE
-    if _HEADING_MAP_CACHE is None:
+    cached = _HEADING_MAP_CACHE
+    if cached is None:
         path = paths.gatekit_root() / "spec-kit" / "heading-map.json"
         with path.open(encoding="utf-8") as fh:
-            _HEADING_MAP_CACHE = json.load(fh)
-    return _HEADING_MAP_CACHE
+            cached = _HEADING_MAP_CACHE = json.load(fh)
+    return cached
 
 
 def spec_files() -> List[str]:
@@ -657,7 +657,7 @@ def _check_tasks(text: str, lang: str) -> List[dict]:
     name = "04-tasks.md"
     findings: List[dict] = []
     detailed = _parse_fences_detailed(text, "gatekit-task")
-    for line_no, parsed, err in detailed:
+    for line_no, _parsed, err in detailed:
         if err is not None:
             findings.append(
                 _finding(
@@ -757,7 +757,7 @@ def _check_criteria(text: str, lang: str) -> List[dict]:
     name = "05-gate.md"
     findings: List[dict] = []
     detailed = _parse_fences_detailed(text, "gatekit-criterion")
-    for line_no, parsed, err in detailed:
+    for line_no, _parsed, err in detailed:
         if err is not None:
             findings.append(
                 _finding(
@@ -815,10 +815,10 @@ def _check_criteria(text: str, lang: str) -> List[dict]:
 
 def _check_traceability(tasks_text: str, gate_text: str, lang: str) -> List[dict]:
     findings: List[dict] = []
-    task_ids = [
-        t.get("id")
+    task_ids: List[str] = [
+        tid
         for t in parse_fences(tasks_text, "gatekit-task")
-        if isinstance(t.get("id"), str)
+        if isinstance(tid := t.get("id"), str)
     ]
     for tid in task_ids:
         if tid not in gate_text:
@@ -946,7 +946,7 @@ def _is_not_applicable(value: Any) -> bool:
     )
 
 
-def _is_number(value: Any) -> bool:
+def _is_number(value: Any) -> TypeGuard[Union[int, float]]:
     return isinstance(value, (int, float)) and not isinstance(value, bool)
 
 

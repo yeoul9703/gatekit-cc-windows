@@ -14,7 +14,6 @@ would misdetect as English.
 """
 from __future__ import annotations
 
-import re
 import sys
 import unicodedata
 from typing import List, Optional

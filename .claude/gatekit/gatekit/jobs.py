@@ -1310,7 +1310,7 @@ def record_attempt(root, task_id: str, state: str, job_id: str = "",
     task_id = str(task_id)
     data = read_attempts(root)
     tasks = data.setdefault("tasks", {})
-    entry = tasks.get(task_id)
+    entry: dict = tasks.get(task_id)
     if not isinstance(entry, dict):
         entry = {"failures": 0}
 
@@ -1831,7 +1831,8 @@ def _terminate_pid(pid: int, grace_s: Optional[float] = None) -> bool:
             return True  # gone
         time.sleep(0.05)
     try:
-        os.kill(pid, signal.SIGKILL)
+        # Unreachable on Windows (returned above); SIGKILL exists on POSIX only.
+        os.kill(pid, signal.SIGKILL)  # pyright: ignore[reportAttributeAccessIssue]
     except OSError:
         pass
     return True

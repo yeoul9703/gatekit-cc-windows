@@ -21,7 +21,6 @@ Like every gate here it exits 0 on any internal error and never blocks.
 from __future__ import annotations
 
 import datetime
-import pathlib
 from typing import Any, Dict, Optional
 
 if __name__ == "__main__" or __package__ in (None, ""):  # pragma: no cover

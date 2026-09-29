@@ -23,7 +23,7 @@ import pathlib
 import posixpath
 import re
 import sys
-from typing import Any, Dict, Iterable, List, Optional, Union
+from typing import Any, Dict, List, Optional, Union
 
 from . import config, paths
 
