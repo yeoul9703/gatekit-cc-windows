@@ -16,11 +16,17 @@ SUBCOMMANDS = {
     "approve":  ("gatekit.approval", "Hash-anchored approvals: approve / check / list."),
     "design":   ("gatekit.design",   "Design tokens: merge-preset / impact."),
     "jobs":     ("gatekit.jobs",     "Worker jobs: start / status / wait / results / redelegate / clean."),
-    "workers":  ("gatekit.workers",  "Worker backends: list / check / set-default (claude default, codex optional)."),
+    "workers":  ("gatekit.workers",  "Worker backends: list / check / set-default."),
     "ledger":   ("gatekit.ledger",   "Session ledger: show / init / set-pipeline."),
     "lang":     ("gatekit.lang",     "Detect output language for a text (ko/en)."),
-    "install":  ("gatekit.hosts",    "Generate a host layer (--host codex): hooks, skills, AGENTS.md block."),
 }
+
+#: Gate modules that `_gate <name>` may dispatch to. This is how
+#: `.claude/settings.json` hooks reach a gate through the single `bin/gatekit`
+#: wrapper instead of needing their own Python-detection logic: the wrapper
+#: finds a working interpreter once and forwards here, and the gate module
+#: reads the hook event JSON from this same process's stdin.
+GATES = ("prompt", "write", "bash", "spawn", "question", "compact", "stop", "tokens")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -29,8 +35,16 @@ def main(argv: list[str] | None = None) -> int:
         print("usage: python3 -m gatekit <subcommand> [args]\n")
         for name, (_, help_text) in SUBCOMMANDS.items():
             print(f"  {name:<10} {help_text}")
+        print(f"  _gate      Run a gate directly (used by hooks): {', '.join(GATES)}")
         return 0 if argv else 1
     name, rest = argv[0], argv[1:]
+    if name == "_gate":
+        if not rest or rest[0] not in GATES:
+            print(f"gatekit: unknown gate '{rest[0] if rest else ''}'", file=sys.stderr)
+            return 2
+        gate_module = importlib.import_module(f"gatekit.gates.{rest[0]}")
+        gate_module.main()
+        return 0
     if name not in SUBCOMMANDS:
         print(f"gatekit: unknown subcommand '{name}'", file=sys.stderr)
         return 2

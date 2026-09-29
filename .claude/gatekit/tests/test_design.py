@@ -120,11 +120,11 @@ class PresetTestCase(TempProject):
         (self.plugin / ".claude-plugin" / "plugin.json").write_text("{}", encoding="utf-8")
         self.presets = self.plugin / "spec-kit" / "presets" / "design"
         self.presets.mkdir(parents=True)
-        self._orig_plugin_root = paths.plugin_root
-        paths.plugin_root = lambda: self.plugin
+        self._orig_plugin_root = paths.gatekit_root
+        paths.gatekit_root = lambda: self.plugin
 
     def tearDown(self) -> None:
-        paths.plugin_root = self._orig_plugin_root
+        paths.gatekit_root = self._orig_plugin_root
         self._plugin_tmp.cleanup()
         super().tearDown()
 

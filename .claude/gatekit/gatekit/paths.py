@@ -5,8 +5,9 @@ ARCHITECTURE.md section 2 is stated exactly once. Two roots matter:
 
 * the **project root** — the user's repository, found by walking up from a
   starting directory to the nearest ancestor holding ``.gatekit/`` or ``.git/``;
-* the **plugin root** — the installed plugin directory (the one holding
-  ``.claude-plugin/plugin.json``), which is wherever Claude Code unpacked us.
+* the **gatekit root** — this standalone install's own directory
+  (``<project>/.claude/gatekit``), derived from ``__file__`` since there is no
+  plugin manager to ask.
 
 No absolute personal path is ever hardcoded: both roots are derived at runtime.
 """
@@ -81,25 +82,16 @@ def contract_file(root: pathlib.Path) -> pathlib.Path:
     return state_dir(root) / "contract.json"
 
 
-def plugin_root() -> pathlib.Path:
-    """Return the installed plugin directory.
+def gatekit_root() -> pathlib.Path:
+    """Return this standalone install's own directory.
 
-    Walks up from this file looking for ``.claude-plugin/plugin.json``. When
-    Claude Code runs a gate it exports ``CLAUDE_PLUGIN_ROOT``; that value is
-    trusted first, since a symlinked install can make ``__file__`` point
-    somewhere other than the real plugin directory.
+    Always derived from ``__file__``: ``gatekit/gatekit/paths.py`` ->
+    ``gatekit/gatekit`` -> ``gatekit`` (i.e. ``<project>/.claude/gatekit``).
+    There is no plugin manager in standalone mode, so no
+    ``CLAUDE_PLUGIN_ROOT`` env var or ``.claude-plugin/plugin.json`` marker is
+    consulted.
     """
-    env_root = os.environ.get("CLAUDE_PLUGIN_ROOT")
-    if env_root:
-        candidate = pathlib.Path(env_root)
-        if (candidate / ".claude-plugin" / "plugin.json").is_file():
-            return candidate
-
     here = pathlib.Path(__file__).resolve()
-    for candidate in here.parents:
-        if (candidate / ".claude-plugin" / "plugin.json").is_file():
-            return candidate
-    # Fall back to the package's parent: gatekit/paths.py -> gatekit/ -> plugin/
     return here.parents[1]
 
 
@@ -127,6 +119,8 @@ def cli_invocation() -> str:
     """The one CLI form that works from a user's project directory.
 
     Used for every user-facing fix string so a copy-pasted remedy runs
-    without PYTHONPATH: ``python3 "<plugin>/bin/gatekit.py"``.
+    without PYTHONPATH and without the caller needing to know which Python
+    interpreter is available: ``"<gatekit_root>/bin/gatekit"``. That wrapper
+    finds a working Python itself and forwards to ``bin/gatekit.py``.
     """
-    return 'python3 "%s"' % (plugin_root() / "bin" / "gatekit.py")
+    return '"%s"' % (gatekit_root() / "bin" / "gatekit")

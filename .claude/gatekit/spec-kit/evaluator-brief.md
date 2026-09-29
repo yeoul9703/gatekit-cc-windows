@@ -9,7 +9,7 @@ given — including the screenshot judgement and the `-visual` verdict.
 Read who grades — the `evaluator` field of:
 
 ```
-python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" workers list --json
+".claude/gatekit/bin/gatekit" workers list --json
 ```
 
 Unless the user set one explicitly, this resolves to an enabled backend whose
@@ -27,7 +27,7 @@ starts "Record the result under" — a CLI evaluator cannot write) to
 `.gatekit/evaluator-prompt.md`, then run:
 
 ```
-python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" jobs evaluate --prompt .gatekit/evaluator-prompt.md --lang <output_lang>
+".claude/gatekit/bin/gatekit" jobs evaluate --prompt .gatekit/evaluator-prompt.md --lang <output_lang>
 ```
 
 **For a Codex evaluator specifically** (ADR-0015): `--sandbox read-only`
@@ -66,7 +66,7 @@ without it:
 The rest of the evaluator's prompt says, in `output_lang`:
 
 - You are the evaluator. You did not write this code and you must not change it.
-- Run `python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" contract run --json` from the project root.
+- Run `".claude/gatekit/bin/gatekit" contract run --json` from the project root.
 - Read `spec/05-gate.md` and carry out every E2E step it describes by hand,
   in order. Record what you actually observed, not what should happen.
 - For each criterion and each E2E step, give one verdict from
@@ -77,7 +77,7 @@ The rest of the evaluator's prompt says, in `output_lang`:
   that image file and judge it, in addition to the criterion's own pass:
   does it match the design direction on record (a chosen preset, or a
   pattern in `spec/02-design.md`)? Does it show any pattern listed in
-  `${CLAUDE_PLUGIN_ROOT}/spec-kit/design-antipatterns.json`? **Read that
+  `.claude/gatekit/spec-kit/design-antipatterns.json`? **Read that
   file rather than working from this sentence** — it is the list, and it
   grows. It covers two kinds of failure: a screen that looks *generic* (an
   unstated gradient hero, one sans-serif for every text role, a page of
@@ -101,7 +101,7 @@ The rest of the evaluator's prompt says, in `output_lang`:
   English). Do not add a heading in another language — `spec validate` treats
   that as cross-language residue and fails. If the file or the heading is
   missing, copy
-  `${CLAUDE_PLUGIN_ROOT}/spec-kit/templates/<output_lang>/PROGRESS.md` first,
+  `.claude/gatekit/spec-kit/templates/<output_lang>/PROGRESS.md` first,
   filling its YAML frontmatter block (`title`/`date`/`status`) along with the
   rest of the placeholders.
   Write the timestamp, the aggregate verdict, and one line per criterion and per

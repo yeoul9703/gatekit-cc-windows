@@ -119,12 +119,12 @@ class TestAxisPluginFiles(DoctorTestCase):
         for name in doctor.GATE_SCRIPTS[:-1]:
             (gates / name).write_text("# gate\n", encoding="utf-8")
 
-        original = paths.plugin_root
-        paths.plugin_root = lambda: fake_plugin
+        original = paths.gatekit_root
+        paths.gatekit_root = lambda: fake_plugin
         try:
             result = doctor.axis_plugin_files(self.root)
         finally:
-            paths.plugin_root = original
+            paths.gatekit_root = original
         self.assertEqual(result["verdict"], verdict.FAIL)
         self.assertIn(doctor.GATE_SCRIPTS[-1], result["detail"])
         self.assertTrue(result["fix"])
@@ -140,12 +140,12 @@ class TestAxisPluginFiles(DoctorTestCase):
         for name in doctor.GATE_SCRIPTS:
             (gates / name).write_text("" if name == "stop.py" else "# gate\n", encoding="utf-8")
 
-        original = paths.plugin_root
-        paths.plugin_root = lambda: fake_plugin
+        original = paths.gatekit_root
+        paths.gatekit_root = lambda: fake_plugin
         try:
             result = doctor.axis_plugin_files(self.root)
         finally:
-            paths.plugin_root = original
+            paths.gatekit_root = original
         self.assertEqual(result["verdict"], verdict.FAIL)
         self.assertIn("empty", result["detail"])
 

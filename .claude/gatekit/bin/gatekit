@@ -1,0 +1,52 @@
+#!/usr/bin/env sh
+# Standalone launcher for the gatekit CLI.
+#
+# Tries a short list of Python interpreters, in order, and picks the first
+# one that actually works (not just "found on PATH" — Windows sometimes puts
+# a Microsoft Store stub named python3.exe on PATH that prints an install
+# prompt and exits non-zero instead of running any code). Once a working
+# interpreter is found, this script hands off to gatekit.py next to it and
+# never touches Python again.
+#
+# Usage: bin/gatekit <subcommand> [args...]
+#   e.g. bin/gatekit doctor
+#        bin/gatekit _gate write   (used by hooks; reads the event on stdin)
+
+set -eu
+
+here="$(dirname "$0")"
+
+try_py() {
+    "$@" -c 'import sys' >/dev/null 2>&1
+}
+
+found=""
+found_args=""
+
+if try_py python3; then
+    found="python3"
+elif try_py python; then
+    found="python"
+elif try_py py -3; then
+    found="py"; found_args="-3"
+elif try_py py; then
+    found="py"
+fi
+
+if [ -z "$found" ]; then
+    echo "gatekit: 실행할 수 있는 Python을 찾지 못했습니다." >&2
+    echo "gatekit: could not find a working Python interpreter." >&2
+    echo "" >&2
+    echo "  python3, python, py -3, py 를 모두 시도했지만 전부 실패했습니다." >&2
+    echo "  Tried python3, python, py -3, and py — all failed." >&2
+    echo "" >&2
+    echo "  Python 3.9 이상을 설치한 뒤 다시 시도하세요: https://www.python.org/downloads/" >&2
+    echo "  Please install Python 3.9+ and try again: https://www.python.org/downloads/" >&2
+    exit 1
+fi
+
+if [ -n "$found_args" ]; then
+    exec "$found" "$found_args" "$here/gatekit.py" "$@"
+else
+    exec "$found" "$here/gatekit.py" "$@"
+fi

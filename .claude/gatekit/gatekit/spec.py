@@ -45,7 +45,7 @@ def heading_map() -> Dict[str, Any]:
     """Load `plugin/spec-kit/heading-map.json` (cached)."""
     global _HEADING_MAP_CACHE
     if _HEADING_MAP_CACHE is None:
-        path = paths.plugin_root() / "spec-kit" / "heading-map.json"
+        path = paths.gatekit_root() / "spec-kit" / "heading-map.json"
         with path.open(encoding="utf-8") as fh:
             _HEADING_MAP_CACHE = json.load(fh)
     return _HEADING_MAP_CACHE

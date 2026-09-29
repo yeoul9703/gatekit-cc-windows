@@ -47,7 +47,7 @@ def _stub_paths() -> types.ModuleType:
     mod.project_root = project_root
     mod.state_dir = lambda root: pathlib.Path(root) / ".gatekit"
     mod.spec_dir = lambda root: pathlib.Path(root) / "spec"
-    mod.plugin_root = lambda: PLUGIN_DIR
+    mod.gatekit_root = lambda: PLUGIN_DIR
     return mod
 
 

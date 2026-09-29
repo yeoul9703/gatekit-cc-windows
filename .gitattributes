@@ -3,5 +3,6 @@
 *.md text eol=lf
 *.json text eol=lf
 *.sh text eol=lf
+.claude/gatekit/bin/gatekit text eol=lf
 *.png binary
 *.jpg binary

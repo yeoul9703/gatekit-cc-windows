@@ -81,9 +81,25 @@ class TestDerivedDirs(TempProject):
     def test_jobs_dir(self) -> None:
         self.assertEqual(paths.jobs_dir(self.root), self.root / ".gatekit" / "jobs")
 
-    def test_plugin_root_contains_plugin_json(self) -> None:
-        found = paths.plugin_root()
-        self.assertTrue((found / ".claude-plugin" / "plugin.json").is_file())
+    def test_gatekit_root_contains_bin_gatekit(self) -> None:
+        found = paths.gatekit_root()
+        self.assertTrue((found / "bin" / "gatekit").is_file())
+        self.assertTrue((found / "bin" / "gatekit.py").is_file())
+
+    def test_gatekit_root_is_derived_from_file_not_env(self) -> None:
+        # Standalone mode has no plugin manager, so CLAUDE_PLUGIN_ROOT must
+        # not influence the result.
+        previous = os.environ.get("CLAUDE_PLUGIN_ROOT")
+        os.environ["CLAUDE_PLUGIN_ROOT"] = str(self.root)
+        try:
+            found = paths.gatekit_root()
+        finally:
+            if previous is None:
+                os.environ.pop("CLAUDE_PLUGIN_ROOT", None)
+            else:
+                os.environ["CLAUDE_PLUGIN_ROOT"] = previous
+        self.assertNotEqual(found, self.root)
+        self.assertTrue((found / "bin" / "gatekit.py").is_file())
 
     def test_ensure_dir_is_idempotent(self) -> None:
         target = self.root / "x" / "y"

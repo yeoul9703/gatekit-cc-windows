@@ -31,7 +31,7 @@ def _axis(name, v, detail, fix=""):
 
 def axis_plugin_files(root) -> dict:
     try:
-        proot = paths.plugin_root()
+        proot = paths.gatekit_root()
     except Exception as exc:
         return _axis("plugin files", verdict.FAIL,
                      "could not locate the plugin root: %s" % exc, "")

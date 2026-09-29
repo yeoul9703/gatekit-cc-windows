@@ -57,7 +57,7 @@ template path — pass the task's own `write_scope` globs as the gate's
 arguments so it scans only what that task writes:
 
 ```json
-{"name": "tokens", "argv": ["python3", "${CLAUDE_PLUGIN_ROOT}/gatekit/gates/tokens.py", "--lang", "<output_lang>", "<write_scope glob>", "..."]}
+{"name": "tokens", "argv": [".claude/gatekit/bin/gatekit", "_gate", "tokens", "--lang", "<output_lang>", "<write_scope glob>", "..."]}
 ```
 
 No `--root` is needed here: `jobs.run_gates` runs every task gate with the
