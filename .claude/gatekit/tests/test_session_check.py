@@ -84,6 +84,33 @@ class TestSessionCheck(unittest.TestCase):
         self.assertIn("claude CLI", message)
         self.assertNotIn(".venv", message)
 
+    def test_venv_whose_python_home_is_gone_is_reported(self) -> None:
+        self.fake("uv")
+        self.fake("claude")
+        self.venv()
+        cfg = self.root / ".claude" / "gatekit" / ".venv" / "pyvenv.cfg"
+        cfg.write_text("home = %s" % (self.root / "no-such-python"), encoding="utf-8")
+        proc = self.run_check()
+        message = json.loads(proc.stdout.decode("ascii"))["systemMessage"]
+        self.assertIn("pyvenv.cfg", message)
+        self.assertIn("/gatekit:setup", message)
+
+    def test_venv_with_an_existing_python_home_is_silent(self) -> None:
+        self.fake("uv")
+        self.fake("claude")
+        self.venv()
+        cfg = self.root / ".claude" / "gatekit" / ".venv" / "pyvenv.cfg"
+        cfg.write_text("home = %s" % self.root, encoding="utf-8")
+        self.assertEqual(self.run_check().stdout.strip(), b"")
+
+    def test_check_finishes_well_under_ten_seconds_and_never_calls_winget(self) -> None:
+        import time
+        text = SCRIPT.read_text(encoding="utf-8-sig")
+        self.assertNotIn("winget ", text.replace("or winget", "").replace("no winget", ""))
+        started = time.monotonic()
+        self.run_check()
+        self.assertLess(time.monotonic() - started, 10)
+
     def test_check_never_creates_a_venv(self) -> None:
         self.fake("uv")
         self.fake("claude")

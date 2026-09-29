@@ -6,3 +6,4 @@
 .claude/gatekit/bin/gatekit text eol=lf
 *.png binary
 *.jpg binary
+*.ps1 text eol=crlf
