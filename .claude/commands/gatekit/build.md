@@ -20,12 +20,12 @@ more independent tasks.
 
 ## Step 0 — load policy and language
 
-1. Read `${CLAUDE_PLUGIN_ROOT}/policy/language.md` and
-   `${CLAUDE_PLUGIN_ROOT}/policy/verification.md`.
+1. Read `.claude/gatekit/policy/language.md` and
+   `.claude/gatekit/policy/verification.md`.
 2. Detect the language and call it `output_lang`:
 
 ```
-python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" lang "$(head -40 spec/01-prd.md)"
+".claude/gatekit/bin/gatekit" lang "$(head -40 spec/01-prd.md)"
 ```
 
 Every user-facing string below is written in `output_lang`.
@@ -33,8 +33,8 @@ Every user-facing string below is written in `output_lang`.
 ## Step 1 — preconditions (both must hold)
 
 ```
-python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" spec validate
-python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" approve check spec/05-gate.md
+".claude/gatekit/bin/gatekit" spec validate
+".claude/gatekit/bin/gatekit" approve check spec/05-gate.md
 ```
 
 - `spec validate` must not print `fail`. If it does, show the findings and
@@ -50,7 +50,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" approve check spec/05-gate.md
 under `host` there is nothing to probe:
 
 ```
-python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" workers check "$(python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" workers list --json | python3 -c 'import json,sys; print(json.load(sys.stdin)["default"])')" --probe
+".claude/gatekit/bin/gatekit" workers check "$(".claude/gatekit/bin/gatekit" workers list --json | python3 -c 'import json,sys; print(json.load(sys.stdin)["default"])')" --probe
 ```
 
 `--probe` sends one trivial prompt through the backend's read-only argv — the
@@ -63,7 +63,7 @@ continue.
 ## Step 2 — start the job
 
 ```
-python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" jobs start
+".claude/gatekit/bin/gatekit" jobs start
 ```
 
 Add `--tasks <ids>` when `$ARGUMENTS` named specific tasks, `--backend <name>`
@@ -88,7 +88,7 @@ scope, gates, design, screens — implement it, then record the verdict with
 ## Step 3 — poll
 
 ```
-python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" jobs status
+".claude/gatekit/bin/gatekit" jobs status
 ```
 
 **Never read `output.txt` or `stderr.txt` into context.** They hold whole worker
@@ -96,7 +96,7 @@ transcripts and will swamp the session. (Under `host` they do not exist.) Use
 the status table and:
 
 ```
-python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" jobs results --compact
+".claude/gatekit/bin/gatekit" jobs results --compact
 ```
 
 which prints `id state gates_passed/total`, one line per task. Read a task's
@@ -138,7 +138,7 @@ to route around a diagnosis you have not done.
 When every task is terminal, update `spec/PROGRESS.md` in `output_lang`.
 
 If the file does not exist, copy
-`${CLAUDE_PLUGIN_ROOT}/spec-kit/templates/<output_lang>/PROGRESS.md` first,
+`.claude/gatekit/spec-kit/templates/<output_lang>/PROGRESS.md` first,
 filling its YAML frontmatter block (`title`/`date`/`status`) along with the
 rest of the placeholders. **Keep the template's headings exactly** — `spec
 validate` rejects a heading from the other language. Under them record: the
@@ -147,7 +147,7 @@ backend, and whether the build is done; one line per task (id, final state,
 gates passed of total); every redelegated task with the gate that failed and
 what changed; tasks left blocked with the failing gate named; the timestamp.
 
-Then run `python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" spec validate` and fix
+Then run `".claude/gatekit/bin/gatekit" spec validate` and fix
 any PROGRESS.md finding before reporting. Report the same table in chat, with
 verdicts as they are: a `timeout` is not a pass, and a task whose gates never
 ran is `unverified`, not done.

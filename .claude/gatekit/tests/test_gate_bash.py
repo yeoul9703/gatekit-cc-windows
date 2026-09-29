@@ -390,12 +390,13 @@ class TestSubprocessContract(BashGateProject):
 
 
 class TestRegistration(unittest.TestCase):
-    def test_hooks_json_routes_bash_to_this_gate(self) -> None:
-        hooks_path = pathlib.Path(__file__).resolve().parents[1] / "hooks" / "hooks.json"
-        hooks = json.loads(hooks_path.read_text(encoding="utf-8"))
-        matchers = {entry["matcher"]: entry for entry in hooks["hooks"]["PreToolUse"]}
+    def test_settings_json_routes_bash_to_this_gate(self) -> None:
+        # .claude/gatekit/tests/test_gate_bash.py -> parents[3] == repo root
+        settings_path = pathlib.Path(__file__).resolve().parents[3] / ".claude" / "settings.json"
+        settings = json.loads(settings_path.read_text(encoding="utf-8"))
+        matchers = {entry["matcher"]: entry for entry in settings["hooks"]["PreToolUse"]}
         self.assertIn("Bash", matchers)
-        self.assertIn("gates/bash.py", matchers["Bash"]["hooks"][0]["command"])
+        self.assertIn("_gate bash", matchers["Bash"]["hooks"][0]["command"])
 
     def test_doctor_lists_bash_gate(self) -> None:
         from gatekit import doctor

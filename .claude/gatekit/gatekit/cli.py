@@ -43,8 +43,14 @@ def main(argv: list[str] | None = None) -> int:
             print(f"gatekit: unknown gate '{rest[0] if rest else ''}'", file=sys.stderr)
             return 2
         gate_module = importlib.import_module(f"gatekit.gates.{rest[0]}")
-        gate_module.main()
-        return 0
+        try:
+            # Hook gates (prompt/write/bash/spawn/question/compact/stop) take
+            # no argv and read the event from stdin. The task gate ("tokens")
+            # takes an argv list instead, so try that shape first.
+            return int(gate_module.main(rest[1:]) or 0)
+        except TypeError:
+            gate_module.main()
+            return 0
     if name not in SUBCOMMANDS:
         print(f"gatekit: unknown subcommand '{name}'", file=sys.stderr)
         return 2

@@ -11,18 +11,18 @@ Input: `$ARGUMENTS` — optional constraints on scope or ordering.
 
 ## Step 0 — load policy and language
 
-1. Read `${CLAUDE_PLUGIN_ROOT}/policy/language.md` and
-   `${CLAUDE_PLUGIN_ROOT}/policy/verification.md`.
+1. Read `.claude/gatekit/policy/language.md` and
+   `.claude/gatekit/policy/verification.md`.
 2. Detect the language from `spec/01-prd.md`:
 
 ```
-python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" lang "$(head -40 spec/01-prd.md)"
+".claude/gatekit/bin/gatekit" lang "$(head -40 spec/01-prd.md)"
 ```
 
 Call it `output_lang`.
 
-3. Read `${CLAUDE_PLUGIN_ROOT}/spec-kit/heading-map.json` and
-   `${CLAUDE_PLUGIN_ROOT}/spec-kit/templates/<output_lang>/04-tasks.md`.
+3. Read `.claude/gatekit/spec-kit/heading-map.json` and
+   `.claude/gatekit/spec-kit/templates/<output_lang>/04-tasks.md`.
 
 ## Step 1 — read the inputs
 
@@ -101,7 +101,7 @@ of ten links were unevidenced, turning three rounds into seven.
 
 ## Step 4 — write gates
 
-**Read `${CLAUDE_PLUGIN_ROOT}/spec-kit/task-gates.md` and follow it.** Every
+**Read `.claude/gatekit/spec-kit/task-gates.md` and follow it.** Every
 task carries at least one gate — an argv list, run without a shell, that
 fails when the task is not done — and that file covers what makes one
 trustworthy (verify it runs before writing it in; a gate that always passes
@@ -126,7 +126,7 @@ execution-order table so a human can see the rounds at a glance.
 ## Step 6 — validate
 
 ```
-python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" spec validate --json
+".claude/gatekit/bin/gatekit" spec validate --json
 ```
 
 On `fail`, fix the specific finding. Scope collisions are re-cut, never

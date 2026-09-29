@@ -6,7 +6,7 @@ Detect the language for **this** call. Never carry a language over from a
 previous session, and never default to Korean.
 
 ```
-python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" lang "<the user's own words>"
+".claude/gatekit/bin/gatekit" lang "<the user's own words>"
 ```
 
 The result is `ko` or `en`. Use the user's text, not your own paraphrase, as
@@ -42,7 +42,7 @@ Identifiers stay in their source form regardless of language:
 | File and directory names | `spec/01-prd.md`, `.gatekit/contract.json` |
 | JSON keys | `write_scope`, `depends_on`, `timeout_s` |
 | Fence names | ` ```gatekit-task `, ` ```gatekit-criterion ` |
-| CLI commands and flags | `python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" spec validate --json` |
+| CLI commands and flags | `".claude/gatekit/bin/gatekit" spec validate --json` |
 | Verdict tokens in JSON | `ok`, `warn`, `fail`, `unverified` |
 | Code symbols from the project | type names, function names, env vars |
 

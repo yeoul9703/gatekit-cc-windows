@@ -4,7 +4,7 @@ This is a *task* gate, not a hook. ``jobs.run_gates`` runs it in the project
 root after the worker exits, with the task's ``write_scope`` globs as
 arguments::
 
-    python3 "${CLAUDE_PLUGIN_ROOT}/gatekit/gates/tokens.py" [--root DIR]
+    ".claude/gatekit/bin/gatekit" _gate tokens [--root DIR]
         [--lang ko|en] [--json] GLOB [GLOB...]
 
 The exit code is the verdict: ``0`` ok, ``1`` fail, ``3`` unverified. An

@@ -12,12 +12,12 @@ the default setup.
 
 ## Step 0 — load policy and language
 
-1. Read `${CLAUDE_PLUGIN_ROOT}/policy/language.md`. Step 5 asks the user a
-   question, so read `${CLAUDE_PLUGIN_ROOT}/policy/questioning.md` too.
+1. Read `.claude/gatekit/policy/language.md`. Step 5 asks the user a
+   question, so read `.claude/gatekit/policy/questioning.md` too.
 2. Detect the language:
 
 ```
-python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" lang "$ARGUMENTS"
+".claude/gatekit/bin/gatekit" lang "$ARGUMENTS"
 ```
 
 Call it `output_lang` and write every user-facing string in it. If `spec/01-prd.md`
@@ -28,7 +28,7 @@ exists, detect from its first 40 lines instead.
 If `.gatekit/config.json` does not exist, create it with the defaults:
 
 ```
-python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" workers set-default claude
+".claude/gatekit/bin/gatekit" workers set-default claude
 ```
 
 `config.save` writes the full default document, so this one call both creates
@@ -38,7 +38,7 @@ when the CLI can produce it. If it already exists, leave it alone and say so.
 ## Step 2 — check the default worker
 
 ```
-python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" workers check claude
+".claude/gatekit/bin/gatekit" workers check claude
 ```
 
 Read the verdict:
@@ -56,7 +56,7 @@ Read the verdict:
 Show the backend table and stop:
 
 ```
-python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" workers list
+".claude/gatekit/bin/gatekit" workers list
 ```
 
 Continue to Step 4 only when `$ARGUMENTS` is `codex`.
@@ -64,7 +64,7 @@ Continue to Step 4 only when `$ARGUMENTS` is `codex`.
 ## Step 4 — Codex: check first
 
 ```
-python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" workers check codex
+".claude/gatekit/bin/gatekit" workers check codex
 ```
 
 If this is `fail`, the Codex CLI is not installed. Say so and stop; there is
@@ -94,21 +94,21 @@ before the answer comes back.** If they decline, say nothing changed and stop.
 Only after an explicit yes:
 
 ```
-python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" workers enable codex
+".claude/gatekit/bin/gatekit" workers enable codex
 ```
 
 Then ask, again with `AskUserQuestion`, whether Codex should also become the
 default backend for new jobs. Only on yes:
 
 ```
-python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" workers set-default codex
+".claude/gatekit/bin/gatekit" workers set-default codex
 ```
 
 ## Step 7 — confirm
 
 ```
-python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" workers list
-python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" doctor
+".claude/gatekit/bin/gatekit" workers list
+".claude/gatekit/bin/gatekit" doctor
 ```
 
 Show the backend table and the doctor's worker axis. Report what changed in

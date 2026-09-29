@@ -16,18 +16,18 @@ and calling that verification.
 
 ## Step 0 — load policy and language
 
-1. Read `${CLAUDE_PLUGIN_ROOT}/policy/verification.md` and
-   `${CLAUDE_PLUGIN_ROOT}/policy/language.md`.
+1. Read `.claude/gatekit/policy/verification.md` and
+   `.claude/gatekit/policy/language.md`.
 2. Detect the language and call it `output_lang`:
 
 ```
-python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" lang "$(head -40 spec/01-prd.md)"
+".claude/gatekit/bin/gatekit" lang "$(head -40 spec/01-prd.md)"
 ```
 
 ## Step 1 — preconditions
 
 ```
-python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" contract derive
+".claude/gatekit/bin/gatekit" contract derive
 ```
 
 Re-derive first: the contract must match the current `spec/05-gate.md`, or every
@@ -39,7 +39,7 @@ same either way: `/gatekit:tasks` then `/gatekit:gate`.
 
 ## Step 2 — run the evaluator
 
-**Read `${CLAUDE_PLUGIN_ROOT}/spec-kit/evaluator-brief.md` and follow it.**
+**Read `.claude/gatekit/spec-kit/evaluator-brief.md` and follow it.**
 It resolves who grades (`workers list --json`'s `evaluator` field), launches
 that backend or a read-only subagent, and holds the brief itself — run the
 contract, carry out every E2E step in `spec/05-gate.md` by hand, one verdict
@@ -60,7 +60,7 @@ Two things the command must surface rather than swallow:
 After the evaluator returns:
 
 ```
-python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" contract run --json
+".claude/gatekit/bin/gatekit" contract run --json
 ```
 
 Run it once, in the main session. Two independent runs that disagree is itself a
@@ -106,5 +106,5 @@ Rules for the report:
 Confirm `spec/PROGRESS.md` carries the evaluator's result under the
 last-verification heading for `output_lang`. If the evaluator could not write
 it, write it yourself from its reply and say that you did. Then run
-`python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" spec validate` and fix any
+`".claude/gatekit/bin/gatekit" spec validate` and fix any
 PROGRESS.md finding before reporting.

@@ -11,18 +11,18 @@ Input: `$ARGUMENTS` — optional additional criteria the user wants enforced.
 
 ## Step 0 — load policy and language
 
-1. Read `${CLAUDE_PLUGIN_ROOT}/policy/language.md` and
-   `${CLAUDE_PLUGIN_ROOT}/policy/verification.md`.
+1. Read `.claude/gatekit/policy/language.md` and
+   `.claude/gatekit/policy/verification.md`.
 2. Detect the language:
 
 ```
-python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" lang "$(head -40 spec/01-prd.md)"
+".claude/gatekit/bin/gatekit" lang "$(head -40 spec/01-prd.md)"
 ```
 
 Call it `output_lang`.
 
-3. Read `${CLAUDE_PLUGIN_ROOT}/spec-kit/heading-map.json` and
-   `${CLAUDE_PLUGIN_ROOT}/spec-kit/templates/<output_lang>/05-gate.md`.
+3. Read `.claude/gatekit/spec-kit/heading-map.json` and
+   `.claude/gatekit/spec-kit/templates/<output_lang>/05-gate.md`.
 
 ## Step 1 — read the inputs
 
@@ -117,8 +117,8 @@ Add project-specific ones from the constraints in `spec/03-architecture.md`.
 ## Step 4 — validate and derive the contract
 
 ```
-python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" spec validate --json
-python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" contract derive
+".claude/gatekit/bin/gatekit" spec validate --json
+".claude/gatekit/bin/gatekit" contract derive
 ```
 
 `spec validate` must not be `fail` before you continue. `contract derive` writes `.gatekit/contract.json` with the source hash of `05-gate.md`.
@@ -142,8 +142,8 @@ change, re-run Step 4, and ask again.
 On approve:
 
 ```
-python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" approve spec/05-gate.md
-python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" approve check spec/05-gate.md
+".claude/gatekit/bin/gatekit" approve spec/05-gate.md
+".claude/gatekit/bin/gatekit" approve check spec/05-gate.md
 ```
 
 The check must print `ok`. Never edit the file to make a hash match.

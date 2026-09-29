@@ -13,19 +13,19 @@ and both merge rather than overwrite.
 
 ## Step 0 — load policy and language
 
-1. Read these under `${CLAUDE_PLUGIN_ROOT}/policy/`: `language.md`,
+1. Read these under `.claude/gatekit/policy/`: `language.md`,
    `questioning.md`, `assumptions.md`, `verification.md`.
 2. Detect the language:
 
 ```
-python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" lang "$ARGUMENTS"
+".claude/gatekit/bin/gatekit" lang "$ARGUMENTS"
 ```
 
 If `$ARGUMENTS` is only a URL or path, detect from the user's surrounding
 message instead. Call the result `output_lang`.
 
-3. Read `${CLAUDE_PLUGIN_ROOT}/spec-kit/heading-map.json` and
-   `${CLAUDE_PLUGIN_ROOT}/spec-kit/templates/<output_lang>/02-screens.md`.
+3. Read `.claude/gatekit/spec-kit/heading-map.json` and
+   `.claude/gatekit/spec-kit/templates/<output_lang>/02-screens.md`.
 
 ## Step 1 — re-entry check
 
@@ -50,10 +50,10 @@ Answering "I have a source" without providing one: ask once more for the
 path, then fall through only if there truly is none.
 
 **New-design branch.** List
-`${CLAUDE_PLUGIN_ROOT}/spec-kit/presets/design/*.json` and offer them as
+`.claude/gatekit/spec-kit/presets/design/*.json` and offer them as
 one `AskUserQuestion`, describing each from its own `patterns` (density,
 palette warmth, feel) rather than its filename. Run `python3
-"${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" design merge-preset <name>` on the
+".claude/gatekit/bin/gatekit" design merge-preset <name>` on the
 pick. If the catalog is somehow empty, ask for a style direction in the
 user's own terms and write it into `spec/tokens.json` instead. Either way
 that direction becomes Step 2's input: go to Step 3 with placeholder
@@ -111,7 +111,7 @@ group rather than inventing values for it.
 
 Every state, flow, or component **not** evidenced by the mockup becomes a
 row in `spec/01-prd.md`'s ledger plus an inline marker in `02-screens.md`
-where it is used, per `${CLAUDE_PLUGIN_ROOT}/policy/assumptions.md`. If
+where it is used, per `.claude/gatekit/policy/assumptions.md`. If
 `01-prd.md` exists, continue its numbering; if not, create it from the
 template in draft mode — headings filled, unknown sections marked "not yet
 interviewed" — and tell the user to run `/gatekit:interview`.
@@ -119,7 +119,7 @@ interviewed" — and tell the user to run `/gatekit:interview`.
 ## Step 6 — validate
 
 ```
-python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" spec validate --json
+".claude/gatekit/bin/gatekit" spec validate --json
 ```
 
 On `fail`, rewrite the offending file from the template rather than
@@ -127,7 +127,7 @@ patching. Never deliver a failing file. Missing 03, 04, 05 are expected.
 
 ## Step 7 — the preview and the prototype gate
 
-**Read `${CLAUDE_PLUGIN_ROOT}/spec-kit/prototype-gate.md` and follow it.**
+**Read `.claude/gatekit/spec-kit/prototype-gate.md` and follow it.**
 Both halves live there: the **optional static preview** (offered only when
 the screens were designed rather than observed), and the **live prototype
 gate**, *not* skippable for a UI-bearing project — real clickable HTML for

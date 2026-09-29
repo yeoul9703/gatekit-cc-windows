@@ -26,19 +26,19 @@ long as it keeps surfacing something new.
 
 ## Step 0 — load policy and language
 
-1. Read `${CLAUDE_PLUGIN_ROOT}/policy/language.md`,
-   `${CLAUDE_PLUGIN_ROOT}/policy/questioning.md`, and
-   `${CLAUDE_PLUGIN_ROOT}/policy/conversation.md` — the last one holds every
+1. Read `.claude/gatekit/policy/language.md`,
+   `.claude/gatekit/policy/questioning.md`, and
+   `.claude/gatekit/policy/conversation.md` — the last one holds every
    rule for how the Step 2 conversation is conducted.
 2. Detect the language from the user's own words (from the surrounding
    message when `$ARGUMENTS` is empty) and call it `output_lang`. Every
    question and every line of the file is in it.
 
 ```
-python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" lang "$ARGUMENTS"
+".claude/gatekit/bin/gatekit" lang "$ARGUMENTS"
 ```
 
-3. Read `${CLAUDE_PLUGIN_ROOT}/spec-kit/templates/<output_lang>/00-discovery.md`.
+3. Read `.claude/gatekit/spec-kit/templates/<output_lang>/00-discovery.md`.
    If `spec/00-discovery.md` exists, continue the conversation from what it
    already records — never re-ask it, never restart because it exists.
 
@@ -71,7 +71,7 @@ climbing the fallback ladder described there.
 This is the entire discovery process: one continuous conversation, not a
 "collect pains" phase followed by a "deepen the chosen one" phase with
 different rules. **Every rule in
-`${CLAUDE_PLUGIN_ROOT}/policy/conversation.md` governs this step** — read
+`.claude/gatekit/policy/conversation.md` governs this step** — read
 it in Step 0 and follow it here; it is not a summary of this section, it
 *is* this section.
 
@@ -94,7 +94,7 @@ continue or wrap up.
 ## Step 3 — summarize what the conversation surfaced
 
 Once the conversation has stopped producing anything new (or a stop signal
-arrived), read `${CLAUDE_PLUGIN_ROOT}/spec-kit/discovery-summary.md` and
+arrived), read `.claude/gatekit/spec-kit/discovery-summary.md` and
 follow it: it holds the summary's shape, every field, and the rules that
 keep it honest (never force a pain framing onto something the user wants to
 create; never invent a field the conversation did not establish; record
@@ -129,7 +129,7 @@ it**. Only once all three questions have real answers, write
 ## Step 5 — validate
 
 ```
-python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" spec validate --json
+".claude/gatekit/bin/gatekit" spec validate --json
 ```
 
 `fail` means a malformed fence, a missing or empty chosen-opportunity

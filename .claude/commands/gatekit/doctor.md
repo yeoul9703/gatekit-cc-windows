@@ -11,13 +11,13 @@ Input: `$ARGUMENTS` — pass `--json` through if the user asked for machine outp
 
 ## Step 0 — load policy and language
 
-1. Read `${CLAUDE_PLUGIN_ROOT}/policy/language.md` and
-   `${CLAUDE_PLUGIN_ROOT}/policy/verification.md` — the latter is what keeps
+1. Read `.claude/gatekit/policy/language.md` and
+   `.claude/gatekit/policy/verification.md` — the latter is what keeps
    `unverified` from being reported as a pass in Step 2.
 2. Detect the language:
 
 ```
-python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" lang "$ARGUMENTS"
+".claude/gatekit/bin/gatekit" lang "$ARGUMENTS"
 ```
 
 Call it `output_lang`. If `spec/01-prd.md` exists, detect from its first 40 lines
@@ -26,7 +26,7 @@ instead. Axis names and verdict tokens stay in English; your prose does not.
 ## Step 1 — run the diagnosis
 
 ```
-python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" doctor
+".claude/gatekit/bin/gatekit" doctor
 ```
 
 Exit code 1 means at least one axis is `fail`. Exit code 0 does **not** mean
@@ -89,5 +89,5 @@ taken through their own commands.
 
 ## Step 4 — machine output
 
-If `$ARGUMENTS` contains `--json`, run `python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" doctor --json` and
+If `$ARGUMENTS` contains `--json`, run `".claude/gatekit/bin/gatekit" doctor --json` and
 show the JSON as-is. Do not reformat it or drop axes from it.

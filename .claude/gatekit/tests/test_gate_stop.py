@@ -267,11 +267,12 @@ class TestHookTimeoutCoversBudget(unittest.TestCase):
     hook timeout, or the gate is killed mid-run: no verdict, no log line."""
 
     def hook_timeout(self) -> float:
-        hooks_path = pathlib.Path(__file__).resolve().parents[1] / "hooks" / "hooks.json"
-        hooks = json.loads(hooks_path.read_text(encoding="utf-8"))
-        return float(hooks["hooks"]["Stop"][0]["hooks"][0]["timeout"])
+        # .claude/gatekit/tests/test_gate_stop.py -> parents[3] == repo root
+        settings_path = pathlib.Path(__file__).resolve().parents[3] / ".claude" / "settings.json"
+        settings = json.loads(settings_path.read_text(encoding="utf-8"))
+        return float(settings["hooks"]["Stop"][0]["hooks"][0]["timeout"])
 
-    def test_hooks_json_matches_declared_timeout(self) -> None:
+    def test_settings_json_matches_declared_timeout(self) -> None:
         self.assertEqual(self.hook_timeout(), stop_gate.STOP_HOOK_TIMEOUT_S)
 
     def test_hook_timeout_is_the_documented_maximum(self) -> None:

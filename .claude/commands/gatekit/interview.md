@@ -21,20 +21,20 @@ something concrete to design for.
 
 ## Step 0 — load policy and language
 
-1. Read these under `${CLAUDE_PLUGIN_ROOT}/policy/`: `language.md`,
+1. Read these under `.claude/gatekit/policy/`: `language.md`,
    `questioning.md`, `conversation.md` (how Step 2 is conducted),
    `assumptions.md` (the ledger Step 3 writes), `verification.md`.
 2. Detect the output language from the user's own words:
 
 ```
-python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" lang "$ARGUMENTS"
+".claude/gatekit/bin/gatekit" lang "$ARGUMENTS"
 ```
 
 Call it `output_lang`; every user-facing string below is in it, and
 identifiers are never translated.
 
-3. Read `${CLAUDE_PLUGIN_ROOT}/spec-kit/heading-map.json` and the templates
-   in `${CLAUDE_PLUGIN_ROOT}/spec-kit/templates/<output_lang>/`. If none
+3. Read `.claude/gatekit/spec-kit/heading-map.json` and the templates
+   in `.claude/gatekit/spec-kit/templates/<output_lang>/`. If none
    matches, use `en` and say so once.
 
 **From `policy/questioning.md`:** both stop-signal categories and the guard
@@ -68,9 +68,9 @@ repository's languages, frameworks and test runner, and `README*`,
 
 Two files govern this step, both read in Step 0:
 
-- **`${CLAUDE_PLUGIN_ROOT}/policy/conversation.md` — *how* to ask.** Every
+- **`.claude/gatekit/policy/conversation.md` — *how* to ask.** Every
   rule there applies here exactly as it does in `discover.md`.
-- **`${CLAUDE_PLUGIN_ROOT}/spec-kit/interview-subjects.md` — *what* to ask
+- **`.claude/gatekit/spec-kit/interview-subjects.md` — *what* to ask
   about**: how many pages, what a user can do on each, what each feature
   needs to work, the unglamorous branches, and confirming each feature's
   mapping to behavior in the turn it comes up.
@@ -85,7 +85,7 @@ say** — `gk-todo4`'s character-chat PRD covered memory and persona in depth
 and never touched context-window management, content safety, or persona
 drift, all standard for that category.
 
-**Read `${CLAUDE_PLUGIN_ROOT}/spec-kit/domain-research.md` and follow it**:
+**Read `.claude/gatekit/spec-kit/domain-research.md` and follow it**:
 freeze what the conversation established (never edited by what follows),
 research the category across four angles with two-source corroboration,
 diff against the frozen set, present what remains in two labeled groups,
@@ -108,7 +108,7 @@ headings in one file.
   external integrations, constraints.
 
 **Every judgement made without confirmation becomes a ledger row plus an
-inline marker, per `${CLAUDE_PLUGIN_ROOT}/policy/assumptions.md`** (read in
+inline marker, per `.claude/gatekit/policy/assumptions.md`** (read in
 Step 0) — including the `Blocking` bar and why a `Blocking: y` row left
 `Confirmed: n` fails validation. Name those rows plainly in Step 6 rather
 than letting the user hit the block later at `/gatekit:gate`.
@@ -116,7 +116,7 @@ than letting the user hit the block later at `/gatekit:gate`.
 ## Step 4 — validate
 
 ```
-python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" spec validate --json
+".claude/gatekit/bin/gatekit" spec validate --json
 ```
 
 On `fail`: read the findings, **discard the failing file and rewrite it**
