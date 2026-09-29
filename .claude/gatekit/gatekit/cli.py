@@ -10,7 +10,7 @@ import importlib
 import sys
 
 SUBCOMMANDS = {
-    "doctor":   ("gatekit.doctor",   "Diagnose install, hooks, state, workers (ok/warn/fail/unverified)."),
+    "doctor":   ("gatekit.doctor",   "Diagnose install, hooks, state, workers (ok/warn/fail/unverified); --lang ko|en."),
     "spec":     ("gatekit.spec",     "Validate the spec set (spec/01..05, RECOVERY, PROGRESS)."),
     "contract": ("gatekit.contract", "Derive and run the completion contract from spec/05-gate.md."),
     "approve":  ("gatekit.approval", "Hash-anchored approvals: approve / check / list."),

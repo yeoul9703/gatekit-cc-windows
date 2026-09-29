@@ -474,6 +474,33 @@ class TestHooksExecForm(DoctorTestCase):
         self.assertEqual(result["verdict"], verdict.FAIL)
         self.assertIn("SessionStart", result["detail"])
 
+    def _session_hook_args(self, args) -> dict:
+        hooks = self.standalone_hooks()
+        hooks["SessionStart"] = [{"hooks": [{
+            "type": "command", "command": "powershell.exe", "args": args}]}]
+        self.write_project_settings(hooks)
+        return doctor.axis_hooks_registered(self.root)
+
+    def test_powershell_hook_without_noprofile_fails(self) -> None:
+        result = self._session_hook_args(
+            ["-ExecutionPolicy", "Bypass", "-File", "x/scripts/session-check.ps1"])
+        self.assertEqual(result["verdict"], verdict.FAIL)
+        self.assertIn("-NoProfile", result["detail"])
+        self.assertIn("SessionStart", result["detail"])
+
+    def test_powershell_hook_without_bypass_fails(self) -> None:
+        for args in (["-NoProfile", "-File", "x/scripts/session-check.ps1"],
+                     ["-NoProfile", "-ExecutionPolicy", "RemoteSigned", "-File",
+                      "x/scripts/session-check.ps1"]):
+            result = self._session_hook_args(args)
+            self.assertEqual(result["verdict"], verdict.FAIL, args)
+            self.assertIn("-ExecutionPolicy Bypass", result["detail"])
+
+    def test_powershell_hook_with_both_flags_is_ok(self) -> None:
+        result = self._session_hook_args(
+            ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "x/scripts/session-check.ps1"])
+        self.assertEqual(result["verdict"], verdict.OK)
+
     def test_real_settings_json_is_ok(self) -> None:
         project = pathlib.Path(__file__).resolve().parents[3]
         self.assertEqual(doctor.axis_hooks_registered(project)["verdict"], verdict.OK)
@@ -516,6 +543,46 @@ class TestCli(DoctorTestCase):
         finally:
             doctor.diagnose = original
         self.assertEqual(code, 0)
+
+    def _output(self, *argv) -> tuple:
+        import contextlib
+        import io
+
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            code = doctor.run([*argv, "--root", str(self.root)])
+        return code, buf.getvalue()
+
+    def test_lang_ko_prints_korean_lines_and_keeps_json_axis_keys(self) -> None:
+        _, text = self._output("--lang", "ko")
+        self.assertIn("gatekit 닥터", text)
+        self.assertIn("설치 파일", text)
+        self.assertIn("해결:", text)
+        self.assertNotIn("fix:", text)
+        self.assertNotIn("no .gatekit/ in this project", text)
+        _, raw = self._output("--lang", "ko", "--json")
+        axes = [a["axis"] for a in json.loads(raw)["axes"]]
+        self.assertEqual(axes[:2], ["plugin files", "hooks registered"])  # stable keys
+
+    def test_default_output_stays_english(self) -> None:
+        _, text = self._output()
+        self.assertIn("fix:", text)
+        self.assertIn("no spec/ directory in this project", text)  # unchanged wording
+        self.assertNotIn("닥터", text)
+
+    def test_lang_en_is_the_default(self) -> None:
+        self.assertEqual(self._output("--lang", "en")[1], self._output()[1])
+
+    def test_unknown_lang_is_refused(self) -> None:
+        import contextlib
+        import io
+
+        with contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(self._output("--lang", "fr")[0], 2)
+
+    def test_lang_does_not_leak_into_later_calls(self) -> None:
+        self._output("--lang", "ko")
+        self.assertEqual(doctor._LANG, "en")
 
     def test_table_output_shows_fixes(self) -> None:
         import contextlib
