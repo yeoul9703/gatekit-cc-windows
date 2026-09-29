@@ -1,0 +1,10 @@
+# gatekit runtime state (machine-local, created while using gatekit commands)
+.gatekit/runs/
+.gatekit/jobs/
+
+# Python bytecode caches
+__pycache__/
+*.pyc
+
+# Claude Code local overrides (not shared)
+.claude/settings.local.json
