@@ -4,6 +4,10 @@
 #   hookSpecificOutput.additionalContext   -> shown to Claude
 # It never runs `uv sync` or winget (a network call must not block session start),
 # spawns no process, stays under a shared 8 second budget, and always exits 0.
+# Same rule as setup.ps1: a program counts as present only if it is on the PATH of THIS
+# session. If it is visible only after merging the registry PATH (Machine + User) the
+# message says "installed but not visible: restart the Claude app" instead of "not found".
+# (GATEKIT_SETUP_REGISTRY_PATH replaces the registry value; used by tests.)
 # Non-ASCII text is emitted as \uXXXX so the output does not depend on the
 # console code page.
 $ErrorActionPreference = 'Stop'
@@ -31,6 +35,22 @@ $budgetMs = 8000      # the whole check must stay well under 10 seconds
 # Each step is skipped once the shared time budget is used up.
 function Test-Budget { return ($sw.ElapsedMilliseconds -lt $budgetMs) }
 
+# Looks the program up on the PATH after merging the registry PATH; never changes the session.
+function Test-RegistryVisible([string]$name) {
+    if ($env:GATEKIT_SETUP_KEEP_PATH -eq '1') { return $false }
+    $saved = $env:Path
+    try {
+        if ($env:GATEKIT_SETUP_REGISTRY_PATH) {
+            $reg = $env:GATEKIT_SETUP_REGISTRY_PATH
+        } else {
+            $reg = [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' + [Environment]::GetEnvironmentVariable('Path', 'User')
+        }
+        $env:Path = $reg + ';' + $saved
+        return [bool](Get-Command $name -CommandType Application -ErrorAction SilentlyContinue)
+    } catch { return $false }
+    finally { $env:Path = $saved }
+}
+
 try {
     $kitRoot = Split-Path -Parent $PSScriptRoot        # .claude\gatekit
     $venvDir = Join-Path $kitRoot '.venv'
@@ -38,11 +58,17 @@ try {
     $problems = @()
 
     if ((Test-Budget) -and -not (Get-Command uv -CommandType Application -ErrorAction SilentlyContinue)) {
-        $problems += 'uv: not found / uv 를 찾을 수 없습니다'
+        if (Test-RegistryVisible 'uv') {
+            $problems += 'uv: installed but not visible in this session - close the Claude app (VS Code window) completely and open it again / 설치돼 있지만 이 창에서는 보이지 않습니다 - Claude 앱을 완전히 닫고 다시 여세요'
+        } else {
+            $problems += 'uv: not found / uv 를 찾을 수 없습니다'
+        }
     }
     if (Test-Budget) {
         if (-not (Test-Path -LiteralPath $venvPy)) {
             $problems += '.claude/gatekit/.venv: missing, so gatekit hooks are silently inactive / 없음 - gatekit 훅이 동작하지 않습니다'
+        } elseif ((Get-Item -LiteralPath $venvPy).Length -eq 0) {
+            $problems += '.claude/gatekit/.venv: python.exe is 0 bytes (damaged), so the hooks cannot start / python.exe 가 0바이트로 손상되어 훅이 시작되지 않습니다'
         } else {
             # pyvenv.cfg "home" points at the Python the venv was built from; if that
             # folder is gone the venv python cannot start and every hook is silent.
@@ -59,7 +85,11 @@ try {
         }
     }
     if ((Test-Budget) -and -not (Get-Command claude -CommandType Application -ErrorAction SilentlyContinue)) {
-        $problems += 'claude CLI: not found on PATH (workers cannot start) / PATH 에 없음 (워커 실행 불가)'
+        if (Test-RegistryVisible 'claude') {
+            $problems += 'claude CLI: installed but not visible in this session - close the Claude app completely and open it again / 설치돼 있지만 이 창에서는 보이지 않습니다 - Claude 앱을 완전히 닫고 다시 여세요'
+        } else {
+            $problems += 'claude CLI: not found on PATH (workers cannot start) / PATH 에 없음 (워커 실행 불가)'
+        }
     }
 
     if ($problems.Count -gt 0) {
