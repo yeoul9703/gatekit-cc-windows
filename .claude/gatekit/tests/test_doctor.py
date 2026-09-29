@@ -1,4 +1,4 @@
-"""Tests for gatekit.doctor — 7 axes, fault-injected one at a time.
+"""Tests for gatekit.doctor — 8 axes, fault-injected one at a time.
 
 `unverified` is asserted as itself rather than rounded to ok or fail.
 """
@@ -21,6 +21,16 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from gatekit import doctor, paths, verdict
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from fakebin import make_fake, print_and_exit  # noqa: E402
+
+
+GATE_ENTRY = {"hooks": [{
+    "type": "command",
+    "command": "${CLAUDE_PROJECT_DIR}/.claude/gatekit/.venv/Scripts/python.exe",
+    "args": ["${CLAUDE_PROJECT_DIR}/.claude/gatekit/bin/gatekit.py", "_gate", "write"]}]}
+SESSION_ENTRY = {"hooks": [{
+    "type": "command", "command": "powershell.exe",
+    "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
+             "${CLAUDE_PROJECT_DIR}/.claude/gatekit/scripts/session-check.ps1"]}]}
 
 
 class DoctorTestCase(unittest.TestCase):
@@ -51,11 +61,9 @@ class DoctorTestCase(unittest.TestCase):
     def standalone_hooks(self) -> dict:
         """A minimal hooks object shaped like the real .claude/settings.json,
         with every expected event routed through bin/gatekit.py (exec form)."""
-        entry = {"hooks": [{"type": "command",
-                            "command": "${CLAUDE_PROJECT_DIR}/.claude/gatekit/.venv/Scripts/python.exe",
-                            "args": ["${CLAUDE_PROJECT_DIR}/.claude/gatekit/bin/gatekit.py",
-                                     "_gate", "write"]}]}
-        return {event: [entry] for event in doctor.EXPECTED_HOOK_EVENTS}
+        hooks = {event: [GATE_ENTRY] for event in doctor.EXPECTED_HOOK_EVENTS}
+        hooks["SessionStart"] = [SESSION_ENTRY]
+        return hooks
 
     def stub_claude(self) -> None:
         make_fake(self.bindir, "claude", print_and_exit("claude 1.0.0"))
@@ -68,9 +76,12 @@ class DoctorTestCase(unittest.TestCase):
 
 
 class TestReportShape(DoctorTestCase):
-    def test_seven_axes_each_with_the_required_keys(self) -> None:
+    def test_eight_axes_each_with_the_required_keys(self) -> None:
         report = doctor.diagnose(self.root)
-        self.assertEqual(len(report["axes"]), 7)
+        self.assertEqual(len(report["axes"]), 8)
+        self.assertEqual([a["axis"] for a in report["axes"]][:2],
+                         ["plugin files", "hooks registered"])
+        self.assertEqual(report["axes"][-1]["axis"], "uv")
         for axis in report["axes"]:
             for key in ("axis", "verdict", "detail", "fix"):
                 self.assertIn(key, axis)
@@ -92,6 +103,45 @@ class TestReportShape(DoctorTestCase):
 
 
 class TestAxisPluginFiles(DoctorTestCase):
+    def make_full_tree(self, base, skip=None, empty=None) -> None:
+        """A gatekit root holding every file axis 1 requires, minus *skip*."""
+        wanted = list(doctor.PROJECT_FILES)
+        wanted += ["gatekit/gates/" + n for n in doctor.GATE_SCRIPTS]
+        wanted += ["scripts/" + n for n in doctor.POWERSHELL_SCRIPTS]
+        for rel in wanted:
+            if rel == skip:
+                continue
+            target = base.joinpath(*rel.split("/"))
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text("" if rel == empty else "# content\n", encoding="utf-8")
+
+    def check_fake_tree(self, base) -> dict:
+        original = paths.gatekit_root
+        paths.gatekit_root = lambda: base
+        try:
+            return doctor.axis_plugin_files(self.root)
+        finally:
+            paths.gatekit_root = original
+
+    def test_complete_tree_is_ok_and_needs_no_sh_wrapper(self) -> None:
+        base = self.root / "fullplugin"
+        self.make_full_tree(base)
+        self.assertFalse((base / "bin" / "gatekit").exists())
+        self.assertEqual(self.check_fake_tree(base)["verdict"], verdict.OK)
+
+    def test_each_required_non_gate_file_is_checked(self) -> None:
+        expected = ["bin/gatekit.py", "pyproject.toml", "uv.lock", "scripts/session-check.ps1",
+                    "scripts/setup.ps1", "scripts/verify.ps1"]
+        for rel in expected:
+            base = self.root / ("tree-" + rel.replace("/", "-"))
+            self.make_full_tree(base, skip=rel)
+            result = self.check_fake_tree(base)
+            self.assertEqual(result["verdict"], verdict.FAIL, rel)
+            self.assertIn(rel, result["detail"])
+
+    def test_real_checkout_axis_1_is_ok(self) -> None:
+        self.assertEqual(doctor.axis_plugin_files(self.root)["verdict"], verdict.OK)
+
     def test_real_checkout_has_every_gate_script_or_reports_which_is_missing(self) -> None:
         result = doctor.axis_plugin_files(self.root)
         if result["verdict"] == verdict.FAIL:
@@ -101,12 +151,7 @@ class TestAxisPluginFiles(DoctorTestCase):
 
     def test_missing_gate_script_fails_axis_1(self) -> None:
         fake_plugin = self.root / "fakeplugin"
-        (fake_plugin / "bin").mkdir(parents=True)
-        (fake_plugin / "bin" / "gatekit.py").write_text("# launcher\n", encoding="utf-8")
-        gates = fake_plugin / "gatekit" / "gates"
-        gates.mkdir(parents=True)
-        for name in doctor.GATE_SCRIPTS[:-1]:
-            (gates / name).write_text("# gate\n", encoding="utf-8")
+        self.make_full_tree(fake_plugin, skip="gatekit/gates/" + doctor.GATE_SCRIPTS[-1])
 
         original = paths.gatekit_root
         paths.gatekit_root = lambda: fake_plugin
@@ -120,12 +165,7 @@ class TestAxisPluginFiles(DoctorTestCase):
 
     def test_empty_gate_script_fails_axis_1(self) -> None:
         fake_plugin = self.root / "fakeplugin2"
-        (fake_plugin / "bin").mkdir(parents=True)
-        (fake_plugin / "bin" / "gatekit.py").write_text("# launcher\n", encoding="utf-8")
-        gates = fake_plugin / "gatekit" / "gates"
-        gates.mkdir(parents=True)
-        for name in doctor.GATE_SCRIPTS:
-            (gates / name).write_text("" if name == "stop.py" else "# gate\n", encoding="utf-8")
+        self.make_full_tree(fake_plugin, empty="gatekit/gates/stop.py")
 
         original = paths.gatekit_root
         paths.gatekit_root = lambda: fake_plugin
@@ -160,12 +200,9 @@ class TestAxisHooksRegistered(DoctorTestCase):
     def test_missing_precompact_registration_is_not_ok(self) -> None:
         # Spelled out (not derived from doctor.EXPECTED_HOOK_EVENTS) so the
         # test fails if doctor stops checking PreCompact.
-        entry = {"hooks": [{"type": "command",
-                            "command": "${CLAUDE_PROJECT_DIR}/.claude/gatekit/.venv/Scripts/python.exe",
-                            "args": ["${CLAUDE_PROJECT_DIR}/.claude/gatekit/bin/gatekit.py",
-                                     "_gate", "write"]}]}
-        hooks = {event: [entry] for event in
+        hooks = {event: [GATE_ENTRY] for event in
                  ("UserPromptSubmit", "PreToolUse", "PostToolUse", "Stop")}
+        hooks["SessionStart"] = [SESSION_ENTRY]
         self.write_project_settings(hooks)
         result = doctor.axis_hooks_registered(self.root)
         self.assertNotEqual(result["verdict"], verdict.OK)
@@ -333,20 +370,120 @@ class TestAxisWorkers(DoctorTestCase):
 
 
 class TestAxisPython(DoctorTestCase):
-    def test_running_interpreter_meets_the_floor(self) -> None:
-        result = doctor.axis_python(self.root)
-        self.assertEqual(result["verdict"], verdict.OK)
-        self.assertIn(".", result["detail"])
+    """Axis 7 checks the project venv's interpreter, not the running one."""
 
-    def test_floor_is_three_nine(self) -> None:
-        self.assertEqual(doctor.MIN_PYTHON, (3, 9))
+    def venv_tree(self, cfg_text, with_python=True):
+        kit = self.root / "kit"
+        (kit / ".venv" / "Scripts").mkdir(parents=True)
+        if with_python:
+            (kit / ".venv" / "Scripts" / "python.exe").write_bytes(b"")
+        if cfg_text is not None:
+            (kit / ".venv" / "pyvenv.cfg").write_text(cfg_text, encoding="utf-8")
+        return kit
+
+    def run_axis(self, kit) -> dict:
+        original = paths.gatekit_root
+        paths.gatekit_root = lambda: kit
+        try:
+            return doctor.axis_python(self.root)
+        finally:
+            paths.gatekit_root = original
+
+    def test_floor_is_three_eleven(self) -> None:
+        self.assertEqual(doctor.MIN_PYTHON, (3, 11))
+
+    def test_real_venv_meets_the_floor(self) -> None:
+        result = doctor.axis_python(self.root)
+        self.assertEqual(result["verdict"], verdict.OK, result)
+        self.assertIn("venv python", result["detail"])
+
+    def test_missing_venv_fails_and_says_hooks_are_inactive(self) -> None:
+        kit = self.root / "kit"
+        kit.mkdir()
+        result = self.run_axis(kit)
+        self.assertEqual(result["verdict"], verdict.FAIL)
+        self.assertIn("silently inactive", result["detail"])
+        self.assertIn("/gatekit:setup", result["fix"])
+
+    def test_uv_style_cfg_at_the_floor_is_ok(self) -> None:
+        kit = self.venv_tree("home = x\nversion_info = 3.11.9\n")
+        result = self.run_axis(kit)
+        self.assertEqual(result["verdict"], verdict.OK)
+        self.assertIn("3.11.9", result["detail"])
+
+    def test_stdlib_style_cfg_is_read_too(self) -> None:
+        kit = self.venv_tree("version = 3.14.3\n")
+        self.assertEqual(self.run_axis(kit)["verdict"], verdict.OK)
+
+    def test_old_venv_python_fails(self) -> None:
+        kit = self.venv_tree("version_info = 3.10.14\n")
+        result = self.run_axis(kit)
+        self.assertEqual(result["verdict"], verdict.FAIL)
+        self.assertIn("3.10.14", result["detail"])
+
+    def test_unreadable_version_is_unverified_not_ok(self) -> None:
+        kit = self.venv_tree("home = x\n")
+        self.assertEqual(self.run_axis(kit)["verdict"], verdict.UNVERIFIED)
+
+
+class TestAxisUv(DoctorTestCase):
+    def test_uv_missing_fails_with_install_hint(self) -> None:
+        result = doctor.axis_uv(self.root)  # PATH holds only an empty scratch dir
+        self.assertEqual(result["verdict"], verdict.FAIL)
+        self.assertIn("winget install --id=astral-sh.uv -e", result["fix"])
+
+    def test_uv_present_reports_its_version(self) -> None:
+        make_fake(self.bindir, "uv", print_and_exit("uv 9.9.9 (fake)"))
+        result = doctor.axis_uv(self.root)
+        self.assertEqual(result["verdict"], verdict.OK)
+        self.assertIn("uv 9.9.9", result["detail"])
+
+    def test_uv_that_does_not_answer_is_unverified(self) -> None:
+        make_fake(self.bindir, "uv", print_and_exit("", exit_code=1))
+        self.assertEqual(doctor.axis_uv(self.root)["verdict"], verdict.UNVERIFIED)
+
+    def test_uv_is_the_last_axis(self) -> None:
+        self.assertIs(doctor.AXES[-1], doctor.axis_uv)
+
+
+class TestHooksExecForm(DoctorTestCase):
+    def test_shell_string_hook_is_not_ok(self) -> None:
+        hooks = self.standalone_hooks()
+        hooks["Stop"] = [{"hooks": [{
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR/.claude/gatekit/bin/gatekit\" _gate stop"}]}]
+        self.write_project_settings(hooks)
+        result = doctor.axis_hooks_registered(self.root)
+        self.assertEqual(result["verdict"], verdict.FAIL)
+        self.assertIn("exec form", result["detail"])
+        self.assertIn("Stop", result["detail"])
+
+    def test_missing_session_start_fails(self) -> None:
+        hooks = self.standalone_hooks()
+        del hooks["SessionStart"]
+        self.write_project_settings(hooks)
+        result = doctor.axis_hooks_registered(self.root)
+        self.assertEqual(result["verdict"], verdict.FAIL)
+        self.assertIn("SessionStart", result["detail"])
+
+    def test_session_start_must_run_the_check_script(self) -> None:
+        hooks = self.standalone_hooks()
+        hooks["SessionStart"] = [GATE_ENTRY]
+        self.write_project_settings(hooks)
+        result = doctor.axis_hooks_registered(self.root)
+        self.assertEqual(result["verdict"], verdict.FAIL)
+        self.assertIn("SessionStart", result["detail"])
+
+    def test_real_settings_json_is_ok(self) -> None:
+        project = pathlib.Path(__file__).resolve().parents[3]
+        self.assertEqual(doctor.axis_hooks_registered(project)["verdict"], verdict.OK)
 
 
 # --------------------------------------------------------------------- CLI
 
 
 class TestCli(DoctorTestCase):
-    def test_json_output_parses_and_lists_seven_axes(self) -> None:
+    def test_json_output_parses_and_lists_eight_axes(self) -> None:
         import contextlib
         import io
 
@@ -354,7 +491,7 @@ class TestCli(DoctorTestCase):
         with contextlib.redirect_stdout(buf):
             doctor.run(["--json", "--root", str(self.root)])
         report = json.loads(buf.getvalue())
-        self.assertEqual(len(report["axes"]), 7)
+        self.assertEqual(len(report["axes"]), 8)
 
     def test_exit_1_when_any_axis_fails(self) -> None:
         import contextlib

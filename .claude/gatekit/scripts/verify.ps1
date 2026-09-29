@@ -43,7 +43,12 @@ else { Fail ('unittest failed / 실패: ' + $ran) $out }
 # 3. doctor -------------------------------------------------------------------
 $out = & $venvPy $launcher doctor --root $projectRoot 2>&1 | ForEach-Object { "$_" }
 $code = $LASTEXITCODE
-if ($code -eq 0) { Say 'ok' ('doctor: ' + $out[0]) }
+if ($code -eq 0) {
+    # Exit 0 only means "no axis failed"; keep unverified/warn visible.
+    $tag = 'ok'
+    if ($out[0] -match '\s\S\s(ok|warn|unverified) \(root') { $tag = $Matches[1] }
+    Say $tag ('doctor: ' + $out[0])
+}
 else { Fail 'doctor: an axis failed / 실패한 축 있음' $out }
 
 # 4. settings.json ------------------------------------------------------------
