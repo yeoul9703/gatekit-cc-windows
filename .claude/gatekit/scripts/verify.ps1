@@ -58,9 +58,23 @@ if ($LASTEXITCODE -eq 0) { Say 'ok' '.claude/settings.json is valid JSON / 유�
 else { Fail '.claude/settings.json is not valid JSON / JSON 오류' $out }
 
 # 5. type check and lint ------------------------------------------------------
-# Not in the dev group yet: report unverified, never ok.
-Say 'unverified' 'type check: not configured / 타입검사 도구 미설정'
-Say 'unverified' 'lint: not configured / 린트 도구 미설정'
+# pyright and ruff live in the uv dev group; --frozen never rewrites uv.lock.
+$uv = Get-Command uv -ErrorAction SilentlyContinue
+if (-not $uv) {
+    Fail 'uv not found: type check and lint cannot run / uv 없음, 타입검사·린트 실행 불가' $null
+}
+else {
+    Push-Location $kit
+    $out = & uv run --frozen pyright 2>&1 | ForEach-Object { "$_" }
+    $code = $LASTEXITCODE
+    if ($code -eq 0) { Say 'ok' ('type check (pyright): ' + ($out | Select-Object -Last 1)) }
+    else { Fail 'type check (pyright) failed / 실패' $out }
+    $out = & uv run --frozen ruff check gatekit 2>&1 | ForEach-Object { "$_" }
+    $code = $LASTEXITCODE
+    Pop-Location
+    if ($code -eq 0) { Say 'ok' ('lint (ruff): ' + ($out | Select-Object -Last 1)) }
+    else { Fail 'lint (ruff) failed / 실패' $out }
+}
 
 if ($failCount -gt 0) {
     Say 'fail' ($failCount.ToString() + ' check(s) failed / 검사 실패')
