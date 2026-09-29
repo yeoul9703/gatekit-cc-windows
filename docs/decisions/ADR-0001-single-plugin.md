@@ -1,3 +1,5 @@
+> **Superseded by ADR-0018.** This fork is no longer a plugin; it is a standalone folder (`.claude/`) with no plugin manager. Kept for history.
+
 # ADR-0001: One plugin, one package
 
 ## Context

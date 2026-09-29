@@ -1,3 +1,5 @@
+> **Partly superseded by ADR-0018.** The "Python 3.9+ / `python3` on any machine" wording is replaced by Python 3.11+ managed by uv on Windows. The stdlib-only rule (zero runtime dependencies) still stands.
+
 # ADR-0002: Python standard library only
 
 ## Context

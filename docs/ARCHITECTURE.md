@@ -22,8 +22,8 @@ directories) but contains no code copied from any other project.
 
 | Rule | Why |
 |---|---|
-| Python 3.9+ standard library only, everywhere | must run on a fresh machine with only `python3` |
-| One kernel package (`.claude/gatekit/gatekit/`), reached via `.claude/gatekit/bin/gatekit` | no plugin manager in standalone mode; the wrapper resolves a working Python and calls `bin/gatekit.py` |
+| Windows + Claude Code only; Python 3.11+ (`requires-python >=3.11`) managed by uv; kernel code uses the standard library only, zero runtime dependencies (ADR-0018, ADR-0002) | the only prerequisites are Claude Code and uv; no `pip install` step exists |
+| One kernel package (`.claude/gatekit/gatekit/`), reached via `.claude/gatekit/bin/gatekit.py` run by `.claude/gatekit/.venv/Scripts/python.exe` | no plugin manager; hooks are shell-less exec-form commands (ADR-0018) |
 | Gates are hooks, not prose | prose instructions fire nondeterministically; hooks fire every time |
 | Every hook exits 0 on any internal error and writes a one-line diagnostic to `.gatekit/runs/hook-errors.log` | a broken hook must never break the user's session |
 | Verdict vocabulary is exactly `ok / warn / fail / unverified` | "not checked" must never be rounded to pass or fail |
@@ -38,7 +38,7 @@ directories) but contains no code copied from any other project.
 ```
 <project root>/
 ├── .claude/
-│   ├── settings.json                    # 7 hook registrations (see §3), via bin/gatekit
+│   ├── settings.json                    # 6 hook events (SessionStart, UserPromptSubmit, PreToolUse x3, PostToolUse x2, PreCompact, Stop), exec form (see §3)
 │   ├── commands/gatekit/                # execution instructions (one per pipeline), /gatekit:<name>
 │   │   ├── discover.md    /gatekit:discover    → spec/00-discovery.md (optional first step)
 │   │   ├── interview.md   /gatekit:interview   → spec/01-prd.md, spec/03-architecture.md
@@ -53,10 +53,12 @@ directories) but contains no code copied from any other project.
 │   ├── skills/gatekit-<name>/SKILL.md   # ≤ 40-line NL trigger shims that point at the command
 │   └── gatekit/                         # the standalone kernel checkout
 │       ├── bin/
-│       │   ├── gatekit                  # POSIX sh launcher: finds a working Python, execs gatekit.py
-│       │   └── gatekit.py               # `python3 -m gatekit` equivalent, sys.path bootstrap
+│       │   └── gatekit.py               # entry point: sys.path bootstrap, then cli.main
+│       ├── pyproject.toml, uv.lock      # requires-python >=3.11, no runtime deps, [tool.uv] package=false, dev group pyright[nodejs]+ruff
+│       ├── .venv/                       # built by uv from uv.lock (ignored)
+│       ├── scripts/                     # setup.ps1 (check/-Install/-Update), session-check.ps1 (SessionStart), verify.ps1
 │       ├── gatekit/                     # kernel package (stdlib only)
-│       │   ├── cli.py         dispatcher: `bin/gatekit <sub>`; `_gate <name>` dispatches to a gate module
+│       │   ├── cli.py         dispatcher: `bin/gatekit.py <sub>`; `_gate <name>` dispatches to a gate module
 │       │   ├── hookio.py      hook stdin/stdout contract, safe wrapper (§3)
 │       │   ├── ledger.py      per-session run ledger
 │       │   ├── lang.py        output_lang detection
@@ -66,7 +68,7 @@ directories) but contains no code copied from any other project.
 │       │   ├── spec.py        spec set validation
 │       │   ├── jobs.py        job runner (job dir, atomic writes, spawn, gates, redelegate)
 │       │   ├── workers.py     worker backends (claude default; a project may add more)
-│       │   ├── doctor.py      7-axis diagnosis
+│       │   ├── doctor.py      8-axis diagnosis
 │       │   ├── config.py      .gatekit/config.json loader with defaults
 │       │   ├── paths.py       project root / gatekit root resolution
 │       │   └── gates/         hook entry points: prompt.py write.py bash.py spawn.py question.py compact.py stop.py
@@ -74,7 +76,7 @@ directories) but contains no code copied from any other project.
 │       │   ├── templates/{ko,en}/01-prd.md … 05-gate.md, RECOVERY.md, PROGRESS.md
 │       │   └── heading-map.json         # canonical headings per file per language
 │       ├── policy/language.md questioning.md verification.md   # loaded at runtime by commands
-│       └── tests/                       # unittest, run with: cd .claude/gatekit && python3 -m unittest discover -s tests
+│       └── tests/                       # unittest, run with: cd .claude/gatekit; uv run --frozen python -m unittest discover -s tests
 ├── docs/ARCHITECTURE.md (this), decisions/ADR-*.md, USAGE.md
 └── .gitignore                           # ignores .gatekit/runs, .gatekit/jobs
 ```
@@ -125,13 +127,16 @@ cannot be evidence for the spec.
 ## 3. Hook I/O contract (`hookio.py`)
 
 Claude Code passes a JSON object on stdin to the hook command from
-`.claude/settings.json`. Every command in this project routes through
-`.claude/gatekit/bin/gatekit _gate <name>`: the wrapper resolves a working
-Python once and forwards to `bin/gatekit.py`, whose `_gate` dispatch imports
-the named gate module and runs it against this same process's stdin — so a
-gate reads its event exactly as it would running as a standalone script
-(`python3 .../gatekit/gates/write.py`), which `gates/_bootstrap.py` also still
-supports directly. Fields used:
+`.claude/settings.json`. Hooks use the shell-less exec form (`command` plus
+`args`, no shell in between; ADR-0018). Every gate command is
+`${CLAUDE_PROJECT_DIR}/.claude/gatekit/.venv/Scripts/python.exe` with args
+`bin/gatekit.py _gate <name>` (about 105 ms per call). `_gate` imports the
+named gate module and runs it against this same process's stdin — so a gate
+reads its event exactly as it would running as a standalone script
+(`python .../gatekit/gates/write.py`), which `gates/_bootstrap.py` also still
+supports directly. The exception is SessionStart, which runs
+`powershell.exe -NoProfile -ExecutionPolicy Bypass -File
+scripts/session-check.ps1` (see below). Fields used:
 `session_id`, `hook_event_name`, `cwd`, `tool_name`, `tool_input`, `tool_response`,
 `prompt` (UserPromptSubmit), `stop_hook_active` (Stop).
 
@@ -148,17 +153,18 @@ Responses:
 prints the returned JSON (if any), and **always exits 0**; exceptions are
 appended to `.gatekit/runs/hook-errors.log` as one line `iso_ts event_name error`.
 Each gate must complete in < 5 s on a normal project. The Stop gate runs the
-contract (§5) and is the exception: its hook `timeout` in `hooks.json` is
+contract (§5) and is the exception: its hook `timeout` in `.claude/settings.json` is
 600 s, the largest value the Claude Code hook documentation shows, and the
 gate caps the contract run at `STOP_BUDGET_CAP_S` = 570 s (`gates/stop.py`)
 so start-up and teardown fit inside the timeout. A `gatekit-budget` above the
 cap runs in full under `contract run` but is cut at the Stop gate, where the
 cut is reported as `unverified` — honest, where a hook killed by Claude Code
-would record no verdict and no log line. Tests pin `hooks.json` to
+would record no verdict and no log line. Tests pin `settings.json` to
 `STOP_HOOK_TIMEOUT_S` and the cap to at least 30 s below it.
 
-Registered hooks (`.claude/settings.json`, each `command` calling
-`bin/gatekit _gate <name>`): UserPromptSubmit→`prompt`,
+Registered hooks (`.claude/settings.json`, six events, exec form, gates
+calling `bin/gatekit.py _gate <name>`): SessionStart→`scripts/session-check.ps1`
+(not a gate), UserPromptSubmit→`prompt`,
 PreToolUse `Write|Edit|MultiEdit|NotebookEdit`→`write`,
 PreToolUse `Bash`→`bash` (ADR-0004),
 PreToolUse `Agent|Task`→`spawn`, PostToolUse `AskUserQuestion`→`question`,
@@ -168,15 +174,22 @@ PostToolUse `Write|Edit|MultiEdit|NotebookEdit`→`question` (clears
 Gate behaviour:
 
 Every gate stands down in a project that has no `.gatekit/` directory. The
-plugin installs globally, so these hooks fire in every project the user
-opens; a project with no `.gatekit/` has never run a gatekit command and
+hooks live in this repository's own `.claude/settings.json`, but the
+`.claude/` folder can be copied into other projects, and a project with no `.gatekit/` has never run a gatekit command and
 never asked to be governed. Such a gate allows without reading further and
 **creates no state there** — no ledger, no `.gatekit/`. The one exception is
 `compact`, which already writes nothing when no job exists.
 
+**SessionStart check.** A hook whose `command` points at an executable that
+does not exist is silently ignored by Claude Code (measured), so a missing
+`.venv` or uv would leave every gate off with no message. `session-check.ps1`
+runs at session start, verifies uv, the `.venv` (including that its
+`pyvenv.cfg` `home` still exists) and the `claude` CLI, and prints a warning
+pointing at `/gatekit:setup` when something is missing. It targets under 10 s.
+
 - **prompt**: ensure ledger exists for `session_id`; detect `output_lang` from `prompt` (§8) and store it — for a slash command only the `<command-args>` content is the user's words, and empty args keep the stored language; **set `active_pipeline`** when the prompt invokes `/gatekit:<pipeline>`. Claude Code delivers a slash command as the tagged body `<command-message>…</command-message>` / `<command-name>/gatekit:<name></command-name>` / `<command-args>…</command-args>`; that tag, a bare `/gatekit:<name>` at the start of the prompt, and the `# /gatekit:<name>` title line of an expanded command body are recognised within the first 12 lines. A mid-sentence mention is not an invocation. `doctor` and `setup` clear it; an unknown name leaves it alone; a plain prompt keeps it. Entering a different pipeline resets `questions` to its defaults. This is the **only** production writer of `active_pipeline` — commands never set it by prose. Inject `additionalContext` (≤ 600 chars) with `output_lang`, question budget state, active pipeline, and unresolved gate count, plus `build=<job> n/m passed, next: <task>` while a job is unfinished (ADR-0013 decision 1a: the session that returns from a compaction is told a build is live and reads `spec/PROGRESS.md` for the rest). The question field is `questions=<asked>/<max>`, followed by the ADR-0012 signals when any is non-zero — `questions=6/2 (2 unjustified, 1 repeat, impl-choice)` — printing only what is set so the 600-char budget holds. Never blocks.
 - **write**: deny when (a) `config.enforce_spec_before_code` is true, `spec/` exists, `.gatekit/approvals.json` has no valid approval for `spec/05-gate.md`, and the target path is outside the allowlist `spec/**, .gatekit/**, docs/**, README*, *.md at root`; or (b) env `GATEKIT_TASK_ID` is set and the target is outside that task's `write_scope` (from the job's `task.json`). Reason text is in `output_lang`.
-- **bash**: apply the write rules (a) and (b) to every file a Bash command would write, read statically from the command text: redirections (`>`, `>>`, `&>`, `>|`, `N>`), `tee`, `sed -i`/`perl -i`, `cp`/`mv`/`ln`/`install`/`rsync` destinations, `touch`/`rm`/`mkdir`/`truncate`/`chmod`/`chown` operands, `dd of=`, `sort -o`, `curl -o`, `wget -O`, `tar -C`/`-f`, `unzip -d`, `zip`, with `cd` tracked across `;`/`&&`/`||`/`|`/newlines, `VAR=`/`sudo`/`env`/`nohup` prefixes stripped, here-document bodies ignored, `/dev/*` targets ignored and `sh|bash|zsh -c "…"` parsed recursively. Fast path: when no rule could deny anything (no `GATEKIT_TASK_ID`, spec gate approved or absent) the command is allowed without parsing. When a rule is active and a write's target **cannot be determined** — `$VAR` or backticks in a path, `cd` to an unknown directory, `eval`, `xargs`, `patch`, `trap`, `find -exec/-delete`, working-tree `git` subcommands (`apply`, `checkout`, `restore`, `reset`, `merge`, `stash`, `init`, `clone`, …), inline interpreter code (`python3 -c`, `node -e`, `perl -e`, stdin scripts), `awk`, command-line editors (`ed`, `ex`, `vim`, `nano`), `busybox`, downloads that choose their own file name (`curl -O`, bare `wget`), process substitution, unbalanced quotes — **deny** with reason `opaque`: "could not tell" is never rounded to "allowed". Programs invoked by name (`npm run build`, `python3 script.py`) are outside its reach by design. Reason text is in `output_lang`.
+- **bash**: apply the write rules (a) and (b) to every file a Bash command would write, read statically from the command text: redirections (`>`, `>>`, `&>`, `>|`, `N>`), `tee`, `sed -i`/`perl -i`, `cp`/`mv`/`ln`/`install`/`rsync` destinations, `touch`/`rm`/`mkdir`/`truncate`/`chmod`/`chown` operands, `dd of=`, `sort -o`, `curl -o`, `wget -O`, `tar -C`/`-f`, `unzip -d`, `zip`, with `cd` tracked across `;`/`&&`/`||`/`|`/newlines, `VAR=`/`sudo`/`env`/`nohup` prefixes stripped, here-document bodies ignored, `/dev/*` targets ignored and `sh|bash|zsh -c "…"` parsed recursively. Fast path: when no rule could deny anything (no `GATEKIT_TASK_ID`, spec gate approved or absent) the command is allowed without parsing. When a rule is active and a write's target **cannot be determined** — `$VAR` or backticks in a path, `cd` to an unknown directory, `eval`, `xargs`, `patch`, `trap`, `find -exec/-delete`, working-tree `git` subcommands (`apply`, `checkout`, `restore`, `reset`, `merge`, `stash`, `init`, `clone`, …), inline interpreter code (`python -c`, `node -e, `perl -e`, stdin scripts), `awk`, command-line editors (`ed`, `ex`, `vim`, `nano`), `busybox`, downloads that choose their own file name (`curl -O`, bare `wget`), process substitution, unbalanced quotes — **deny** with reason `opaque`: "could not tell" is never rounded to "allowed". Programs invoked by name (`npm run build`, `python script.py`) are outside its reach by design. Reason text is in `output_lang`.
 - **spawn**: the spawn prompt must contain a fenced block ` ```gatekit-scope ` with JSON `{"write_scope": [globs] | "read-only", "stop_when": "…", "tools": [...] | "inherit"}`. Deny if missing/invalid, or if `write_scope` intersects any scope already recorded in the ledger for this session. On allow, record the scope in the ledger. No regex over prose: parse the fence as JSON.
 - **compact** (PreCompact, ADR-0013): stamp the latest job's state — job id, execution mode, backend, and every task's state, gate tally and detail — into `spec/PROGRESS.md` between `<!-- gatekit:build-state -->` and its closing marker, replacing that block in place so repeated compactions leave one stamp and nothing outside it is touched. The heading belongs to neither language's canonical set, so `spec validate` is unaffected. Writes nothing when no job exists; an unwritable file is swallowed, since the job dir still holds every fact. Under host execution a build lives in one session, so a compaction is routine: this hook records the narrative, which is the only thing the files did not already hold.
 - **question**: increment `ledger.questions.asked`; if `asked > budget.max_calls` (default 2 for interview, unlimited otherwise) record `budget_exceeded=true` (informational; commands read it). ADR-0012 adds four signals, all informational and all confined to the budgeted pipeline, because a raw count permits waste inside the budget and forbids value outside it. Past `max_calls` a call must arrive with `questions.justification` — one line naming what the command would write differently depending on the answer — which the call **consumes** (set to `null`); a call without one raises `unjustified`. A justified call sets `awaiting_write`, and if the next `AskUserQuestion` arrives with it still set, `unrealized` is raised: the claim that the answer changes what gets written did not come true. The same gate is therefore also registered on **PostToolUse for `Write|Edit|MultiEdit|NotebookEdit`**, where it only calls `note_write` (clearing `awaiting_write`) and never counts a question — PreToolUse could not serve, since a write it sees may still be denied. Independently of the budget, each question's `header` + `question` is reduced to a content-word fingerprint (noise words dropped, ≥ `REPEAT_MIN_WORDS` 3 words) and compared against `questions.asked_topics` (last 50): overlap ≥ `REPEAT_OVERLAP` (0.7) of the smaller set raises `repeated` and records `repeat_of`. A call whose options are **all** code tokens (path, `call()`, dotted filename, `snake_case`, `camelCase`) sets `implementation_choice` — a `warn`-grade signature of handing the user a decision the command owned, never a verdict, since a question about implementation is sometimes right.
@@ -215,7 +228,7 @@ Criteria are declared in `spec/05-gate.md` as fenced JSON blocks:
 
 ````
 ```gatekit-criterion
-{"id": "tests-pass", "argv": ["python3", "-m", "unittest", "discover"], "expect": {"exit": 0}, "timeout_s": 30, "artifacts": ["reports/junit.xml"]}
+{"id": "tests-pass", "argv": ["python", "-m", "unittest", "discover"], "expect": {"exit": 0}, "timeout_s": 30, "artifacts": ["reports/junit.xml"]}
 ```
 ````
 
@@ -626,20 +639,21 @@ more in `.gatekit/config.json`.
 `unverified` → `unverified`; else any `warn` → `warn`; else `ok`. Rendering:
 `render(v, lang)` gives the localized label; JSON always uses the English token.
 
-## 12. Doctor (`doctor.py`) — 7 axes
+## 12. Doctor (`doctor.py`) — 8 axes
 
-1 plugin files present (`bin/gatekit`, `bin/gatekit.py`, all gate scripts exist and are non-empty);
-2 hooks registered (the project's own `.claude/settings.json` has all 4 events, each routed through `bin/gatekit`);
+1 plugin files present (`bin/gatekit.py`, all gate scripts and the `scripts/*.ps1` files exist and are non-empty; `pyproject.toml` and `uv.lock` exist);
+2 hooks registered (the project's own `.claude/settings.json` has all six events, each in exec form; gates point at the `.venv` python and `bin/gatekit.py`, SessionStart at `session-check.ps1`);
 3 project state (`.gatekit/config.json` valid, approvals valid JSON);
 4 spec set (`spec.validate` verdict, or `unverified` when no `spec/`);
 5 contract freshness (`source_sha256` matches);
 6 workers (default backend `check`);
-7 python version ≥ 3.9. Each axis returns `{axis, verdict, detail, fix}` where
+7 python (the `.venv` interpreter is ≥ 3.11);
+8 uv (uv is on PATH and answers `--version`). Each axis returns `{axis, verdict, detail, fix}` where
 `fix` is a copy-pasteable command or empty. Exit 1 iff any `fail`.
 
 ## 13. Testing convention
 
-`cd .claude/gatekit && python3 -m unittest discover -s tests -v` must pass with
+`cd .claude/gatekit; uv run --frozen python -m unittest discover -s tests -v` must pass with
 no network and no external binaries. Tests that need a binary (`claude`) use a
 fake executable created in a temp dir and prepended to `PATH`. Every gate has at
 least three tests: allow, deny/block, internal-error-still-exits-0. Fixtures
@@ -696,7 +710,7 @@ unrelated `*-preview.html` capture do not.
 def project_root(cwd: str | None = None) -> pathlib.Path
 def state_dir(root: pathlib.Path) -> pathlib.Path      # root / ".gatekit"
 def spec_dir(root: pathlib.Path) -> pathlib.Path       # root / "spec"
-def plugin_root() -> pathlib.Path                      # directory containing plugin.json (parent of gatekit/)
+def gatekit_root() -> pathlib.Path                      # .claude/gatekit (parent of the gatekit/ package)
 
 # config.py
 DEFAULTS: dict

@@ -1,0 +1,84 @@
+# ADR-0018: Windows-only standalone folder, managed by uv
+
+Status: accepted 2026-09-30.
+
+## Context
+
+gatekit began as a Claude Code plugin (upstream LovelyPaul/gatekit 0.11.2):
+one plugin (ADR-0001), stdlib-only Python found by a generic interpreter name on any machine
+(ADR-0002), hooks declared in the plugin's own hook file and reached through
+the plugin-root variable, and a POSIX `sh` launcher script that searched for a
+working Python.
+This fork (yeoul9703/gatekit) serves one audience: people on Windows using
+Claude Code who want to open a folder and have it work. Supporting Mac, Linux,
+other hosts and several Python versions cost a launcher, path guessing and
+version checks that this audience never benefits from.
+
+## Decision
+
+1. **Windows and Claude Code only.** Mac/Linux and other hosts are not
+   supported. (Codex support, ADR-0006, was already not adopted here.)
+2. **Standalone folder.** gatekit lives in the project's own `.claude/`
+   (commands, skills, `settings.json`) and `.claude/gatekit/` (kernel,
+   scripts, tests). No plugin manager, no global install; opening the folder
+   is enough.
+3. **uv manages Python.** `.claude/gatekit/pyproject.toml`
+   (`requires-python >=3.11`, no runtime dependencies, `[tool.uv]
+   package=false`, dev group `pyright[nodejs]` + `ruff`) and `uv.lock` let uv
+   build `.claude/gatekit/.venv`. Commands run as `uv run --project
+   .claude/gatekit --frozen python .claude/gatekit/bin/gatekit.py <sub>`,
+   the same in PowerShell and Git Bash. Kernel code stays standard-library
+   only (ADR-0002's rule survives).
+4. **Exec-form hooks, no shell.** `.claude/settings.json` registers six
+   events (SessionStart, UserPromptSubmit, PreToolUse x3, PostToolUse x2,
+   PreCompact, Stop). Gates run
+   `${CLAUDE_PROJECT_DIR}/.claude/gatekit/.venv/Scripts/python.exe` with
+   args `bin/gatekit.py _gate <name>`. The POSIX sh wrapper is
+   deleted. `env` sets `CLAUDE_CODE_USE_POWERSHELL_TOOL=1`.
+5. **SessionStart check.** `powershell.exe -NoProfile -ExecutionPolicy
+   Bypass -File scripts/session-check.ps1` verifies uv, the `.venv` (and that
+   its `pyvenv.cfg` home still exists) and the `claude` CLI, and warns when
+   one is missing.
+6. **PowerShell scripts for setup and verification.** `scripts/setup.ps1`
+   checks by default and changes only what the user approved
+   (`-Install pwsh,uv,claude,git,venv`, `-Update`, `-Json`, `-Lang ko|en`;
+   exit 0 ready, 1 failed, 2 consent/action needed, 3 restart needed, 4
+   blocked by policy or network). `scripts/verify.ps1` runs syntax, tests,
+   pyright, ruff, doctor and a `settings.json` check.
+7. **Doctor has eight axes**: plugin files, hooks registered, project state,
+   spec set, contract freshness, workers, python (venv >= 3.11), uv.
+
+## Rationale (measured)
+
+- Start-up cost of one hook call: python directly 33 ms; `uv run` 101 ms;
+  pwsh 221 ms; Windows PowerShell 5.1 317 ms. Gates use the venv python
+  directly (about 105 ms including gatekit's own work) and pay neither the
+  `uv run` nor PowerShell cost on every prompt and tool call.
+- The exec form (`command` + `args`) works without a shell, so quoting and
+  profile-loading problems disappear.
+- A hook that points at an executable that does not exist is silently
+  ignored by Claude Code. A missing `.venv` would leave every gate off with
+  no message, so SessionStart needs its own check, and that check has to be
+  a command that exists on every Windows machine (`powershell.exe`).
+- The 3.9 release line reached end of life in 2025-10 and 3.10 reaches it in
+  2026-10;
+  pinning `>=3.11` with uv-provided interpreters avoids depending on
+  whatever the machine has.
+
+## Consequences
+
+- The only prerequisites are Claude Code (with the `claude` CLI; the desktop
+  app alone does not provide it) and uv. Recommended: PowerShell 7.6 stable
+  and winget; optional: Git for Windows. `/gatekit:setup` offers to install
+  what is missing, asking first.
+- A first session in a fresh clone has no `.venv` until `/gatekit:setup`
+  builds it; the SessionStart warning says so.
+- Some environments (corporate PCs) block winget or downloads; setup reports
+  exit code 4 rather than working around policy.
+
+## Supersedes
+
+- ADR-0001 (single plugin): replaced; there is no plugin.
+- ADR-0002: the "any machine with an old Python" wording is replaced;
+  stdlib-only stays.
+- ADR-0006 (Codex second host): already not adopted here; unchanged.
