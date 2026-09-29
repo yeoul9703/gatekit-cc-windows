@@ -65,6 +65,8 @@ Use `ko` or `en` for `<output_lang>`. The output is one JSON object:
 | S6 | the `claude` CLI on PATH (required; the desktop app alone has no CLI) |
 | S7, S18, S23 | Git, Node/npm (only with a `package.json`), Python stub note — information |
 | S15 | doctor |
+| P-pwsh, P-uv, P-claude, P-git | package table: installed version, **update available** (looked up with `winget list` only when the winget source terms are accepted, otherwise `unverified`), install method (winget / official script / other) |
+| P-failures | failed installs/updates/reinstalls recorded in `.gatekit/runs/setup-last.json` (`warn` when there are any) |
 
 Exit codes: `0` ready · `1` failed · `2` the user must allow or do something ·
 `3` a program is installed but not visible in this session (PATH), restart needed ·
@@ -94,6 +96,13 @@ switch can fix: missing, too old, a preview build, or a broken receipt:
 | `pwsh` (S2 warn: preview or older) | `-Update pwsh` | stable PowerShell 7.6; an older MSI install may show a Windows administrator prompt (UAC) | includes winget terms | tens of MB | maybe (MSI) |
 | `venv` (S5 warn: no Python; S5 fail: damaged) | `-Install venv` | Python and packages for the hooks; **a damaged `.claude/gatekit/.venv` is deleted and rebuilt** | none | Python plus packages, tens of MB | no |
 | `git` | `-Install git` (prints a command only) | Git for Windows, optional | — | — | may need it |
+| `uv` / `pwsh` / `claude` — only when the user asks for a **reinstall** (broken install, `uv self update` failing because `uv-receipt.json` is broken and `-Update uv` did not help) | `-Reinstall uv` / `-Reinstall pwsh` / `-Reinstall claude` | uv: winget `--force` when uv came from winget, otherwise the official script (repairs the receipt); pwsh: winget MSIX `--force`; claude: the official script. The version is read again afterwards | as for install | small / tens of MB | pwsh: maybe (old MSI) |
+| items recorded as failed in `P-failures` | `-RetryFailed` | retries only the recorded items with the **same action** | as recorded | as recorded | as recorded |
+
+`-Reinstall` and `-RetryFailed` are never offered on their own: use them only when the
+user asks for a reinstall, or when `P-failures` lists recorded failures. `-Reinstall` accepts
+only `uv`, `pwsh`, `claude` (git and venv are refused: git is guidance only, venv is rebuilt
+with `-Install venv`).
 
 If there are no candidates, skip to Step 5. Otherwise ask **one**
 `AskUserQuestion` (it is deliberately not in `allowed-tools`, so the choice window
@@ -131,6 +140,25 @@ Both switches may be given in one call:
 ```
 powershell -NoProfile -ExecutionPolicy Bypass -File .claude/gatekit/scripts/setup.ps1 -Install uv,claude,venv -Update pwsh -Json -Lang <output_lang>
 ```
+
+A reinstall is a separate permission, asked in the same way (name, what it does, terms,
+download size, administrator rights) before running:
+
+```
+powershell -NoProfile -ExecutionPolicy Bypass -File .claude/gatekit/scripts/setup.ps1 -Reinstall uv -Json -Lang <output_lang>
+```
+
+**Retry after a failure.** If `P-failures` is `warn`, say which items failed and why (the
+class and message are in the item), and ask **again** — the earlier permission does not
+carry over — before running:
+
+```
+powershell -NoProfile -ExecutionPolicy Bypass -File .claude/gatekit/scripts/setup.ps1 -RetryFailed -Json -Lang <output_lang>
+```
+
+It retries only the recorded items with the same action; with no record it prints one info
+line and does nothing. To look at the table and the record without the `.venv` and doctor
+steps, use `-Status` (no permission needed, nothing changes).
 
 `-Update git` never runs anything: Git is left as it is. Only the names in `-Install` / `-Update` receive
 winget's `--accept-source-agreements --accept-package-agreements`, which is why the
@@ -173,3 +201,12 @@ not a pass; builds will still run); `fail` — the binary is missing.
 A project that wants an additional worker backend can add one to
 `.gatekit/config.json`'s `worker.backends` by hand (see `docs/USAGE.md`), then
 enable it with `workers enable <name>`.
+
+## Reference
+
+Copy-and-paste commands for every tool (install, update, reinstall, version check with winget
+or the official script, administrator needs), the switch/CLI table, the exit codes, common
+winget error codes and a message for the IT contact are in `docs/SETUP-REFERENCE.md`. When the
+uv or the `.venv` is broken, `gatekit.py setup` cannot start: run `scripts/setup.ps1` directly
+(the same switches, section 9 of that document). Tell the user this in plain words if a step
+fails and the CLI is unreachable.

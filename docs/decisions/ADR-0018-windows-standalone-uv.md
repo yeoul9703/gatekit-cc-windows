@@ -41,7 +41,9 @@ version checks that this audience never benefits from.
    one is missing.
 6. **PowerShell scripts for setup and verification.** `scripts/setup.ps1`
    checks by default and changes only what the user approved
-   (`-Install pwsh,uv,claude,git,venv`, `-Update`, `-Json`, `-Lang ko|en`;
+   (`-Install pwsh,uv,claude,git,venv`, `-Update`, `-Reinstall uv,pwsh,claude`, `-RetryFailed`, `-Status`, `-Json`, `-Lang ko|en`;
+   program ids and urls live in `scripts/packages.json`, failures in `.gatekit/runs/setup-last.json`,
+   and `gatekit.py setup` forwards to the script; see `docs/SETUP-REFERENCE.md`;
    exit 0 ready, 1 failed, 2 consent/action needed, 3 restart needed, 4
    blocked by policy or network). `scripts/verify.ps1` runs syntax, tests,
    pyright, ruff, doctor and a `settings.json` check.

@@ -7,5 +7,6 @@
 Claude Code와 uv뿐이며, Python은 uv가 준비하고 코드는 표준 라이브러리만 씁니다.
 
 - 사용법 (처음 쓰는 분): [docs/USAGE.md](docs/USAGE.md)
+- 설치·업데이트·재설치 참조: [docs/SETUP-REFERENCE.md](docs/SETUP-REFERENCE.md)
 - 설계 (개발자): [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 - 결정 기록: [docs/decisions/ADR-0018-windows-standalone-uv.md](docs/decisions/ADR-0018-windows-standalone-uv.md)

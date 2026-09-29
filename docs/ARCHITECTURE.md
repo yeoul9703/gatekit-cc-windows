@@ -56,7 +56,7 @@ directories) but contains no code copied from any other project.
 │       │   └── gatekit.py               # entry point: sys.path bootstrap, then cli.main
 │       ├── pyproject.toml, uv.lock      # requires-python >=3.14, no runtime deps, [tool.uv] package=false, dev group pyright[nodejs]+ruff
 │       ├── .venv/                       # built by uv from uv.lock (ignored)
-│       ├── scripts/                     # setup.ps1 (check/-Install/-Update), session-check.ps1 (SessionStart), verify.ps1
+│       ├── scripts/                     # setup.ps1 (check/-Install/-Update/-Reinstall/-RetryFailed/-Status), packages.json (single source of winget ids, script urls, minimum versions), session-check.ps1 (SessionStart), verify.ps1
 │       ├── gatekit/                     # kernel package (stdlib only)
 │       │   ├── cli.py         dispatcher: `bin/gatekit.py <sub>`; `_gate <name>` dispatches to a gate module
 │       │   ├── hookio.py      hook stdin/stdout contract, safe wrapper (§3)
