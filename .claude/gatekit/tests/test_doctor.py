@@ -157,6 +157,21 @@ class TestAxisHooksRegistered(DoctorTestCase):
         self.assertEqual(result["verdict"], verdict.FAIL)
         self.assertIn("Stop", result["detail"])
 
+    def test_missing_precompact_registration_is_not_ok(self) -> None:
+        # Spelled out (not derived from doctor.EXPECTED_HOOK_EVENTS) so the
+        # test fails if doctor stops checking PreCompact.
+        entry = {"hooks": [{"type": "command",
+                            "command": "\"$CLAUDE_PROJECT_DIR/.claude/gatekit/bin/gatekit\" _gate write"}]}
+        hooks = {event: [entry] for event in
+                 ("UserPromptSubmit", "PreToolUse", "PostToolUse", "Stop")}
+        self.write_project_settings(hooks)
+        result = doctor.axis_hooks_registered(self.root)
+        self.assertNotEqual(result["verdict"], verdict.OK)
+        self.assertIn("PreCompact", result["detail"])
+
+    def test_gate_scripts_include_compact(self) -> None:
+        self.assertIn("compact.py", doctor.GATE_SCRIPTS)
+
     def test_hooks_not_routed_through_wrapper_fails(self) -> None:
         hooks = {event: [{"hooks": [{"type": "command", "command": "python3 somewhere.py"}]}]
                  for event in doctor.EXPECTED_HOOK_EVENTS}

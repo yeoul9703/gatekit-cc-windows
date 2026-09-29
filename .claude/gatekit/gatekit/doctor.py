@@ -14,10 +14,11 @@ import sys
 from gatekit import paths, verdict
 
 #: Gate scripts that must exist and be non-empty for axis 1.
-GATE_SCRIPTS = ("prompt.py", "write.py", "bash.py", "spawn.py", "question.py", "stop.py")
+GATE_SCRIPTS = ("prompt.py", "write.py", "bash.py", "spawn.py", "question.py", "stop.py",
+                "compact.py")
 
 #: Hook events axis 2 expects to find registered in the running install.
-EXPECTED_HOOK_EVENTS = ("UserPromptSubmit", "PreToolUse", "PostToolUse", "Stop")
+EXPECTED_HOOK_EVENTS = ("UserPromptSubmit", "PreToolUse", "PostToolUse", "PreCompact", "Stop")
 
 MIN_PYTHON = (3, 9)
 
