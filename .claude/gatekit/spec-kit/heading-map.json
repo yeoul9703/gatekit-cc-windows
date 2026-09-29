@@ -1,0 +1,149 @@
+{
+  "version": 1,
+  "note": "Canonical H2 headings per spec file per language. spec.validate requires every heading listed here to be present in the corresponding file, and requires that no heading belonging to the other language's set appears in it. Order is not enforced; presence is. Files listed in absent_ok are optional stages: their absence produces no finding at all. 02-screens.md is deliberately NOT in absent_ok: its absence is a plain missing_optional warn by default, escalated to a fail against 04-tasks.md by spec.py's _check_screens_required (ADR-0017) whenever 01-prd.md is UI-bearing (no [non-ui] marker) — a conditional rule that a static list cannot express.",
+  "files": [
+    "00-discovery.md",
+    "01-prd.md",
+    "02-screens.md",
+    "02-design.md",
+    "03-architecture.md",
+    "04-tasks.md",
+    "05-gate.md",
+    "RECOVERY.md",
+    "PROGRESS.md"
+  ],
+  "required_files": [
+    "01-prd.md",
+    "05-gate.md"
+  ],
+  "ko": {
+    "00-discovery.md": [
+      "## 불편 목록",
+      "## 고른 문제",
+      "## 기한",
+      "## 심화 게이트",
+      "## 남은 것"
+    ],
+    "01-prd.md": [
+      "## 문제",
+      "## 현재 상태 (측정값)",
+      "## 목표",
+      "## 목표가 아닌 것",
+      "## 사용자",
+      "## 기능",
+      "## 수용 기준",
+      "## 가정 원장"
+    ],
+    "02-screens.md": [
+      "## 화면 목록",
+      "## 화면 흐름",
+      "## 화면별 상태",
+      "## 컴포넌트",
+      "## 디자인 토큰",
+      "## 근거 없는 영역"
+    ],
+    "02-design.md": [
+      "## 출처",
+      "## 디자인 패턴",
+      "## 컴포넌트",
+      "## 디자인 토큰",
+      "## 근거 없는 영역"
+    ],
+    "03-architecture.md": [
+      "## 스택",
+      "## 데이터 모델",
+      "## 식별자와 토큰",
+      "## 외부 연동",
+      "## 제약"
+    ],
+    "04-tasks.md": [
+      "## 작업 목록",
+      "## 실행 순서",
+      "## 범위 규칙"
+    ],
+    "05-gate.md": [
+      "## 완료 기준",
+      "## 완료로 보지 않는 조건",
+      "## 증거 수집 방법"
+    ],
+    "RECOVERY.md": [
+      "## 진단 루프",
+      "## 재시도 한도",
+      "## 범위 잠금",
+      "## 롤백 절차"
+    ],
+    "PROGRESS.md": [
+      "## 현재 상태",
+      "## 마일스톤",
+      "## 실패한 시도",
+      "## 마지막 검증"
+    ]
+  },
+  "en": {
+    "00-discovery.md": [
+      "## Pain list",
+      "## Chosen problem",
+      "## Deadline",
+      "## Deepening gates",
+      "## Open items"
+    ],
+    "01-prd.md": [
+      "## Problem",
+      "## Current state (measured)",
+      "## Goals",
+      "## Non-goals",
+      "## Users",
+      "## Features",
+      "## Acceptance criteria",
+      "## Assumption ledger"
+    ],
+    "02-screens.md": [
+      "## Screen list",
+      "## Screen flow",
+      "## Per-screen states",
+      "## Components",
+      "## Design tokens",
+      "## Negative space"
+    ],
+    "02-design.md": [
+      "## Sources",
+      "## Design patterns",
+      "## Components",
+      "## Design tokens",
+      "## Not covered"
+    ],
+    "03-architecture.md": [
+      "## Stack",
+      "## Data model",
+      "## Identifiers and tokens",
+      "## External integrations",
+      "## Constraints"
+    ],
+    "04-tasks.md": [
+      "## Task list",
+      "## Execution order",
+      "## Scope rules"
+    ],
+    "05-gate.md": [
+      "## Completion criteria",
+      "## Not counted as done",
+      "## How evidence is collected"
+    ],
+    "RECOVERY.md": [
+      "## Diagnosis loop",
+      "## Retry limit",
+      "## Scope lock",
+      "## Rollback procedure"
+    ],
+    "PROGRESS.md": [
+      "## Status",
+      "## Milestones",
+      "## Failed attempts",
+      "## Last verification"
+    ]
+  },
+  "absent_ok": [
+    "00-discovery.md",
+    "02-design.md"
+  ]
+}

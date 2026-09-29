@@ -1,0 +1,72 @@
+{
+  "version": 1,
+  "note": "Generic-looking or unfinished AI-output patterns the verify evaluator checks a build screenshot against (ADR-0017 decision 9). Unlike presets/design/ (recommendations, only committed after a real build observes them), this is a refusal list, and it grows by citation: a new row names where the pattern was seen. Evidence prefixes say how strong that is — `seed:` a reviewed conversation, `observed:` a gatekit trial whose screenshot showed it, `reported:` a failure observed in another project's screenshot review and described to this one, not reproduced here. AP1-AP5 are about a screen looking generic; AP7-AP11 are about a screen looking unfinished, which review evidence says is the more common failure and is only visible once something is actually rendered.",
+  "patterns": [
+    {
+      "id": "AP1",
+      "name": "unstated gradient hero",
+      "rule": "A hero or header section uses a purple-to-blue (or similarly saturated) gradient with no stated reason tying it to the project's own design direction.",
+      "evidence": "seed:chatgpt-review-2026-09-19"
+    },
+    {
+      "id": "AP2",
+      "name": "single-face typography",
+      "rule": "Every text role (heading, body, label) uses the same sans-serif family (commonly Inter or a system font) with no second face for contrast.",
+      "evidence": "seed:chatgpt-review-2026-09-19"
+    },
+    {
+      "id": "AP3",
+      "name": "identical-card layout",
+      "rule": "A page or section is built entirely from identically-shaped cards laid out in a row, with no other layout device.",
+      "evidence": "seed:chatgpt-review-2026-09-19"
+    },
+    {
+      "id": "AP4",
+      "name": "decorative emoji as icons",
+      "rule": "Emoji stand in for icons in navigation, feature lists, or section markers instead of an icon set or no icon at all.",
+      "evidence": "seed:chatgpt-review-2026-09-19"
+    },
+    {
+      "id": "AP5",
+      "name": "centered-everything layout",
+      "rule": "Every block of content is center-aligned with no deliberate asymmetry anywhere on the screen. This is about alignment inside the content area; how much of the window that area occupies is AP7.",
+      "evidence": "seed:chatgpt-review-2026-09-19"
+    },
+    {
+      "id": "AP6",
+      "name": "no styling at all",
+      "rule": "The screen renders as unstyled semantic HTML with no stylesheet, no design tokens applied, and no visual hierarchy — the browser's own defaults are the entire visual design.",
+      "evidence": "observed:gk-todo-2026-09-19"
+    },
+    {
+      "id": "AP7",
+      "name": "centered column on a wide screen",
+      "rule": "Page content is locked to a narrow centered column (a max-width wrapper plus auto margins) so that on a wide monitor the left and right thirds of the window are empty bands, while the content itself is cramped. A deliberately narrow measure for running prose is not this; a dashboard, table or tool screen that leaves most of the viewport unused is.",
+      "evidence": "reported:external-design-review-2026-09-29"
+    },
+    {
+      "id": "AP8",
+      "name": "unfilled vertical space",
+      "rule": "Blocks stack to their own natural height and stop, leaving a wide empty band below the last one instead of the primary work surface growing to fill the window. Judged on the first screenful: the screen looks unfinished rather than short.",
+      "evidence": "reported:external-design-review-2026-09-29"
+    },
+    {
+      "id": "AP9",
+      "name": "error state that reads as data",
+      "rule": "A screen that failed to load renders its figures as though they were real values — a metric showing 0 with a trend indicator beside it, a chart drawn with empty axes, or a list showing its empty state — so the viewer cannot tell 'we could not load this' from 'the answer is zero'. Failure must be visibly different from emptiness.",
+      "evidence": "reported:external-design-review-2026-09-29"
+    },
+    {
+      "id": "AP10",
+      "name": "table-only dashboard",
+      "rule": "A screen presented as a dashboard or overview contains only a table (or only a single block), with none of the summary figures, chart, or activity list that make an overview readable at a glance. Judged only against screens the spec calls an overview or dashboard.",
+      "evidence": "reported:external-design-review-2026-09-29"
+    },
+    {
+      "id": "AP11",
+      "name": "missing loading, empty and error states",
+      "rule": "Only the populated normal state is implemented; the same screen under loading, with no data, and after a failure shows either nothing, a raw error string, or the normal layout with blanks in it. The screen spec names four states and the build has one.",
+      "evidence": "reported:external-design-review-2026-09-29"
+    }
+  ]
+}
