@@ -24,22 +24,11 @@ import tempfile
 import time
 from typing import Optional
 
-from gatekit import config, paths, spec, verdict, workers
+from gatekit import config, jobstore, paths, spec, verdict, workers
 
-STATES = (
-    "queued",
-    "running",
-    "gating",
-    "passed",
-    "failed",
-    "timeout",
-    "redelegated",
-    "stopped",   # ADR-0009: ended by `jobs stop`
-    "blocked",   # ADR-0009: a dependency did not pass
-)
-
-#: States after which a task will not change again on its own.
-TERMINAL_STATES = ("passed", "failed", "timeout", "redelegated", "stopped", "blocked")
+#: States after which a task will not change again on its own. Defined once in
+#: jobstore (spec.py reads the same list); see there for every state a task has.
+TERMINAL_STATES = jobstore.TERMINAL_STATES
 #: Terminal states that mean "not done" for the job verdict. `blocked` is not
 #: here: a task that never ran was not judged, and the job verdict reports it
 #: as `unverified`, never `fail` (the cardinal rule).
@@ -150,16 +139,8 @@ def jobs_dir(root):
     return paths.state_dir(root) / "jobs"
 
 
-def job_dir(root, job_id: str):
-    return jobs_dir(root) / job_id
-
-
-def latest_job_id(root) -> Optional[str]:
-    base = jobs_dir(root)
-    if not base.is_dir():
-        return None
-    names = sorted(p.name for p in base.iterdir() if (p / "job.json").is_file())
-    return names[-1] if names else None
+job_dir = jobstore.job_dir
+latest_job_id = jobstore.latest_job_id
 
 
 def load_tasks(root) -> list:
@@ -1052,11 +1033,6 @@ def _run_wave(root, jdir, job_id, wave, backend, timeout_s, parallel) -> None:
 
 def _stop_requested(jdir) -> bool:
     return (pathlib.Path(jdir) / STOP_MARKER).is_file()
-
-
-def _task_state(jdir, task_id: str) -> str:
-    st = read_json(_task_dir(jdir, task_id) / "status.json", {}) or {}
-    return str(st.get("state", "queued"))
 
 
 def _split_wave_by_dependencies(jdir, wave: list, job_task_ids: set) -> tuple:

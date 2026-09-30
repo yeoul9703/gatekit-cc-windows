@@ -30,7 +30,7 @@ import sys
 from typing import Any, Dict, List, Optional, TypeGuard, Union
 
 from gatekit import lang as lang_mod
-from gatekit import paths
+from gatekit import jobstore, paths
 from gatekit import verdict as V
 
 # --------------------------------------------------------------------------
@@ -832,7 +832,8 @@ def _check_traceability(tasks_text: str, gate_text: str, lang: str) -> List[dict
 # progress freshness
 # --------------------------------------------------------------------------
 
-_TERMINAL_STATES = ("passed", "failed", "timeout", "redelegated")
+#: The one definition lives in jobstore: a stopped or blocked task is finished too.
+_TERMINAL_STATES = jobstore.TERMINAL_STATES
 
 
 def _latest_job_finish(root: pathlib.Path):
