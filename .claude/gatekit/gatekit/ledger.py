@@ -15,7 +15,6 @@ subsequent gate in the session.
 """
 from __future__ import annotations
 
-import argparse
 import datetime
 import fnmatch
 import json
@@ -314,6 +313,8 @@ class Ledger:
 
 def run(argv: List[str]) -> int:
     """``python3 -m gatekit ledger <show|init|set-pipeline> --session <id>``."""
+    import argparse  # CLI only; the hooks that import ledger never parse arguments
+
     parser = argparse.ArgumentParser(prog="gatekit ledger", add_help=True)
     parser.add_argument("action", choices=["show", "init", "set-pipeline"])
     parser.add_argument(

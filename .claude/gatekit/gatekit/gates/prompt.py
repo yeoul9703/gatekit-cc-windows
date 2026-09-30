@@ -159,13 +159,14 @@ def build_context(root, led: "ledger.Ledger") -> str:
 def _live_build(root) -> str:
     """``build=<job> n/m passed, next: <task>`` for an unfinished job, else ""."""
     try:
-        from gatekit import jobs
+        # jobstore and util, not jobs: jobs.py is the heavy runner a hook must not import.
+        from gatekit import jobstore, util
 
-        job_id = jobs.latest_job_id(root)
+        job_id = jobstore.latest_job_id(root)
         if not job_id:
             return ""
-        jdir = jobs.job_dir(root, job_id)
-        job = jobs.read_json(jdir / "job.json", None)
+        jdir = jobstore.job_dir(root, job_id)
+        job = util.read_json(jdir / "job.json", None)
         if not isinstance(job, dict) or job.get("finished_at"):
             return ""
         task_ids = [str(t) for t in (job.get("tasks") or [])]
@@ -173,7 +174,7 @@ def _live_build(root) -> str:
             return ""
         passed, next_task = 0, ""
         for task_id in task_ids:
-            state = str((jobs.read_json(
+            state = str((util.read_json(
                 jdir / "tasks" / task_id / "status.json", {}) or {}).get("state", "queued"))
             if state == "passed":
                 passed += 1

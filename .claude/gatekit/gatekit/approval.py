@@ -18,7 +18,6 @@ recorded hash would defeat the entire mechanism.
 """
 from __future__ import annotations
 
-import argparse
 import datetime
 import json
 import pathlib
@@ -133,6 +132,8 @@ def approve(
 
 def run(argv: List[str]) -> int:
     """``gatekit approve <path> [--note]`` / ``check <path>`` / ``list``."""
+    import argparse  # CLI only; hooks that import approval never parse arguments
+
     parser = argparse.ArgumentParser(prog="gatekit approve", add_help=True)
     parser.add_argument(
         "action_or_path",

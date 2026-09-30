@@ -21,13 +21,11 @@ stays a list, so a criterion cannot smuggle in shell metacharacters.
 """
 from __future__ import annotations
 
-import argparse
 import datetime
 import json
 import os
 import pathlib
 import re
-import subprocess
 import sys
 import time
 from typing import Any, Dict, List, Optional
@@ -382,6 +380,7 @@ def _run_one(
     root: pathlib.Path, crit: Dict[str, Any], remaining: float
 ) -> Dict[str, Any]:
     """Execute one criterion and classify the outcome."""
+    import subprocess  # here, not at the top: most hook calls only read the contract, never run it
     result: Dict[str, Any] = {
         "id": crit["id"],
         "verdict": verdict.UNVERIFIED,
@@ -521,6 +520,8 @@ def execute(
 
 def run(argv: List[str]) -> int:
     """``gatekit contract derive|status|run [--json]``."""
+    import argparse  # CLI only; hooks that import contract never parse arguments
+
     parser = argparse.ArgumentParser(prog="gatekit contract", add_help=True)
     parser.add_argument("action", choices=["derive", "status", "run"])
     parser.add_argument("--root", default=None)
