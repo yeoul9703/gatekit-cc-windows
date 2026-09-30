@@ -34,8 +34,17 @@ PARSE_SNIPPET = (
 
 class TestScriptFiles(unittest.TestCase):
     def test_expected_scripts_exist(self) -> None:
-        for name in ("session-check.ps1", "setup.ps1", "verify.ps1"):
+        for name in ("common.ps1", "session-check.ps1", "setup.ps1", "verify.ps1"):
             self.assertTrue((SCRIPTS / name).is_file(), name)
+
+    def test_common_ps1_is_in_the_bom_and_syntax_checks(self) -> None:
+        # The BOM, PowerShell 7 syntax, Read-Host and 5.1 parse checks all walk SCRIPTS.glob("*.ps1"):
+        # the shared file must be part of that walk, and it must start with the one-line summary.
+        self.assertIn("common.ps1", [path.name for path in SCRIPTS.glob("*.ps1")])
+        raw = (SCRIPTS / "common.ps1").read_bytes()
+        self.assertEqual(raw[:3], b"\xef\xbb\xbf")
+        first = raw.decode("utf-8-sig").splitlines()[0]
+        self.assertTrue(first.startswith("# common.ps1"), first)
 
     def test_every_script_has_a_utf8_bom(self) -> None:
         # Windows PowerShell 5.1 decodes BOM-less files as the ANSI code page,
@@ -203,6 +212,7 @@ class SetupCase(unittest.TestCase):
         self.kit = self.root / ".claude" / "gatekit"
         (self.kit / "scripts").mkdir(parents=True)
         shutil.copy(SCRIPTS / "setup.ps1", self.kit / "scripts" / "setup.ps1")
+        shutil.copy(SCRIPTS / "common.ps1", self.kit / "scripts" / "common.ps1")
         shutil.copy(SCRIPTS / "packages.json", self.kit / "scripts" / "packages.json")
         shutil.copy(PROJECT / ".claude" / "settings.json", self.root / ".claude" / "settings.json")
         self.bin = self.root / "fakebin"
@@ -645,6 +655,17 @@ class TestSetupVenv(SetupCase):
         self.assertIn("outdated folder", out)
         self.assertFalse(marker.exists(), out)  # deleted and rebuilt
         self.assertEqual(len(self.sync_calls()), 1)
+
+    def test_minimum_python_comes_from_packages_json(self) -> None:
+        self.fake_uv("build")
+        self.run_setup("-Install", "venv", "-Lang", "en")
+        pk = self.kit / "scripts" / "packages.json"
+        data = json.loads(pk.read_text(encoding="utf-8"))
+        data["python_min"] = "3.99"
+        pk.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        code, _, by_id = self.run_json("-Lang", "en")
+        self.assertEqual(by_id["S5"]["verdict"], "warn", by_id["S5"])
+        self.assertIn("older than the required 3.99", by_id["S5"]["detail"])
 
     def test_default_minimum_python_is_3_14(self) -> None:
         text = (SCRIPTS / "setup.ps1").read_bytes().decode("utf-8-sig")

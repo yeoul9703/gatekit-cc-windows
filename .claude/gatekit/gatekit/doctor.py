@@ -21,7 +21,7 @@ GATE_SCRIPTS = ("prompt.py", "write.py", "bash.py", "spawn.py", "question.py", "
                 "compact.py")
 
 #: PowerShell scripts under ``<gatekit root>/scripts`` that axis 1 requires.
-POWERSHELL_SCRIPTS = ("session-check.ps1", "setup.ps1", "verify.ps1")
+POWERSHELL_SCRIPTS = ("common.ps1", "session-check.ps1", "setup.ps1", "verify.ps1")
 
 #: Other files (relative to the gatekit root) that axis 1 requires.
 PROJECT_FILES = ("bin/gatekit.py", "pyproject.toml", "uv.lock")
@@ -30,8 +30,23 @@ PROJECT_FILES = ("bin/gatekit.py", "pyproject.toml", "uv.lock")
 EXPECTED_HOOK_EVENTS = ("SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse",
                         "PreCompact", "Stop")
 
-#: The venv's interpreter must be at least this (``requires-python`` in pyproject.toml).
+#: Fallback when ``scripts/packages.json`` has no readable ``python_min``.
 MIN_PYTHON = (3, 14)
+
+
+def min_python(packages_json=None) -> tuple:
+    """``python_min`` of ``scripts/packages.json`` (the single source shared with the
+    PowerShell scripts) as ``(major, minor)``; :data:`MIN_PYTHON` if it cannot be read."""
+    try:
+        path = packages_json or (paths.gatekit_root() / "scripts" / "packages.json")
+        with open(path, encoding="utf-8-sig") as fh:
+            text = str(json.load(fh).get("python_min", ""))
+        match = re.fullmatch(r"(\d+)\.(\d+)", text)
+        if match:
+            return (int(match.group(1)), int(match.group(2)))
+    except (OSError, ValueError, AttributeError):
+        pass
+    return MIN_PYTHON
 
 
 #: Output language of the axis texts: "en" (default) or "ko" (``--lang ko``).
@@ -376,10 +391,11 @@ def axis_python(root) -> dict:
                      _t(".venv exists but its version could not be read from pyvenv.cfg",
                         ".venv 는 있지만 pyvenv.cfg 에서 버전을 읽지 못했습니다"), setup_fix)
     text = "%d.%d.%d" % version
-    if version[:2] < MIN_PYTHON:
+    wanted = min_python()
+    if version[:2] < wanted:
         return _axis("python", verdict.FAIL,
                      _t("venv python %s is below the required %d.%d",
-                        ".venv 의 파이썬 %s 이(가) 필요한 %d.%d 보다 낮습니다") % (text, *MIN_PYTHON),
+                        ".venv 의 파이썬 %s 이(가) 필요한 %d.%d 보다 낮습니다") % (text, *wanted),
                      _t("rebuild the venv: /gatekit:setup (-Install venv), or delete "
                         ".claude/gatekit/.venv and run uv sync --project .claude/gatekit --frozen",
                         ".venv 를 다시 만드세요: /gatekit:setup (-Install venv), 또는 .claude/gatekit/.venv 를 지운 뒤 "

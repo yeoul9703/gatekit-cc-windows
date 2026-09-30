@@ -24,6 +24,14 @@ class TestPackagesFile(unittest.TestCase):
         raw.decode("utf-8")
         self.assertEqual(load()["schema"], 1)
 
+    def test_python_min_matches_python_version_and_pyproject(self) -> None:
+        wanted = load()["python_min"]
+        self.assertRegex(wanted, r"^\d+\.\d+$")
+        kit = PACKAGES.parent.parent
+        self.assertEqual((kit / ".python-version").read_text(encoding="utf-8").strip(), wanted)
+        self.assertIn('requires-python = ">=%s"' % wanted,
+                      (kit / "pyproject.toml").read_text(encoding="utf-8"))
+
     def test_the_four_managed_packages_have_every_field(self) -> None:
         packages = {p["key"]: p for p in load()["packages"]}
         self.assertEqual(sorted(packages), ["claude", "git", "pwsh", "uv"])

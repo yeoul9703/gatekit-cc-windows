@@ -37,9 +37,10 @@
 # Nothing here asks a question (no Read-Host); winget always gets --disable-interactivity.
 # Every external call has a timeout; on timeout the whole process tree is killed (taskkill /T /F).
 #
-# The check looks at the PATH of THIS session only (the same rule as session-check.ps1).
-# A program that is visible only after merging the registry PATH (Machine + User) is reported
-# as warn and exit 3: close the Claude app (VS Code window) completely and open it again.
+# The check looks at the PATH of THIS session only (the same rule as session-check.ps1: both use
+# Get-App from common.ps1). A program that is visible only after merging the registry PATH
+# (Machine + User) is reported as warn and exit 3: close the Claude app (VS Code window)
+# completely and open it again.
 #
 # Exit codes (when several problems mix, the FIRST matching row wins):
 #   1  something failed that a permission cannot fix (bad switch, .venv or config
@@ -51,7 +52,8 @@
 #      old, Python must be downloaded, .venv is broken, or a program needs administrator rights)
 #   0  ready
 # Test hooks (environment): GATEKIT_SETUP_KEEP_PATH=1 never reads the registry PATH;
-#   GATEKIT_SETUP_REGISTRY_PATH replaces the registry PATH value; GATEKIT_SETUP_SYNC_TIMEOUT
+#   GATEKIT_SETUP_REGISTRY_PATH replaces the registry PATH value (these two are read by
+#   common.ps1, so session-check.ps1 honors them too); GATEKIT_SETUP_SYNC_TIMEOUT
 #   (seconds) replaces the 300 second uv sync limit; GATEKIT_SETUP_MIN_PYTHON (major.minor)
 #   replaces the required 3.14 for the .venv Python; GATEKIT_SETUP_LIST_TIMEOUT (seconds) replaces
 #   the 30 second `winget list` limit of the package table; GATEKIT_SETUP_OFFICIAL_RUNNER is an
@@ -80,6 +82,14 @@ $dash = [string][char]0x2014
 $allowed = @('pwsh', 'uv', 'claude', 'git', 'venv')
 $allowedReinstall = @('uv', 'pwsh', 'claude')
 
+# The PATH rule and the ASCII-only JSON live in common.ps1 (shared with session-check.ps1).
+# Nothing below can run without it.
+try { . "$PSScriptRoot\common.ps1" } catch {
+    Write-Host ('[fail] scripts/common.ps1: ' + $_.Exception.Message)
+    Write-Host '       git checkout .claude/gatekit/scripts/common.ps1'
+    exit 1
+}
+
 # scripts/packages.json is the single source for winget ids, installer types, official script
 # urls and minimum versions. Nothing below hard-codes them.
 $script:pkgs = @{}
@@ -97,6 +107,7 @@ try {
     if ($script:pkgs['pwsh'].min_version) { $pwshMinimum = [version]$script:pkgs['pwsh'].min_version }
 } catch { }
 $pythonMinimum = [version]'3.14'
+try { if ("$($pkgData.python_min)" -match '^\d+\.\d+$') { $pythonMinimum = [version]$pkgData.python_min } } catch { }
 if ($env:GATEKIT_SETUP_MIN_PYTHON -match '^\d+\.\d+$') { $pythonMinimum = [version]$env:GATEKIT_SETUP_MIN_PYTHON }
 $syncTimeout = 300
 $listTimeout = 30
@@ -152,16 +163,7 @@ function Get-ExitCode {
     return 0
 }
 
-# -Json must be pure ASCII: every char above 0x7E becomes \uXXXX.
-function ConvertTo-AsciiJson([string]$json) {
-    $sb = New-Object System.Text.StringBuilder
-    foreach ($ch in $json.ToCharArray()) {
-        $code = [int]$ch
-        if ($code -gt 126) { [void]$sb.AppendFormat('\u{0:x4}', $code) } else { [void]$sb.Append($ch) }
-    }
-    return $sb.ToString()
-}
-
+# -Json must be pure ASCII: ConvertTo-AsciiJson (common.ps1) turns every char above 0x7E into \uXXXX.
 function Complete-Run {
     $code = Get-ExitCode
     if ($script:showSummary -and ($code -ne 0 -or $script:done.Count -gt 0 -or $script:failedActions.Count -gt 0)) {
@@ -316,7 +318,7 @@ if ($updateList -contains 'venv') {
 }
 if ($argsBad) { $script:showSummary = $false; Set-Flag 'fail'; Complete-Run }
 
-# ---- process and PATH helpers ------------------------------------------------
+# ---- process and version helpers (the PATH rule, Find-App and Get-App, is in common.ps1) ----
 function Quote-Arg([string]$a) {
     if ($a -eq '') { return '""' }
     if ($a -match '[\s"]') { return '"' + ($a -replace '"', '\"') + '"' }
@@ -369,53 +371,9 @@ function Invoke-Proc([string]$file, [string[]]$argList, [int]$timeoutSec = 20) {
     return $res
 }
 
-# Looks a program up on $pathValue (default: the current process PATH).
-function Find-App([string]$name, [string]$pathValue = '') {
-    $saved = $env:Path
-    if ($pathValue) { $env:Path = $pathValue }
-    try { return @(Get-Command $name -CommandType Application -ErrorAction SilentlyContinue) }
-    finally { $env:Path = $saved }
-}
-
 function Get-VersionFrom([string]$text) {
     if ($text -match '(\d+)\.(\d+)\.(\d+)') { return [version]($Matches[1] + '.' + $Matches[2] + '.' + $Matches[3]) }
     return $null
-}
-
-# Machine + User PATH from the registry merged with this session's PATH (installers write the
-# registry, not the running process). Never assigned to the session: it is only used to tell
-# "installed but not visible in this session" apart from "not installed".
-function Get-MergedPath {
-    if ($env:GATEKIT_SETUP_KEEP_PATH -eq '1') { return $script:sessionPath }
-    if ($env:GATEKIT_SETUP_REGISTRY_PATH) {
-        $machine = $env:GATEKIT_SETUP_REGISTRY_PATH
-        $user = ''
-    } else {
-        $machine = [Environment]::GetEnvironmentVariable('Path', 'Machine')
-        $user = [Environment]::GetEnvironmentVariable('Path', 'User')
-    }
-    $seen = @{}
-    $merged = @()
-    foreach ($src in @($machine, $user, $script:sessionPath)) {
-        foreach ($e in ("$src" -split ';')) {
-            $t = [Environment]::ExpandEnvironmentVariables($e.Trim())
-            if ($t) {
-                $key = $t.ToLower().TrimEnd('\')
-                if (-not $seen.ContainsKey($key)) { $seen[$key] = $true; $merged += $t }
-            }
-        }
-    }
-    return ($merged -join ';')
-}
-
-# where = session (found on this session's PATH) / registry (only after merging the registry
-# PATH: restart needed) / none.
-function Get-App([string]$name) {
-    $s = Find-App $name $script:sessionPath
-    if ($s.Count -gt 0) { return @{ apps = $s; where = 'session' } }
-    $m = Find-App $name (Get-MergedPath)
-    if ($m.Count -gt 0) { return @{ apps = $m; where = 'registry' } }
-    return @{ apps = @(); where = 'none' }
 }
 
 function Add-RestartItem([string]$id, [string]$level, [string]$name, [string]$found) {
@@ -614,7 +572,7 @@ function Confirm-Reinstalled([string]$name, [string]$path) {
 function Invoke-Action([string]$name, [string]$mode) {
     if ($name -eq 'venv') { return }                     # handled by the .venv step below
     $script:currentAction = $mode
-    $found = Get-App $name
+    $found = Get-App $name $script:sessionPath
     $apps = $found.apps
     $present = ($found.where -ne 'none')
     if ($mode -eq 'install' -and $present) {
@@ -740,7 +698,7 @@ function Invoke-Action([string]$name, [string]$mode) {
         }
     }
     if ($ok) {
-        $after = Get-App $name
+        $after = Get-App $name $script:sessionPath
         if ($after.where -eq 'none') {
             Set-Flag 'restart'
             [void]$script:failedActions.Add($name)
@@ -794,7 +752,7 @@ if ($mark) {
 }
 
 # S3 winget ---------------------------------------------------------------------
-$wingetFound = Get-App 'winget'
+$wingetFound = Get-App 'winget' $script:sessionPath
 $wingetApp = $wingetFound.apps
 if ($wingetFound.where -eq 'none') {
     Add-Item 'S3' 'recommended' 'winget' 'warn' (T '없음' 'not found') (T 'Microsoft Store 의 "앱 설치 관리자(App Installer)"를 설치·업데이트하세요(자동 설치 안 함). uv·claude 는 winget 없이도 설치할 수 있습니다' 'install or update "App Installer" from the Microsoft Store (not done automatically). uv and claude can be installed without winget')
@@ -826,7 +784,7 @@ if ($wingetFound.where -eq 'none') {
 }
 
 # S2 pwsh -----------------------------------------------------------------------
-$pwshFound = Get-App 'pwsh'
+$pwshFound = Get-App 'pwsh' $script:sessionPath
 $pwshApps = $pwshFound.apps
 $script:pkgInfo['pwsh'] = @{ where = $pwshFound.where; path = ''; version = '' }
 if ($pwshFound.where -eq 'none') {
@@ -878,7 +836,7 @@ if ($pwshFound.where -eq 'none') {
 }
 
 # S4 uv -------------------------------------------------------------------------
-$uvFound = Get-App 'uv'
+$uvFound = Get-App 'uv' $script:sessionPath
 $uvApps = $uvFound.apps
 $uvOk = $false
 $uvPath = ''
@@ -1088,7 +1046,7 @@ if (-not (Test-Path -LiteralPath $settingsFile)) {
 }
 
 # S6 claude ---------------------------------------------------------------------
-$claudeFound = Get-App 'claude'
+$claudeFound = Get-App 'claude' $script:sessionPath
 $claudeApps = $claudeFound.apps
 $script:pkgInfo['claude'] = @{ where = $claudeFound.where; path = ''; version = '' }
 if ($claudeFound.where -eq 'none') {
@@ -1110,7 +1068,7 @@ if ($claudeFound.where -eq 'none') {
 }
 
 # S7 git ------------------------------------------------------------------------
-$gitFound = Get-App 'git'
+$gitFound = Get-App 'git' $script:sessionPath
 $gitApps = $gitFound.apps
 $script:pkgInfo['git'] = @{ where = $gitFound.where; path = ''; version = '' }
 if ($gitFound.where -eq 'none') {

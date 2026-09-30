@@ -1,6 +1,7 @@
 {
   "schema": 1,
   "note": "Single source for the programs setup.ps1 manages. setup.ps1 and docs/SETUP-REFERENCE.md must agree with this file (tests check it). level: 필수 / 권장 / 선택.",
+  "python_min": "3.14",
   "packages": [
     {
       "key": "pwsh",

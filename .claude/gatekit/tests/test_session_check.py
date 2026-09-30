@@ -17,6 +17,7 @@ import unittest
 
 KIT = pathlib.Path(__file__).resolve().parents[1]
 SCRIPT = KIT / "scripts" / "session-check.ps1"
+COMMON = KIT / "scripts" / "common.ps1"  # the PATH rule and the ASCII JSON, shared with setup.ps1
 POWERSHELL = pathlib.Path(os.environ.get("SystemRoot", r"C:\Windows")) / \
     "System32" / "WindowsPowerShell" / "v1.0" / "powershell.exe"
 
@@ -29,6 +30,7 @@ class TestSessionCheck(unittest.TestCase):
         self.scripts = self.root / ".claude" / "gatekit" / "scripts"
         self.scripts.mkdir(parents=True)
         shutil.copy(SCRIPT, self.scripts / "session-check.ps1")
+        shutil.copy(COMMON, self.scripts / "common.ps1")
         self.bin = self.root / "bin"
         self.bin.mkdir()
 
@@ -103,6 +105,16 @@ class TestSessionCheck(unittest.TestCase):
         cfg = self.root / ".claude" / "gatekit" / ".venv" / "pyvenv.cfg"
         cfg.write_text("home = %s" % self.root, encoding="utf-8")
         self.assertEqual(self.run_check().stdout.strip(), b"")
+
+    def test_minimum_python_comes_from_packages_json(self) -> None:
+        self.fake("uv")
+        self.fake("claude")
+        self.venv()
+        (self.scripts / "packages.json").write_text('{"python_min": "3.99"}', encoding="utf-8")
+        cfg = self.root / ".claude" / "gatekit" / ".venv" / "pyvenv.cfg"
+        cfg.write_text("home = %s\nversion_info = 3.14.3\n" % self.root, encoding="utf-8")
+        message = json.loads(self.run_check().stdout.decode("ascii"))["systemMessage"]
+        self.assertIn("3.99", message)
 
     def test_venv_python_below_3_14_is_reported(self) -> None:
         self.fake("uv")

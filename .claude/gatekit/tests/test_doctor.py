@@ -392,6 +392,20 @@ class TestAxisPython(DoctorTestCase):
     def test_floor_is_three_fourteen(self) -> None:
         self.assertEqual(doctor.MIN_PYTHON, (3, 14))
 
+    def test_floor_comes_from_packages_json(self) -> None:
+        kit = self.venv_tree("version_info = 3.14.3\n")
+        (kit / "scripts").mkdir()
+        (kit / "scripts" / "packages.json").write_text('{"python_min": "3.99"}', encoding="utf-8")
+        result = self.run_axis(kit)
+        self.assertEqual(result["verdict"], verdict.FAIL, result)
+        self.assertIn("3.99", result["detail"])
+
+    def test_unreadable_python_min_falls_back_to_three_fourteen(self) -> None:
+        bad = self.root / "packages.json"
+        bad.write_text('{"python_min": "latest"}', encoding="utf-8")
+        self.assertEqual(doctor.min_python(bad), (3, 14))
+        self.assertEqual(doctor.min_python(self.root / "missing.json"), (3, 14))
+
     def test_real_venv_meets_the_floor(self) -> None:
         result = doctor.axis_python(self.root)
         self.assertEqual(result["verdict"], verdict.OK, result)
