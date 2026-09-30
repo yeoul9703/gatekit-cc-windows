@@ -13,9 +13,11 @@ from __future__ import annotations
 
 import copy
 import json
-import os
 import pathlib
 from typing import Any, Dict
+
+# Re-exported so callers keep using config.write_json_atomic: one definition, in util.
+from gatekit.util import write_json_atomic, write_text_atomic  # noqa: F401
 
 from . import paths
 
@@ -107,36 +109,3 @@ def save(root: pathlib.Path, cfg: Dict[str, Any]) -> None:
     """Write *cfg* to ``.gatekit/config.json`` atomically."""
     target = paths.config_file(root)
     write_json_atomic(target, cfg)
-
-
-def write_json_atomic(target: pathlib.Path, payload: Any) -> None:
-    """Serialize *payload* to *target* via a temp file plus ``os.replace``.
-
-    Shared by every module that persists JSON state. A crash mid-write leaves
-    the previous file intact rather than a truncated one; the temp file is
-    created in the destination directory so the replace stays on one filesystem.
-    """
-    text = json.dumps(payload, indent=2, ensure_ascii=False, sort_keys=False)
-    write_text_atomic(target, text + "\n")
-
-
-def write_text_atomic(target: pathlib.Path, text: str) -> None:
-    """Write *text* to *target* via a temp file plus ``os.replace``."""
-    target = pathlib.Path(target)
-    paths.ensure_dir(target.parent)
-    import tempfile  # lazy: keeps the hot hook path off tempfile/shutil/random imports
-    handle, tmp_name = tempfile.mkstemp(
-        dir=str(target.parent), prefix=f".{target.name}.", suffix=".tmp"
-    )
-    try:
-        with os.fdopen(handle, "w", encoding="utf-8") as stream:
-            stream.write(text)
-            stream.flush()
-            os.fsync(stream.fileno())
-        paths.replace_file(tmp_name, str(target))
-    except BaseException:
-        try:
-            os.unlink(tmp_name)
-        except OSError:
-            pass
-        raise

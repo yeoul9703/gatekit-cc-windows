@@ -105,8 +105,8 @@ class TestAtomicWrite(JobTestCase):
         target = self.root / "sub" / "x.json"
         jobs.write_json(target, {"a": 1})
         self.assertEqual(json.loads(target.read_text()), {"a": 1})
-        leftovers = [p.name for p in target.parent.iterdir() if p.name.startswith(".tmp-")]
-        self.assertEqual(leftovers, [])
+        # Nothing but the target may be left behind, whatever the temp files are called.
+        self.assertEqual([p.name for p in target.parent.iterdir()], ["x.json"])
 
     def test_write_json_replaces_existing_content(self) -> None:
         target = self.root / "x.json"

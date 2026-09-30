@@ -20,11 +20,10 @@ import secrets
 import shutil
 import subprocess
 import sys
-import tempfile
 import time
 from typing import Optional
 
-from gatekit import config, jobstore, paths, spec, verdict, workers
+from gatekit import config, jobstore, paths, spec, util, verdict, workers
 
 #: States after which a task will not change again on its own. Defined once in
 #: jobstore (spec.py reads the same list); see there for every state a task has.
@@ -92,8 +91,7 @@ REDELEGATE_TAIL_CHARS = 2000
 # --------------------------------------------------------------------- helpers
 
 
-def _now() -> str:
-    return datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+_now = util.now_iso
 
 
 def new_job_id() -> str:
@@ -102,33 +100,9 @@ def new_job_id() -> str:
     return "%s-%s" % (stamp, secrets.token_hex(2))
 
 
-def write_json(path, data) -> None:
-    """Atomic JSON write: temp file in the same directory, then os.replace."""
-    path = str(path)
-    directory = os.path.dirname(path) or "."
-    os.makedirs(directory, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(dir=directory, prefix=".tmp-", suffix=".json")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            json.dump(data, handle, indent=2, ensure_ascii=False)
-            handle.write("\n")
-            handle.flush()
-            os.fsync(handle.fileno())
-        paths.replace_file(tmp, path)
-    except BaseException:
-        try:
-            os.unlink(tmp)
-        except OSError:
-            pass
-        raise
-
-
-def read_json(path, default=None):
-    try:
-        with open(str(path), "r", encoding="utf-8") as handle:
-            return json.load(handle)
-    except (OSError, ValueError):
-        return default
+#: Atomic JSON write and tolerant JSON read: one definition each, in util.
+write_json = util.write_json_atomic
+read_json = util.read_json
 
 
 def _tail(text: str, limit: int = TAIL_BYTES) -> str:

@@ -17,6 +17,8 @@ import os
 import pathlib
 from typing import Optional
 
+from gatekit.util import replace_file  # noqa: F401  (re-exported: one definition, in util)
+
 #: Directory names that mark a project root, in priority order. ``.gatekit``
 #: comes first so a gatekit-managed subproject inside a larger git repository
 #: wins over the outer repository.
@@ -46,27 +48,6 @@ def resolve_argv(argv):
         if found:
             out[0] = found
     return out
-
-
-def replace_file(src, dst, attempts: int = 40, delay_s: float = 0.05) -> None:
-    """``os.replace`` that tolerates Windows sharing violations.
-
-    POSIX replaces atomically no matter who has the destination open. On
-    Windows ``os.replace`` raises ``PermissionError`` while another thread or
-    process is reading or replacing the same file, which for gatekit's status,
-    ledger and config files is a transient condition; retry for about two
-    seconds before giving up. Elsewhere this is a plain ``os.replace``.
-    """
-    import time
-
-    for attempt in range(attempts if os.name == "nt" else 1):
-        try:
-            os.replace(src, dst)
-            return
-        except PermissionError:
-            if os.name != "nt" or attempt == attempts - 1:
-                raise
-            time.sleep(delay_s)
 
 
 def project_root(cwd: Optional[str] = None) -> pathlib.Path:
