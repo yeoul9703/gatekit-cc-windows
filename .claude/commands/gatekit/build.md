@@ -1,6 +1,6 @@
 ---
 name: build
-description: Run spec/04-tasks.md as worker jobs behind the gates — spawn workers per task, let the gates decide pass or fail, redelegate failures, and hand off to verify.
+description: Run spec/04-tasks.md as worker jobs behind the gates — spawn workers per task, let the gates decide pass or fail, redelegate failures, and hand off to verify. Korean triggers — "빌드 시작해줘", "작업 실행해줘", "워커 돌려줘", "태스크 자동으로 만들어줘". English triggers — "build it", "run the tasks", "start the workers", "execute the task list". NOT for judging whether the result is done — that is /gatekit:verify.
 argument-hint: "[optional: task ids to build, comma-separated]"
 allowed-tools: Read, Write, Edit, Glob, Grep, Bash, PowerShell
 ---
@@ -19,15 +19,9 @@ verification) or a round holds three or more independent tasks.
 
 ## Step 0 — load policy and language
 
-1. Read `.claude/gatekit/policy/language.md` and
-   `.claude/gatekit/policy/verification.md`.
-2. Detect the language and call it `output_lang`:
-
-```
-uv run --project .claude/gatekit --frozen python .claude/gatekit/bin/gatekit.py lang --file spec/01-prd.md --lines 40
-```
-
-Every user-facing string below is written in `output_lang`.
+1. Read `.claude/gatekit/policy/preamble.md` and follow it, detecting
+   `output_lang` **from the spec**.
+2. Read `.claude/gatekit/policy/verification.md`.
 
 ## Step 1 — preconditions (both must hold)
 
@@ -109,29 +103,12 @@ pass: fix the dependency, then `jobs start --tasks <id>`. To end a job early,
 
 ## Step 4 — route failures
 
-For every `failed` or `timeout` task, read the failing gate's output tail in
-`gates.json` and decide **whether the code or the gate is wrong**. A gate names
-files and commands that do not exist until the work is done, so narrowing one
-mid-build is normal, not a mistake.
-
-**Gate wrong** — too broad, names a path the task never had to create, or fails
-the same way regardless of the code: fix `spec/04-tasks.md`, then
-`jobs recheck <task_id>`, which runs the new gate against existing code in
-seconds with no worker and no new job. **Never redelegate or start a job for a
-gate edit** — on the trial behind ADR-0013 that was 28 of 35 spawns.
-
-**Code wrong** — under `host`, fix it yourself and `jobs complete <task_id>`
-again. Under `worker`, `jobs redelegate <task_id>`: it archives the attempt
-under `attempt-N/`, appends the gate output to the prompt and re-runs; exit 3
-means out of retries (`build.max_retries`) and you do not retry past it.
-
-Consecutive failures bind across jobs by code (ADR-0014): `redelegate` and
-`start` both refuse a task at `max_retries`, exit 3, naming the jobs it failed
-in. On refusal, diagnose: read `spec/RECOVERY.md` and the task's `gates.json`,
-write the diagnosis there under a heading naming the task (what gate fails,
-what the output says, likely causes), then **stop the pipeline**. Once the
-cause is fixed, `jobs start --force-retry <task_id>` clears its count — never
-to route around a diagnosis you have not done.
+If every task passed, skip this step. For a `failed` or `timeout` task,
+**read `.claude/gatekit/spec-kit/build-failures.md` and follow it**: it
+covers how to tell a wrong gate from wrong code, `jobs recheck` for a gate
+edit (never a new job), `jobs redelegate` for code, and what to do when a
+task is out of retries (exit 3: diagnose in `spec/RECOVERY.md` and stop the
+pipeline).
 
 ## Step 5 — update progress
 

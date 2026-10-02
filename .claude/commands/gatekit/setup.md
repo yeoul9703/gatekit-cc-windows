@@ -1,6 +1,6 @@
 ---
 name: setup
-description: Prepare gatekit on Windows — check uv, build the .venv from uv.lock, initialize .gatekit/config.json, check the Claude worker backend and run doctor.
+description: Prepare gatekit on Windows — check uv, build the .venv from uv.lock, initialize .gatekit/config.json, check the Claude worker backend and run doctor. Installs a program only after the user says yes. Korean triggers — "셋업 해줘", "초기 설정", "설치해줘", "워커 확인해줘", "백엔드 설정". English triggers — "set up gatekit", "install gatekit", "check my workers", "configure the backend". NOT for diagnosing a project that is already set up — that is /gatekit:doctor — and NOT for enabling a bypass or unsandboxed backend, which gatekit refuses.
 allowed-tools: Read, Write, Edit, Glob, Grep, Bash, PowerShell
 ---
 
@@ -16,19 +16,10 @@ The user may not know the terminal: use plain words, no jargon.
 
 ## Step 0 — load policy and language
 
-1. Read `.claude/gatekit/policy/language.md`.
-2. Detect the language. `$ARGUMENTS` carries no signal here. If `spec/01-prd.md`
-   exists, run:
-
-```
-uv run --project .claude/gatekit --frozen python .claude/gatekit/bin/gatekit.py lang --file spec/01-prd.md --lines 40
-```
-
-   Otherwise use the language of the user's own message (`ko` if Korean, else
-   `en`). If uv or the `.venv` is not there yet the command above cannot run —
-   then just use the language of the user's message.
-
-Call it `output_lang` and write every user-facing string in it.
+Read `.claude/gatekit/policy/preamble.md` and follow it, detecting
+`output_lang` **from the spec**. On a first run there is no spec and maybe no
+uv yet; the preamble's fallback (the language of the user's own message)
+covers that.
 
 ## Step 1 — say what the permission windows mean, then check
 
@@ -49,71 +40,43 @@ also on every later run:
 powershell -NoProfile -ExecutionPolicy Bypass -File .claude/gatekit/scripts/setup.ps1 -Json -Lang <output_lang>
 ```
 
-Use `ko` or `en` for `<output_lang>`. The output is one JSON object:
-`exit_code` and `items`, each item `{id, level, name, verdict, detail, action}`
-(`hints` are extra lines). `verdict` is `ok`, `warn`, `fail`, `unverified` or
-`info`; `level` is `required`, `recommended` or `info`. What the items cover:
-
-| id | what |
-|---|---|
-| S1, S17, S8 | Windows version, folder path (OneDrive or very long), script mark |
-| S3 | winget present, its version, whether its source terms were accepted |
-| S2 | PowerShell 7 (stable 7.6 recommended; a preview build only warns) |
-| S4 | uv (required, at least 0.4.27) and how it was installed |
-| S5 | `.claude/gatekit/.venv` (default check: `uv sync --frozen --no-dev --no-python-downloads` only; a missing Python or a damaged `.venv` is a `warn`/`fail` that asks for `-Install venv`) |
-| S12 | `.gatekit/config.json` and the hooks in `.claude/settings.json` |
-| S6 | the `claude` CLI on PATH (required; the desktop app alone has no CLI) |
-| S7, S18, S23 | Git, Node/npm (only with a `package.json`), Python stub note — information |
-| S15 | doctor |
-| P-pwsh, P-uv, P-claude, P-git | package table: installed version, **update available** (looked up with `winget list` only when the winget source terms are accepted, otherwise `unverified`), install method (winget / official script / other) |
-| P-failures | failed installs/updates/reinstalls recorded in `.gatekit/runs/setup-last.json` (`warn` when there are any) |
-
-Exit codes: `0` ready · `1` failed · `2` the user must allow or do something ·
-`3` a program is installed but not visible in this session (PATH), restart needed ·
-`4` blocked by policy or network. When several apply, the first of `1, 4, 3, 2` wins.
-The check judges by the PATH of the current session only; a program that shows up
-only after re-reading the registry PATH is a `warn` with exit `3`.
+The output is one JSON object: `exit_code` and `items`, each item
+`{id, level, name, verdict, detail, action}` (`hints` are extra lines). Each
+item explains itself in `name`, `detail` and `action`. `verdict` is `ok`,
+`warn`, `fail`, `unverified` or `info`; `level` is `required`, `recommended`
+or `info`. The check judges by the PATH of the current session only.
 
 ## Step 2 — show the result as a table
 
 Write a short table in `output_lang`: one row per item with the verdict (`ok`,
 `warn`, `fail`, or `unverified` = "not checked", never "ok") and the plain-language
 detail. Do not paste raw JSON. Doctor `unverified` axes (no `spec/` yet, no
-contract yet) are normal in a new project; follow `verification.md`.
+contract yet) are normal in a new project.
 
 ## Step 3 — if something can be installed, ask once
 
-Installable candidates are the items with verdict `fail` **or `warn`** that a
-switch can fix: missing, too old, a preview build, or a broken receipt:
+Installable candidates are the items with verdict `fail` **or `warn`** whose
+`action` names a switch. Missing things go to `-Install`, things that exist
+but are old or broken go to `-Update`:
 
 | name | switch | purpose | terms | download | admin |
 |---|---|---|---|---|---|
-| `uv` (S4 fail) | `-Install uv` | runs gatekit and fetches Python | none with the official script; winget adds source terms | small | no |
-| `uv` (S4 warn: broken receipt, or too old) | `-Update uv` | repairs `uv self update` | none | small | no |
-| `claude` (S6 fail) | `-Install claude` | the Claude Code CLI that workers use | none | tens of MB | no |
-| `claude` (S6 warn: older than recommended) | `-Update claude` | newer CLI | none | tens of MB | no |
-| `pwsh` (S2 warn: missing) | `-Install pwsh` | PowerShell 7, optional | includes winget source and package terms | tens of MB | no |
-| `pwsh` (S2 warn: preview or older) | `-Update pwsh` | stable PowerShell 7.6; an older MSI install may show a Windows administrator prompt (UAC) | includes winget terms | tens of MB | maybe (MSI) |
-| `venv` (S5 warn: no Python; S5 fail: damaged) | `-Install venv` | Python and packages for the hooks; **a damaged `.claude/gatekit/.venv` is deleted and rebuilt** | none | Python plus packages, tens of MB | no |
-| `git` | `-Install git` (prints a command only) | Git for Windows, optional | — | — | may need it |
-| `uv` / `pwsh` / `claude` — only when the user asks for a **reinstall** (broken install, `uv self update` failing because `uv-receipt.json` is broken and `-Update uv` did not help) | `-Reinstall uv` / `-Reinstall pwsh` / `-Reinstall claude` | uv: winget `--force` when uv came from winget, otherwise the official script (repairs the receipt); pwsh: winget MSIX `--force`; claude: the official script. The version is read again afterwards | as for install | small / tens of MB | pwsh: maybe (old MSI) |
-| items recorded as failed in `P-failures` | `-RetryFailed` | retries only the recorded items with the **same action** | as recorded | as recorded | as recorded |
-
-`-Reinstall` and `-RetryFailed` are never offered on their own: use them only when the
-user asks for a reinstall, or when `P-failures` lists recorded failures. `-Reinstall` accepts
-only `uv`, `pwsh`, `claude` (git and venv are refused: git is guidance only, venv is rebuilt
-with `-Install venv`).
+| `uv` | `-Install uv` / `-Update uv` | runs gatekit and fetches Python | none with the official script; winget adds source terms | small | no |
+| `claude` | `-Install claude` / `-Update claude` | the Claude Code CLI that workers use (the desktop app or the VS Code extension alone does not provide it) | none | tens of MB | no |
+| `pwsh` | `-Install pwsh` / `-Update pwsh` | PowerShell 7, optional | includes winget source and package terms | tens of MB | maybe, for an older MSI install |
+| `venv` | `-Install venv` only | Python and packages for the hooks; **a damaged `.claude/gatekit/.venv` is deleted and rebuilt** | none | tens of MB | no |
+| `git` | prints a command only | Git for Windows, optional | — | — | may need it |
 
 If there are no candidates, skip to Step 5. Otherwise ask **one**
 `AskUserQuestion` (it is deliberately not in `allowed-tools`, so the choice window
 really appears; see `policy/questioning.md`). Put one line per candidate in the
 question text: name, purpose, whether agreeing to terms is included, how much is
 downloaded, whether administrator rights are needed. For `venv` say plainly that
-Python and packages are downloaded (tens of MB, network needed) and, if S5 was a
-`fail`, that the damaged `.claude/gatekit/.venv` folder is deleted and rebuilt (it is
-a folder inside this project and can be rebuilt). Options: **install all** / **let me choose** /
-**later**. If the user chooses "let me choose", ask which names in a plain chat
-message and wait for the answer. Wait for the answer; never assume it.
+Python and packages are downloaded (network needed) and, if its verdict was
+`fail`, that the damaged `.claude/gatekit/.venv` folder is deleted and rebuilt.
+Options: **install all** / **let me choose** / **later**. If the user chooses
+"let me choose", ask which names in a plain chat message. Wait for the answer;
+never assume it.
 
 - `git` may need administrator rights and the script never installs it: show the
   command it prints and let the user do it. Offer it only as a separate, optional
@@ -132,42 +95,23 @@ powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | ie
 
 ## Step 4 — install only what was allowed, then check again
 
-Pass exactly the allowed names (`pwsh`, `uv`, `claude`, `git`, `venv` are the only
-names the script accepts) and nothing else. Missing things go to `-Install`, the
-`warn` candidates that already exist go to `-Update` (`venv` only ever with `-Install`).
-Both switches may be given in one call:
+Pass exactly the allowed names and nothing else (`pwsh`, `uv`, `claude`, `git`,
+`venv` are the only names the script accepts). Both switches may be given in
+one call:
 
 ```
 powershell -NoProfile -ExecutionPolicy Bypass -File .claude/gatekit/scripts/setup.ps1 -Install uv,claude,venv -Update pwsh -Json -Lang <output_lang>
 ```
 
-A reinstall is a separate permission, asked in the same way (name, what it does, terms,
-download size, administrator rights) before running:
-
-```
-powershell -NoProfile -ExecutionPolicy Bypass -File .claude/gatekit/scripts/setup.ps1 -Reinstall uv -Json -Lang <output_lang>
-```
-
-**Retry after a failure.** If `P-failures` is `warn`, say which items failed and why (the
-class and message are in the item), and ask **again** — the earlier permission does not
-carry over — before running:
-
-```
-powershell -NoProfile -ExecutionPolicy Bypass -File .claude/gatekit/scripts/setup.ps1 -RetryFailed -Json -Lang <output_lang>
-```
-
-It retries only the recorded items with the same action; with no record it prints one info
-line and does nothing. To look at the table and the record without the `.venv` and doctor
-steps, use `-Status` (no permission needed, nothing changes).
-
-`-Update git` never runs anything: Git is left as it is. Only the names in `-Install` / `-Update` receive
-winget's `--accept-source-agreements --accept-package-agreements`, which is why the
-question in Step 3 said terms are included. Then run the plain check from Step 1
-again and show the new table. React to the exit code:
+Only the names passed here receive winget's `--accept-source-agreements
+--accept-package-agreements`, which is why the question in Step 3 said terms
+are included. Then run the plain check from Step 1 again, show the new table,
+and react to the exit code:
 
 - `0` — ready; go to Step 5.
-- `3` — installed but not visible: tell the user to close the Claude app (the VS
-  Code window) completely, open it again, and type `/gatekit:setup` again. Stop.
+- `3` — installed but not visible in this session: tell the user to close
+  Claude Code completely (the desktop app, the VS Code window, or the terminal
+  it runs in), open it again, and type `/gatekit:setup` again. Stop.
 - `4` — blocked by policy or network. Show the "what you can do now" lines and the
   message for the IT contact from the `hints`, so the user can forward it. Do not
   retry in a loop and do not look for a way around the policy.
@@ -175,8 +119,10 @@ again and show the new table. React to the exit code:
   say exactly which and what to do.
 - `1` — a step failed for another reason: show the lines the script printed and
   ask the user to retry when the cause is fixed. `uv sync` failing with `-Install
-  venv` usually means no network (uv fetches Python); behind a proxy the hints list
-  `UV_SYSTEM_CERTS`, `SSL_CERT_FILE` and `HTTPS_PROXY`.
+  venv` usually means no network; behind a proxy the hints list `UV_SYSTEM_CERTS`,
+  `SSL_CERT_FILE` and `HTTPS_PROXY`.
+
+When several apply, the first of `1, 4, 3, 2` wins.
 
 Never enable a bypass flag to make a worker run; a missing `claude` CLI is fixed by
 installing it (Step 3), nothing else.
@@ -185,28 +131,30 @@ installing it (Step 3), nothing else.
 
 Report in `output_lang` what changed (installed programs, created
 `.gatekit/config.json` or left as it was, a rebuilt `.venv`) and name the file each
-change landed in. Doctor already ran inside the script (item S15, in `output_lang`).
+change landed in. Doctor already ran inside the script (the `S15` item), so do
+not run `/gatekit:doctor` again here. Then name the next command:
+`/gatekit:discover` when the user does not yet know what to build,
+`/gatekit:interview` when they do.
 
-To look at the worker backends in more detail:
+## Reference — rare paths, read before acting
 
-```
-uv run --project .claude/gatekit --frozen python .claude/gatekit/bin/gatekit.py workers check claude
-uv run --project .claude/gatekit --frozen python .claude/gatekit/bin/gatekit.py workers list
-```
+`docs/SETUP-REFERENCE.md` holds what this command needs only occasionally.
+Read the named section when one of these comes up:
 
-`workers check` verdicts: `ok` — the CLI answered its version probe;
-`unverified` — the binary is there but the probe did not answer (not a failure,
-not a pass; builds will still run); `fail` — the binary is missing.
-
-A project that wants an additional worker backend can add one to
-`.gatekit/config.json`'s `worker.backends` by hand (see `docs/USAGE.md`), then
-enable it with `workers enable <name>`.
-
-## Reference
-
-Copy-and-paste commands for every tool (install, update, reinstall, version check with winget
-or the official script, administrator needs), the switch/CLI table, the exit codes, common
-winget error codes and a message for the IT contact are in `docs/SETUP-REFERENCE.md`. When the
-uv or the `.venv` is broken, `gatekit.py setup` cannot start: run `scripts/setup.ps1` directly
-(the same switches, section 9 of that document). Tell the user this in plain words if a step
-fails and the CLI is unreachable.
+- **The user asks for a reinstall**, or `-Update uv` did not repair a broken
+  `uv self update` — section 2-3-1. `-Reinstall` takes only `uv`, `pwsh`,
+  `claude`, and it is a **separate permission**: ask again in the same way
+  (name, what it does, terms, download size, administrator rights) before
+  running it. Never offer it on your own.
+- **The `P-failures` item is `warn`** (recorded failed installs) — section 7.
+  Say which items failed and why, and ask **again** before `-RetryFailed`; the
+  earlier permission does not carry over.
+- **A winget error code** appears in the output — section 6.
+- **uv or the `.venv` is broken so `gatekit.py` cannot start** — section 9:
+  run `scripts/setup.ps1` directly with the same switches, and tell the user
+  so in plain words.
+- **Looking at the package table without the `.venv` and doctor steps** — the
+  `-Status` switch in section 3 (no permission needed, nothing changes).
+- **Worker backends in more detail** — `docs/USAGE.md`; `workers check claude`
+  and `workers list` print them, and an additional backend is enabled only by
+  the user.

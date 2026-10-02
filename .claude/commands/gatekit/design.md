@@ -1,6 +1,6 @@
 ---
 name: design
-description: Read a Figma file, screenshots, HTML files, a live site URL, a preset, or a user pattern file and derive spec/02-design.md plus spec/tokens.json, recording every gap the source does not evidence as an assumption.
+description: Read a Figma file, screenshots, HTML files, a live site URL, a preset, or a user pattern file and derive spec/02-design.md plus spec/tokens.json, recording every gap the source does not evidence as an assumption. Korean triggers — "이 사이트처럼 만들어줘", "디자인 패턴 정리해줘", "레퍼런스 사이트에서 뽑아줘", "디자인 프리셋 적용해줘". English triggers — "make it look like this site", "extract design patterns from this reference", "apply this design preset". NOT for a screen list with flows and per-screen states — that is /gatekit:mockup — and NOT for implementing the design as code.
 argument-hint: "[Figma URL | screenshot/HTML paths | live site URL | preset name | pattern file]"
 allowed-tools: Read, Write, Edit, Glob, Grep, Bash, PowerShell, mcp__figma__get_design_context, mcp__figma__get_variable_defs, mcp__figma__get_screenshot, mcp__figma__get_metadata, WebFetch, mcp__claude-in-chrome__tabs_context_mcp, mcp__claude-in-chrome__tabs_create_mcp, mcp__claude-in-chrome__navigate, mcp__claude-in-chrome__get_page_text, mcp__claude-in-chrome__computer, mcp__claude-in-chrome__tabs_close_mcp
 ---
@@ -18,14 +18,12 @@ including mid-build.
 
 ## Step 0 — load policy and language
 
-Read `.claude/gatekit/policy/language.md`,
-`.claude/gatekit/policy/questioning.md`, and
-`.claude/gatekit/policy/verification.md`. Detect the language: write `$ARGUMENTS` verbatim to `.gatekit/runs/lang-input.txt` (Write tool) and run
-`uv run --project .claude/gatekit --frozen python .claude/gatekit/bin/gatekit.py lang --file .gatekit/runs/lang-input.txt` — if
-`$ARGUMENTS` is only a URL or a path, detect from the user's surrounding
-message instead. Call the result `output_lang`. Read
-`.claude/gatekit/spec-kit/heading-map.json` and
-`.claude/gatekit/spec-kit/templates/<output_lang>/02-design.md`.
+1. Read `.claude/gatekit/policy/preamble.md` and follow it, detecting
+   `output_lang` **from the input** (`$ARGUMENTS`).
+2. Read `.claude/gatekit/policy/questioning.md` and
+   `.claude/gatekit/policy/verification.md`.
+3. Read `.claude/gatekit/spec-kit/heading-map.json` and
+   `.claude/gatekit/spec-kit/templates/<output_lang>/02-design.md`.
 
 ## Step 1 — re-entry check
 

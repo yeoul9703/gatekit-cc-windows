@@ -1,6 +1,6 @@
 ---
 name: mockup
-description: Read a Figma file, HTML, or screenshots and derive spec/02-screens.md plus spec/tokens.json, recording every screen state the mockup does not evidence as an assumption.
+description: Read a Figma file, HTML, or screenshots and derive spec/02-screens.md plus spec/tokens.json, recording every screen state the mockup does not evidence as an assumption. Korean triggers — "피그마 보고 화면 명세 만들어줘", "목업에서 스펙 뽑아줘", "이 디자인 정리해줘", "화면 명세 써줘". English triggers — "spec these screens from Figma", "extract screens from this mockup", "turn this design into a screen spec". NOT for implementing the design as code, and NOT for writing the PRD — that is /gatekit:interview.
 argument-hint: "[Figma URL | path to HTML | path to screenshots]"
 allowed-tools: Read, Write, Edit, Glob, Grep, Bash, PowerShell, mcp__figma__get_design_context, mcp__figma__get_variable_defs, mcp__figma__get_screenshot, mcp__figma__get_metadata
 ---
@@ -13,20 +13,10 @@ and both merge rather than overwrite.
 
 ## Step 0 — load policy and language
 
-1. Read these under `.claude/gatekit/policy/`: `language.md`,
-   `questioning.md`, `assumptions.md`, `verification.md`.
-2. Detect the language:
-
-Write `$ARGUMENTS` verbatim (it may hold quotes, `$` or backticks, so it never goes
-through a shell argument) to `.gatekit/runs/lang-input.txt` with the Write tool, then run:
-
-```
-uv run --project .claude/gatekit --frozen python .claude/gatekit/bin/gatekit.py lang --file .gatekit/runs/lang-input.txt
-```
-
-If `$ARGUMENTS` is only a URL or path, detect from the user's surrounding
-message instead. Call the result `output_lang`.
-
+1. Read `.claude/gatekit/policy/preamble.md` and follow it, detecting
+   `output_lang` **from the input** (`$ARGUMENTS`).
+2. Read these under `.claude/gatekit/policy/`: `questioning.md`,
+   `assumptions.md`, `verification.md`.
 3. Read `.claude/gatekit/spec-kit/heading-map.json` and
    `.claude/gatekit/spec-kit/templates/<output_lang>/02-screens.md`.
 

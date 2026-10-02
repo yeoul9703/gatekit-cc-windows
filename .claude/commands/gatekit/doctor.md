@@ -1,6 +1,6 @@
 ---
 name: doctor
-description: Diagnose the gatekit install across eight axes — plugin files, hook registration, project state, spec set, contract freshness, workers, python, uv — then show the table and offer the printed fixes.
+description: Diagnose the gatekit install across eight axes — plugin files, hook registration, project state, spec set, contract freshness, workers, python, uv — then show the table and offer the printed fixes. Read-only, for when something looks wrong in a project that is already set up. Korean triggers — "닥터 돌려줘", "설치 점검해줘", "훅이 안 먹는 것 같아", "게이트킷 상태 확인". English triggers — "run doctor", "diagnose gatekit", "why are my hooks not firing", "check the install". NOT the built-in /doctor, which checks Claude Code itself and knows nothing about gatekit. NOT for installing a missing program — that is /gatekit:setup — and NOT for fixing the spec or approving a gate file.
 argument-hint: "[optional: --json]"
 allowed-tools: Read, Glob, Grep, Bash, PowerShell
 ---
@@ -11,19 +11,12 @@ Input: `$ARGUMENTS` — pass `--json` through if the user asked for machine outp
 
 ## Step 0 — load policy and language
 
-1. Read `.claude/gatekit/policy/language.md` and
-   `.claude/gatekit/policy/verification.md` — the latter is what keeps
+1. Read `.claude/gatekit/policy/preamble.md` and follow it, detecting
+   `output_lang` **from the spec** (`$ARGUMENTS` is empty or `--json`, so it
+   carries no language signal). Axis names and verdict tokens stay in
+   English; your prose does not.
+2. Read `.claude/gatekit/policy/verification.md` — it is what keeps
    `unverified` from being reported as a pass in Step 2.
-2. Detect the language. `$ARGUMENTS` is normally empty or `--json`, so it carries
-   no language signal. If `spec/01-prd.md` exists, run:
-
-```
-uv run --project .claude/gatekit --frozen python .claude/gatekit/bin/gatekit.py lang --file spec/01-prd.md --lines 40
-```
-
-Otherwise choose from the user's own message: `ko` if it is Korean, else `en`.
-Call the result `output_lang`. Axis names and verdict tokens stay in English;
-your prose does not.
 
 ## Step 1 — run the diagnosis
 
@@ -84,7 +77,7 @@ Common cases:
 - **workers** fail — the default backend's binary is not on PATH. Route to
   `/gatekit:setup`.
 - **python** fail — `.claude/gatekit/.venv` is missing (hooks are silently
-  inactive) or its interpreter is below 3.11. Route to `/gatekit:setup`.
+  inactive) or its interpreter is below 3.14. Route to `/gatekit:setup`.
 - **uv** fail — `uv` is not on PATH. Route to `/gatekit:setup`, which shows the
   install command; install it only after the user agrees.
 

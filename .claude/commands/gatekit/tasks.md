@@ -1,6 +1,6 @@
 ---
 name: tasks
-description: Derive vertical-slice tasks from the spec into spec/04-tasks.md as gatekit-task fences, with non-overlapping write scopes and at least one gate each.
+description: Derive vertical-slice tasks from the spec into spec/04-tasks.md as gatekit-task fences, with non-overlapping write scopes and at least one gate each. Korean triggers — "작업 나눠줘", "태스크로 쪼개줘", "할 일 목록 만들어줘", "작업 분해해줘". English triggers — "break this into tasks", "split the work", "make a task list from the spec", "decompose into work items". NOT for executing the tasks — that is /gatekit:build — and NOT for writing the spec itself.
 argument-hint: "[optional: constraints, e.g. 'round 1 only' or 'backend first']"
 allowed-tools: Read, Write, Edit, Glob, Grep, Bash, PowerShell
 ---
@@ -11,16 +11,9 @@ Input: `$ARGUMENTS` — optional constraints on scope or ordering.
 
 ## Step 0 — load policy and language
 
-1. Read `.claude/gatekit/policy/language.md` and
-   `.claude/gatekit/policy/verification.md`.
-2. Detect the language from `spec/01-prd.md`:
-
-```
-uv run --project .claude/gatekit --frozen python .claude/gatekit/bin/gatekit.py lang --file spec/01-prd.md --lines 40
-```
-
-Call it `output_lang`.
-
+1. Read `.claude/gatekit/policy/preamble.md` and follow it, detecting
+   `output_lang` **from the spec**.
+2. Read `.claude/gatekit/policy/verification.md`.
 3. Read `.claude/gatekit/spec-kit/heading-map.json` and
    `.claude/gatekit/spec-kit/templates/<output_lang>/04-tasks.md`.
 

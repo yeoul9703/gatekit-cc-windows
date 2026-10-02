@@ -28,7 +28,7 @@ directories) but contains no code copied from any other project.
 | Every hook exits 0 on any internal error and writes a one-line diagnostic to `.gatekit/runs/hook-errors.log` | a broken hook must never break the user's session |
 | Verdict vocabulary is exactly `ok / warn / fail / unverified` | "not checked" must never be rounded to pass or fail |
 | No absolute personal paths anywhere in the repo | keeps the checkout portable across machines |
-| `SKILL.md` ≤ 40 lines: trigger shim only. `.claude/commands/gatekit/*.md` is the execution instruction | prevents the command/skill split from becoming two products |
+| `.claude/commands/gatekit/*.md` is the only entry point per pipeline (`/gatekit:<name>`); its `description` carries the Korean and English triggers, and steps needed only sometimes live in `policy/` or `spec-kit/` reference docs the command names (ADR-0019) | one listing per pipeline; a command stays short enough to follow |
 | Data (templates, heading maps, presets, schemas) lives in JSON/Markdown files, not in prompt prose | keeps prompts small and data diffable |
 | Any file > 1 MB fails CI | no committed corpora |
 | Output language follows `output_lang` (see §8); Korean is never a default | open-source posture |
@@ -50,7 +50,6 @@ directories) but contains no code copied from any other project.
 │   │   ├── verify.md      /gatekit:verify      → independent E2E + report check
 │   │   ├── doctor.md      /gatekit:doctor
 │   │   └── setup.md       /gatekit:setup       → config, default worker check
-│   ├── skills/gatekit-<name>/SKILL.md   # ≤ 40-line NL trigger shims that point at the command
 │   └── gatekit/                         # the standalone kernel checkout
 │       ├── bin/
 │       │   └── gatekit.py               # entry point: sys.path bootstrap, then cli.main
@@ -74,8 +73,9 @@ directories) but contains no code copied from any other project.
 │       │   └── gates/         hook entry points: prompt.py write.py bash.py spawn.py question.py compact.py stop.py
 │       ├── spec-kit/
 │       │   ├── templates/{ko,en}/01-prd.md … 05-gate.md, RECOVERY.md, PROGRESS.md
-│       │   └── heading-map.json         # canonical headings per file per language
-│       ├── policy/language.md questioning.md verification.md   # loaded at runtime by commands
+│       │   ├── heading-map.json         # canonical headings per file per language
+│       │   └── *.md                     # reference docs a command reads at the step that needs them (task-gates, gate-criteria, build-failures, evaluator-brief, prototype-gate, …)
+│       ├── policy/preamble.md language.md questioning.md conversation.md assumptions.md verification.md   # loaded at runtime by commands; preamble.md is every command's Step 0
 │       └── tests/                       # unittest, run with: cd .claude/gatekit; uv run --frozen python -m unittest discover -s tests
 ├── docs/ARCHITECTURE.md (this), decisions/ADR-*.md, USAGE.md
 └── .gitignore                           # ignores .gatekit/runs, .gatekit/jobs

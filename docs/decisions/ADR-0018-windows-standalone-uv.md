@@ -19,7 +19,7 @@ version checks that this audience never benefits from.
 1. **Windows and Claude Code only.** Mac/Linux and other hosts are not
    supported. (Codex support, ADR-0006, was already not adopted here.)
 2. **Standalone folder.** gatekit lives in the project's own `.claude/`
-   (commands, skills, `settings.json`) and `.claude/gatekit/` (kernel,
+   (commands, `settings.json`; the skill shims were removed by ADR-0019) and `.claude/gatekit/` (kernel,
    scripts, tests). No plugin manager, no global install; opening the folder
    is enough.
 3. **uv manages Python.** `.claude/gatekit/pyproject.toml`

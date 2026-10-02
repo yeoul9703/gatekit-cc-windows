@@ -1,6 +1,6 @@
 ---
 name: verify
-description: Verify the build against the completion contract with an independent evaluator — a read-only agent runs the criteria and the E2E steps, then the main session re-runs the contract and reports per-criterion verdicts.
+description: Verify the build against the completion contract with an independent evaluator — a read-only agent runs the criteria and the E2E steps, then the main session re-runs the contract and reports per-criterion verdicts. Korean triggers — "검증해줘", "다 됐는지 확인해줘", "완료 기준 통과했는지 봐줘", "E2E 돌려줘". English triggers — "verify it", "check if it is done", "run the completion contract", "did it pass the gate". NOT for fixing what the verification finds — route failures back to /gatekit:build.
 argument-hint: "[optional: criterion id to focus on]"
 allowed-tools: Read, Write, Edit, Glob, Grep, Bash, PowerShell, Agent
 ---
@@ -16,13 +16,9 @@ and calling that verification.
 
 ## Step 0 — load policy and language
 
-1. Read `.claude/gatekit/policy/verification.md` and
-   `.claude/gatekit/policy/language.md`.
-2. Detect the language and call it `output_lang`:
-
-```
-uv run --project .claude/gatekit --frozen python .claude/gatekit/bin/gatekit.py lang --file spec/01-prd.md --lines 40
-```
+1. Read `.claude/gatekit/policy/preamble.md` and follow it, detecting
+   `output_lang` **from the spec**.
+2. Read `.claude/gatekit/policy/verification.md`.
 
 ## Step 1 — preconditions
 

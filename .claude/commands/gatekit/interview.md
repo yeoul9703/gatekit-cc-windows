@@ -1,6 +1,6 @@
 ---
 name: interview
-description: Turn a chosen problem into spec/01-prd.md and spec/03-architecture.md through a deep, free-ranging interview on implementation shape — pages, what each page does, what data it needs — laying the groundwork for design and tasks.
+description: Turn a chosen problem into spec/01-prd.md and spec/03-architecture.md through a deep, free-ranging interview on implementation shape — pages, what each page does, what data it needs — laying the groundwork for design and tasks. Korean triggers — "기획해줘", "PRD 써줘", "요구사항 정리해줘", "뭘 만들지 정리하자", "스펙 만들어줘". English triggers — "write a PRD", "spec this out", "turn this idea into requirements", "plan what to build". NOT for writing code, and NOT for reading an existing Figma file, HTML or screenshots — that is /gatekit:mockup.
 argument-hint: "[what you want to build, in your own words]"
 allowed-tools: Read, Write, Edit, Glob, Grep, Bash, PowerShell, WebSearch
 ---
@@ -21,24 +21,13 @@ something concrete to design for.
 
 ## Step 0 — load policy and language
 
-1. Read these under `.claude/gatekit/policy/`: `language.md`,
-   `questioning.md`, `conversation.md` (how Step 2 is conducted),
-   `assumptions.md` (the ledger Step 3 writes), `verification.md`.
-2. Detect the output language from the user's own words:
-
-Write `$ARGUMENTS` verbatim (it may hold quotes, `$` or backticks, so it never goes
-through a shell argument) to `.gatekit/runs/lang-input.txt` with the Write tool, then run:
-
-```
-uv run --project .claude/gatekit --frozen python .claude/gatekit/bin/gatekit.py lang --file .gatekit/runs/lang-input.txt
-```
-
-Call it `output_lang`; every user-facing string below is in it, and
-identifiers are never translated.
-
+1. Read `.claude/gatekit/policy/preamble.md` and follow it, detecting
+   `output_lang` **from the input** (`$ARGUMENTS`).
+2. Read these under `.claude/gatekit/policy/`: `questioning.md`,
+   `conversation.md` (how Step 2 is conducted), `assumptions.md` (the
+   ledger Step 3 writes), `verification.md`.
 3. Read `.claude/gatekit/spec-kit/heading-map.json` and the templates
-   in `.claude/gatekit/spec-kit/templates/<output_lang>/`. If none
-   matches, use `en` and say so once.
+   in `.claude/gatekit/spec-kit/templates/<output_lang>/`.
 
 **From `policy/questioning.md`:** both stop-signal categories and the guard
 against asking what is already knowable. Its two-call `AskUserQuestion`

@@ -5,11 +5,8 @@
 Detect the language for **this** call. Never carry a language over from a
 previous session, and never default to Korean.
 
-```
-".claude/gatekit/bin/gatekit" lang "<the user's own words>"
-```
-
-The result is `ko` or `en`. Use the user's text, not your own paraphrase, as
+How to run the detection is in `preamble.md` next to this file. The result
+is `ko` or `en`. Use the user's text, not your own paraphrase, as
 the input. When a session ledger already holds an `output_lang` for this
 session, prefer that value — the prompt gate recorded it from the same rule.
 
@@ -42,7 +39,7 @@ Identifiers stay in their source form regardless of language:
 | File and directory names | `spec/01-prd.md`, `.gatekit/contract.json` |
 | JSON keys | `write_scope`, `depends_on`, `timeout_s` |
 | Fence names | ` ```gatekit-task `, ` ```gatekit-criterion ` |
-| CLI commands and flags | `".claude/gatekit/bin/gatekit" spec validate --json` |
+| CLI commands and flags | `uv run --project .claude/gatekit --frozen python .claude/gatekit/bin/gatekit.py spec validate --json` |
 | Verdict tokens in JSON | `ok`, `warn`, `fail`, `unverified` |
 | Code symbols from the project | type names, function names, env vars |
 
@@ -51,7 +48,7 @@ Verdict tokens are localized only when rendered as prose for a human
 
 ## Templates
 
-`plugin/spec-kit/templates/ko/` and `.../en/` exist. For a detected language
+`.claude/gatekit/spec-kit/templates/ko/` and `.../en/` exist. For a detected language
 that is neither, use the `en` templates and say once, in the user's language:
 "gatekit has no template set for this language yet, so the English structure is
 used; the content is written in your language." Do not repeat that notice on
@@ -67,6 +64,6 @@ a Korean sentence.
 ## Checking your own output
 
 Before writing a file under `spec/`, confirm its headings come from the
-matching language block of `plugin/spec-kit/heading-map.json`. Mixing headings
+matching language block of `.claude/gatekit/spec-kit/heading-map.json`. Mixing headings
 from both languages in one file is a hard `fail` in `spec validate`, not a
 style issue.

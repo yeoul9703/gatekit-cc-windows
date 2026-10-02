@@ -1,6 +1,6 @@
 ---
 name: discover
-description: Find a problem worth building through a free-ranging conversation, no fixed question slots — surface pains, summarize the improvement opportunities that emerge, confirm the summary, then hand off to interview.
+description: Find a problem worth building through a free-ranging conversation, no fixed question slots — surface pains, summarize the improvement opportunities that emerge, confirm the summary, write spec/00-discovery.md, then hand off to interview. Korean triggers — "뭘 만들지 모르겠어", "아이디어가 없어", "만들 만한 거 찾아줘", "뭐부터 시작하지", "문제 발굴". English triggers — "I don't know what to build", "help me find a project", "what should I make", "discover a problem". NOT for a user who can already name one real user and their pain — that is /gatekit:interview.
 argument-hint: "[optional: a rough idea, or nothing at all]"
 allowed-tools: Read, Write, Edit, Glob, Grep, Bash, PowerShell
 ---
@@ -26,21 +26,12 @@ long as it keeps surfacing something new.
 
 ## Step 0 — load policy and language
 
-1. Read `.claude/gatekit/policy/language.md`,
-   `.claude/gatekit/policy/questioning.md`, and
+1. Read `.claude/gatekit/policy/preamble.md` and follow it, detecting
+   `output_lang` **from the input** (`$ARGUMENTS`). Every question and every
+   line of the file is in it.
+2. Read `.claude/gatekit/policy/questioning.md` and
    `.claude/gatekit/policy/conversation.md` — the last one holds every
    rule for how the Step 2 conversation is conducted.
-2. Detect the language from the user's own words (from the surrounding
-   message when `$ARGUMENTS` is empty) and call it `output_lang`. Every
-   question and every line of the file is in it.
-
-Write `$ARGUMENTS` verbatim (it may hold quotes, `$` or backticks, so it never goes
-through a shell argument) to `.gatekit/runs/lang-input.txt` with the Write tool, then run:
-
-```
-uv run --project .claude/gatekit --frozen python .claude/gatekit/bin/gatekit.py lang --file .gatekit/runs/lang-input.txt
-```
-
 3. Read `.claude/gatekit/spec-kit/templates/<output_lang>/00-discovery.md`.
    If `spec/00-discovery.md` exists, continue the conversation from what it
    already records — never re-ask it, never restart because it exists.

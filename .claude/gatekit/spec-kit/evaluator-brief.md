@@ -9,7 +9,7 @@ given — including the screenshot judgement and the `-visual` verdict.
 Read who grades — the `evaluator` field of:
 
 ```
-".claude/gatekit/bin/gatekit" workers list --json
+uv run --project .claude/gatekit --frozen python .claude/gatekit/bin/gatekit.py workers list --json
 ```
 
 Unless the user set one explicitly, this resolves to an enabled backend whose
@@ -28,7 +28,7 @@ starts "Record the result under" — a CLI evaluator cannot write) to
 `.gatekit/evaluator-prompt.md`, then run:
 
 ```
-".claude/gatekit/bin/gatekit" jobs evaluate --prompt .gatekit/evaluator-prompt.md --lang <output_lang>
+uv run --project .claude/gatekit --frozen python .claude/gatekit/bin/gatekit.py jobs evaluate --prompt .gatekit/evaluator-prompt.md --lang <output_lang>
 ```
 
 `evaluate` always runs the backend's read-only sandbox — the write gate is the
@@ -59,7 +59,7 @@ without it:
 The rest of the evaluator's prompt says, in `output_lang`:
 
 - You are the evaluator. You did not write this code and you must not change it.
-- Run `".claude/gatekit/bin/gatekit" contract run --json` from the project root.
+- Run `uv run --project .claude/gatekit --frozen python .claude/gatekit/bin/gatekit.py contract run --json` from the project root.
 - Read `spec/05-gate.md` and carry out every E2E step it describes by hand,
   in order. Record what you actually observed, not what should happen.
 - For each criterion and each E2E step, give one verdict from
