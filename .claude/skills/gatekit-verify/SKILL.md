@@ -45,7 +45,8 @@ uv run --project .claude/gatekit --frozen python .claude/gatekit/bin/gatekit.py 
 
 Run it once. Its result is the verdict for every criterion that is a command;
 neither you nor the reviewer overrides it, and nobody re-runs it to get a
-second opinion.
+second opinion. The Stop hook reuses this run when the session ends, as long
+as no file has changed since.
 
 ## Step 3 — hand out only what a command cannot decide
 

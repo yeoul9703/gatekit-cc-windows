@@ -366,6 +366,141 @@ class TestEndToEndViaPromptGate(StopProject):
         self.assertIsNone(stop_gate.handle(self.event()))
 
 
+class TestReuse(StopProject):
+    """ADR-0024: the stop gate does not run the contract again when nothing a
+    criterion could see has changed since the last run."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.runs = 0
+        self._original = contract.execute
+
+        def counting(root, total_budget_s=None, cap_s=None):
+            self.runs += 1
+            return self._original(root, total_budget_s=total_budget_s, cap_s=cap_s)
+
+        contract.execute = counting
+        self.addCleanup(lambda: setattr(contract, "execute", self._original))
+        (self.root / "src").mkdir()
+        (self.root / "src" / "app.py").write_text("x = 1\n", encoding="utf-8")
+
+    def cli_run(self) -> None:
+        self.assertEqual(contract.run(["run", "--root", str(self.root)]), 0)
+
+    def test_verify_then_stop_runs_the_contract_once(self) -> None:
+        # contract run -> write spec/PROGRESS.md -> Stop: the answer is known.
+        self.passing()
+        self.set_pipeline("verify")
+        self.cli_run()
+        (self.root / "spec" / "PROGRESS.md").write_text("# progress\n", encoding="utf-8")
+        self.assertIsNone(stop_gate.handle(self.event()))
+        self.assertEqual(self.runs, 1)
+        self.assertEqual(self.led().data["stop"]["final_verdict"], "ok")
+
+    def test_a_turn_that_changes_nothing_reuses_the_gates_own_run(self) -> None:
+        self.passing()
+        self.set_pipeline("build")
+        stop_gate.handle(self.event())
+        stop_gate.handle(self.event())
+        self.assertEqual(self.runs, 1)
+
+    def test_a_failing_result_is_reused_and_still_blocks(self) -> None:
+        self.failing()
+        self.set_pipeline("build")
+        first = stop_gate.handle(self.event())
+        second = stop_gate.handle(self.event())
+        self.assertEqual(self.runs, 1)
+        self.assertEqual(second["decision"], "block")
+        self.assertIn("bad-crit", second["reason"])
+        self.assertEqual(first["reason"], second["reason"])
+
+    def test_an_edited_file_runs_it_again(self) -> None:
+        self.passing()
+        self.set_pipeline("build")
+        self.cli_run()
+        (self.root / "src" / "app.py").write_text("x = 22\n", encoding="utf-8")
+        stop_gate.handle(self.event())
+        self.assertEqual(self.runs, 2)
+
+    def test_an_added_or_a_removed_file_runs_it_again(self) -> None:
+        self.passing()
+        self.set_pipeline("build")
+        self.cli_run()
+        (self.root / "src" / "new.py").write_text("", encoding="utf-8")
+        stop_gate.handle(self.event())
+        self.assertEqual(self.runs, 2)
+        (self.root / "src" / "new.py").unlink()
+        stop_gate.handle(self.event())
+        self.assertEqual(self.runs, 3)
+
+    def test_a_derived_contract_runs_it_again(self) -> None:
+        self.passing()
+        self.set_pipeline("build")
+        self.cli_run()
+        self.write_contract({"id": "other-crit", "argv": [PY, "-c", "pass"], "timeout_s": 20})
+        stop_gate.handle(self.event())
+        self.assertEqual(self.runs, 2)
+
+    def test_a_stale_contract_is_never_reused(self) -> None:
+        self.passing()
+        self.set_pipeline("build")
+        self.cli_run()
+        self.gate_md.write_text(self.gate_md.read_text(encoding="utf-8") + "\nedited\n",
+                                encoding="utf-8")
+        self.assertIsNone(contract.reusable(self.root))
+        result = stop_gate.handle(self.event())
+        self.assertEqual(result["decision"], "block")
+
+    def test_an_old_run_is_not_reused(self) -> None:
+        self.passing()
+        self.set_pipeline("build")
+        self.cli_run()
+        record = contract.last_run_file(self.root)
+        data = json.loads(record.read_text(encoding="utf-8"))
+        data["ran_at"] -= contract.REUSE_MAX_AGE_S + 60
+        record.write_text(json.dumps(data), encoding="utf-8")
+        stop_gate.handle(self.event())
+        self.assertEqual(self.runs, 2)
+
+    def test_caches_and_gatekit_state_do_not_count_as_a_change(self) -> None:
+        self.passing()
+        self.set_pipeline("build")
+        self.cli_run()
+        cache = self.root / "src" / "__pycache__"
+        cache.mkdir()
+        (cache / "app.cpython-314.pyc").write_bytes(b"x")
+        (self.root / ".gatekit" / "runs" / "note.txt").write_text("x", encoding="utf-8")
+        stop_gate.handle(self.event())
+        self.assertEqual(self.runs, 1)
+
+    def test_a_tree_too_large_to_fingerprint_is_never_reused(self) -> None:
+        self.passing()
+        self.set_pipeline("build")
+        original = contract.FINGERPRINT_MAX_FILES
+        contract.FINGERPRINT_MAX_FILES = 1
+        try:
+            self.cli_run()
+            self.assertIsNone(contract.reusable(self.root))
+            stop_gate.handle(self.event())
+        finally:
+            contract.FINGERPRINT_MAX_FILES = original
+        self.assertEqual(self.runs, 2)
+
+    def test_a_run_cut_by_an_explicit_budget_is_not_recorded(self) -> None:
+        self.passing()
+        contract.run(["run", "--budget", "30", "--root", str(self.root)])
+        self.assertFalse(contract.last_run_file(self.root).exists())
+
+    def test_a_record_that_is_not_a_result_is_ignored(self) -> None:
+        self.passing()
+        self.set_pipeline("build")
+        self.cli_run()
+        record = contract.last_run_file(self.root)
+        for junk in ("not json", "[]", json.dumps({"ran_at": "now", "result": {}})):
+            record.write_text(junk, encoding="utf-8")
+            self.assertIsNone(contract.reusable(self.root), junk)
+
+
 class TestUnmanagedProject(unittest.TestCase):
     """No `.gatekit/` means no contract to run and no state left behind."""
 

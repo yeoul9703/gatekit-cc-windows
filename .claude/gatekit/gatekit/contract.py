@@ -518,6 +518,137 @@ def execute(
     }
 
 
+# ------------------------------------------------------------ reuse (ADR-0024)
+
+#: Where the last full run is recorded, under ``.gatekit/runs``.
+LAST_RUN_NAME = "contract-last.json"
+
+#: A recorded run older than this is never reused: a criterion may depend on
+#: something outside the tree (a server, a database), and a short window bounds
+#: how long such a change can go unseen.
+REUSE_MAX_AGE_S = 600.0
+
+#: Past this many files the tree is not fingerprinted and nothing is reused.
+FINGERPRINT_MAX_FILES = 20000
+
+#: Directories whose content changes without the work changing (caches), holds
+#: gatekit's own state, or is too large to walk and is pinned by a lock file.
+_FINGERPRINT_SKIP_DIRS = frozenset((
+    ".git", ".gatekit", "node_modules", ".venv", "venv", "__pycache__",
+    ".pytest_cache", ".mypy_cache", ".ruff_cache",
+))
+
+#: The one file a verification writes after the contract has run.
+_FINGERPRINT_SKIP_FILES = frozenset(("spec/progress.md",))
+
+
+_VERDICTS = (verdict.OK, verdict.WARN, verdict.FAIL, verdict.UNVERIFIED)
+
+
+def last_run_file(root: pathlib.Path) -> pathlib.Path:
+    return paths.runs_dir(root) / LAST_RUN_NAME
+
+
+def tree_fingerprint(root: pathlib.Path) -> Optional[str]:
+    """A digest of every file's path, size and modification time under *root*.
+
+    Two equal digests mean no file was added, removed or rewritten in between
+    — by a tool call, a worker in another session, or the user's own editor.
+    ``None`` when the tree cannot be read or holds more than
+    :data:`FINGERPRINT_MAX_FILES` files; a caller treats that as "changed".
+    """
+    import hashlib
+
+    base = str(root)
+    rows: List[str] = []
+    try:
+        for current, dirs, files in os.walk(base):
+            dirs[:] = sorted(d for d in dirs if d not in _FINGERPRINT_SKIP_DIRS)
+            for name in files:
+                full = os.path.join(current, name)
+                rel = os.path.relpath(full, base).replace(os.sep, "/")
+                if rel.lower() in _FINGERPRINT_SKIP_FILES:
+                    continue
+                info = os.stat(full)
+                rows.append("%s|%d|%d" % (rel, info.st_size, info.st_mtime_ns))
+                if len(rows) > FINGERPRINT_MAX_FILES:
+                    return None
+    except OSError:
+        return None
+    rows.sort()
+    return hashlib.sha256("\n".join(rows).encode("utf-8", "surrogatepass")).hexdigest()
+
+
+def _contract_digest(root: pathlib.Path) -> Optional[str]:
+    try:
+        return approval.sha256_file(paths.contract_file(root))
+    except OSError:
+        return None
+
+
+def record_run(root: pathlib.Path, result: Dict[str, Any]) -> None:
+    """Record a finished run so the stop gate need not repeat it unchanged."""
+    record = {
+        "ran_at": time.time(),
+        "contract_sha256": _contract_digest(root),
+        "fingerprint": tree_fingerprint(root),
+        "result": result,
+    }
+    try:
+        config.write_json_atomic(last_run_file(root), record)
+    except OSError:
+        pass  # a run that cannot be recorded is simply run again
+
+
+def reusable(root: pathlib.Path, now: Optional[float] = None) -> Optional[Dict[str, Any]]:
+    """The recorded result when it still describes this tree, else ``None``.
+
+    Reused only when all hold: the contract file is byte-identical to the one
+    that ran, the contract is not stale, the run is at most
+    :data:`REUSE_MAX_AGE_S` old, and the tree fingerprint is unchanged. The
+    verdict does not matter — an unchanged tree fails for the same reasons.
+    """
+    try:
+        record = json.loads(last_run_file(root).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(record, dict) or not isinstance(record.get("result"), dict):
+        return None
+    ran_at = record.get("ran_at")
+    if not isinstance(ran_at, (int, float)) or isinstance(ran_at, bool):
+        return None
+    age = (time.time() if now is None else now) - float(ran_at)
+    if age < 0 or age > REUSE_MAX_AGE_S:
+        return None
+    digest = _contract_digest(root)
+    if not digest or record.get("contract_sha256") != digest:
+        return None
+    if status(root) != verdict.OK:
+        return None
+    recorded = record.get("fingerprint")
+    if not recorded or recorded != tree_fingerprint(root):
+        return None
+    result = record["result"]
+    if result.get("verdict") not in _VERDICTS or not isinstance(result.get("reasons"), list):
+        return None
+    result.setdefault("criteria", [])
+    return result
+
+
+def execute_reusing(root: pathlib.Path, cap_s: Optional[float] = None) -> Dict[str, Any]:
+    """:func:`execute`, unless an unchanged tree already has its answer.
+
+    The returned dict carries ``"reused": True`` when no criterion ran.
+    """
+    previous = reusable(root)
+    if previous is not None:
+        previous["reused"] = True
+        return previous
+    result = execute(root, cap_s=cap_s)
+    record_run(root, result)
+    return result
+
+
 def run(argv: List[str]) -> int:
     """``gatekit contract derive|status|run [--json]``."""
     import argparse  # CLI only; hooks that import contract never parse arguments
@@ -559,6 +690,10 @@ def run(argv: List[str]) -> int:
         return 0 if result == verdict.OK else 1
 
     result = execute(root, total_budget_s=args.budget)
+    if args.budget is None:
+        # A run cut short by an explicit budget is not what the stop gate
+        # would have got, so only a full run is recorded for reuse.
+        record_run(root, result)
     if args.as_json:
         print(json.dumps(result, indent=2, ensure_ascii=False))
     else:

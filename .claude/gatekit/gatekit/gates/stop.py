@@ -13,6 +13,12 @@ Three safety valves keep the block from becoming a trap:
 * **Any internal error allows.** The wrapper in :mod:`gatekit.hookio` catches
   everything and exits 0.
 
+The contract is not run again when its answer is already known: a run recorded
+within the last ten minutes is reused while the contract file and every file
+in the tree are unchanged (:func:`gatekit.contract.execute_reusing`, ADR-0024).
+A turn that changed nothing, or a ``/gatekit-verify`` that has just run the
+contract, costs a directory walk instead of the whole suite.
+
 Whenever the gate lets the session stop it records ``stop.final_verdict``, and
 that value is **never blank**: an unrun contract is recorded as ``unverified``,
 not silently as success.
@@ -38,7 +44,7 @@ ENFORCED_PIPELINES = ("build", "verify")
 #: How many times this gate may block one session before standing down.
 MAX_BLOCKS = 3
 
-#: The Stop hook's ``timeout`` in ``hooks/hooks.json``. 600 s is the largest
+#: The Stop hook's ``timeout`` in ``.claude/settings.json``. 600 s is the largest
 #: value the Claude Code hook documentation shows; no higher value is
 #: documented as supported, so gatekit does not rely on one.
 STOP_HOOK_TIMEOUT_S = 600.0
@@ -119,7 +125,7 @@ def handle(event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
 
     # Already inside a stop-hook continuation: never block again.
     if bool(event.get("stop_hook_active")):
-        result = contract.execute(root, cap_s=STOP_BUDGET_CAP_S)
+        result = contract.execute_reusing(root, cap_s=STOP_BUDGET_CAP_S)
         _finish(led, result["verdict"], result["reasons"])
         return hookio.allow()
 
@@ -131,7 +137,7 @@ def handle(event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     except (TypeError, ValueError):
         block_count = 0
 
-    result = contract.execute(root, cap_s=STOP_BUDGET_CAP_S)
+    result = contract.execute_reusing(root, cap_s=STOP_BUDGET_CAP_S)
     outcome = result["verdict"]
 
     if outcome == verdict.OK:

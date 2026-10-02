@@ -61,6 +61,6 @@ has the roles the wrong way round.
 
 ## Not decided here
 
-- Whether the Stop hook may reuse a contract result from the same turn rather
-  than run it again.
+- Whether the Stop hook may reuse a contract result rather than run it again:
+  decided in ADR-0024.
 - Removing the backend machinery from the kernel.
