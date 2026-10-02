@@ -389,13 +389,7 @@ if ($argsBad) { $script:showSummary = $false; Set-Flag 'fail'; Complete-Run }
 # winget goes first: the other installs may need it (-Install winget,pwsh).
 if ($installList -contains 'winget') { $installList = @('winget') + @($installList | Where-Object { $_ -ne 'winget' }) }
 
-# ---- process and version helpers (the PATH rule, Find-App and Get-App, is in common.ps1) ----
-function Quote-Arg([string]$a) {
-    if ($a -eq '') { return '""' }
-    if ($a -match '[\s"]') { return '"' + ($a -replace '"', '\"') + '"' }
-    return $a
-}
-
+# ---- process and version helpers (the PATH rule, Find-App and Get-App, and Quote-Arg are in common.ps1) ----
 # Kills a process and all its children (a plain Kill leaves grandchildren running).
 function Stop-ProcTree($p) {
     try {
@@ -691,7 +685,7 @@ function Confirm-Reinstalled([string]$name, [string]$path, [string]$known = '') 
 }
 
 # ---- PowerShell 7: the installed stable PRODUCT decides, not the PATH order --------------------
-# Order: (1) the Windows package and (2) the MSI folder <Program Files>\PowerShell: both are
+# Order: (1) the Windows package and (2) the MSI folder <Program Files>\PowerShell\7: both are
 # Get-PwshProduct in common.ps1, the rule session-check.ps1 uses too (the package names come from
 # packages.json); (3) the version text of each pwsh on the session PATH (a "-preview" style
 # suffix means preview), which needs a process and is therefore only done here.

@@ -48,13 +48,11 @@ function Fail-Timeout([string]$name, [int]$limit, $r) {
 }
 
 # ---- process helpers (the same way as Invoke-Proc in setup.ps1) --------------
-# Quotes one argument for CreateProcess: backslashes before a quote and at the end are doubled.
-function Quote-Arg([string]$a) {
-    if ($a -eq '') { return '""' }
-    if ($a -notmatch '[\s"]') { return $a }
-    $s = $a -replace '(\\*)"', '$1$1\"'
-    $s = $s -replace '(\\+)$', '$1$1'
-    return '"' + $s + '"'
+# Quote-Arg (one argument quoted for a new process) is in common.ps1, the one copy setup.ps1 uses too.
+try { . "$PSScriptRoot\common.ps1" } catch {
+    Say 'fail' ('scripts/common.ps1 could not be read / 읽지 못함: ' + "$($_.Exception.Message)")
+    Write-Host '       git checkout .claude/gatekit/scripts/common.ps1'
+    exit 1
 }
 
 # Kills a process and all its children (a plain Kill leaves grandchildren running).

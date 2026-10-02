@@ -42,7 +42,7 @@ status: "초안"
 | 타입·클래스 | {{PascalCase}} | {{UserProfile}} |
 | 함수·변수 | {{camelCase}} | {{loadUserProfile}} |
 | 환경변수 | {{SCREAMING_SNAKE}} | {{DATABASE_URL}} |
-| API 경로 | {{/api/<복수형 명사>}} | {{/api/users}} |
+| API 경로 | {{`/api/<복수형 명사>`}} | {{/api/users}} |
 
 ## 외부 연동
 

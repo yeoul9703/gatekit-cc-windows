@@ -414,7 +414,7 @@ application code is written.** Concretely:
   `AskUserQuestion` ("이대로 확정할까요?" / "더 수정할 부분이 있어요") — not
   until the pipeline decides the prototype looks finished.
 - **`/gatekit:tasks` Step 1 now also requires this confirmation to be
-  recorded** (a line in `02-screens.md`, e.g. "프로토타입 확정 <date>",
+  recorded** (a line in `02-screens.md`, e.g. `프로토타입 확정 <date>`,
   parallel to how `05-gate.md`'s approval hash already gates `/gatekit:build`
   in `approve check`). Its absence blocks Step 1 the same way a missing
   `02-screens.md` does under decision 3 — the two checks compose: no screen

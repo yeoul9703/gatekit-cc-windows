@@ -31,7 +31,7 @@ and three commands carried long sections that are needed only sometimes.
    deleted.
 2. **The command's `description` carries what the shim carried**: what it
    does, Korean and English trigger phrases, and the boundary to its nearest
-   neighbour ("NOT for … — that is /gatekit:<other>"). At most 1024
+   neighbour (`NOT for … — that is /gatekit:<other>`). At most 1024
    characters, no angle brackets.
 3. **One preamble.** `.claude/gatekit/policy/preamble.md` holds language
    detection (from the spec, or from the input) and what follows from it.

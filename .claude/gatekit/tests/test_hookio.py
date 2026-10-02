@@ -10,6 +10,7 @@ import io
 import json
 import os
 import pathlib
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -174,6 +175,90 @@ class TestRun(unittest.TestCase):
         self._run(boom)
         log = self.root / ".gatekit" / "runs" / "hook-errors.log"
         self.assertEqual(len(log.read_text(encoding="utf-8").strip().splitlines()), 1)
+
+
+class TestRunWithACwdThatIsNotText(unittest.TestCase):
+    """The event itself can be what breaks a gate: a ``cwd`` that is not a string makes
+    ``event_root`` raise. The failure path asked ``event_root`` again, failed the same way and
+    left no line. It must leave its line, in the project of the process's own working
+    directory, and still allow."""
+
+    BROKEN_CWDS = (1, True, 1.5, ["a"], {"x": 1})
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.root = pathlib.Path(os.path.realpath(self._tmp.name))
+        (self.root / ".gatekit").mkdir()
+        self.log = self.root / ".gatekit" / "runs" / "hook-errors.log"
+        # Registered after the folder's cleanup, so it runs first: the folder cannot be
+        # removed while it is the working directory.
+        self.addCleanup(os.chdir, os.getcwd())
+        os.chdir(self.root)
+
+    def _run(self, handler, event) -> "tuple[str, int]":
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            code = hookio.run(handler, stdin=io.StringIO(json.dumps(event)), exit_process=False)
+        return buf.getvalue(), code
+
+    def _lines(self) -> list:
+        return self.log.read_text(encoding="utf-8").strip().splitlines() if self.log.is_file() else []
+
+    def test_the_event_root_fault_is_logged_and_the_gate_allows(self) -> None:
+        # What every gate does first: resolve the project from the event.
+        for count, cwd in enumerate(self.BROKEN_CWDS, start=1):
+            with self.subTest(cwd=cwd):
+                with self.assertRaises(TypeError):
+                    hookio.event_root({"cwd": cwd})
+                out, code = self._run(lambda event: hookio.event_root(event) and None,
+                                      {"hook_event_name": "PreToolUse", "cwd": cwd})
+                self.assertEqual((out, code), ("", 0))
+                lines = self._lines()
+                self.assertEqual(len(lines), count, lines)
+                self.assertIn("PreToolUse", lines[-1])
+                self.assertIn("TypeError", lines[-1])
+
+    def test_a_handler_fault_is_logged_whatever_the_cwd_is(self) -> None:
+        def boom(event):
+            raise RuntimeError("gate exploded")
+
+        out, code = self._run(boom, {"hook_event_name": "Stop", "cwd": ["not", "a", "path"]})
+        self.assertEqual((out, code), ("", 0))
+        lines = self._lines()
+        self.assertEqual(len(lines), 1, lines)
+        self.assertIn("Stop", lines[0])
+        self.assertIn("gate exploded", lines[0])
+
+    def test_a_text_cwd_still_decides_where_the_line_goes(self) -> None:
+        # The usual path is unchanged: the line goes to the project of the event's cwd,
+        # not to the one the process happens to stand in.
+        def boom(event):
+            raise RuntimeError("gate exploded")
+
+        with tempfile.TemporaryDirectory() as other:
+            other_root = pathlib.Path(os.path.realpath(other))
+            (other_root / ".gatekit").mkdir()
+            self._run(boom, {"hook_event_name": "PreToolUse", "cwd": str(other_root)})
+            self.assertTrue((other_root / ".gatekit" / "runs" / "hook-errors.log").is_file())
+        self.assertEqual(self._lines(), [])
+
+    def test_a_hook_process_exits_zero_prints_nothing_and_leaves_the_line(self) -> None:
+        # The same through a real process, the way Claude Code starts a hook: JSON on stdin,
+        # the project folder as the working directory, sys.exit at the end.
+        kit = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        code = ("import sys; sys.path.insert(0, %r); from gatekit import hookio; "
+                "hookio.run(lambda event: hookio.event_root(event) and None)" % kit)
+        proc = subprocess.run([sys.executable, "-c", code], cwd=str(self.root),
+                              input=json.dumps({"hook_event_name": "PreToolUse", "cwd": 1}),
+                              capture_output=True, text=True, timeout=30)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(proc.stdout, "")
+        self.assertNotIn("Traceback", proc.stderr)
+        lines = self._lines()
+        self.assertEqual(len(lines), 1, lines)
+        self.assertIn("PreToolUse", lines[0])
+        self.assertIn("TypeError", lines[0])
 
 
 class TestLogError(unittest.TestCase):

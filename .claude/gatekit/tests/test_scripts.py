@@ -15,6 +15,7 @@ import pathlib
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 
@@ -80,6 +81,125 @@ class TestScriptFiles(unittest.TestCase):
     def test_gitattributes_pins_ps1_line_endings(self) -> None:
         text = (PROJECT / ".gitattributes").read_text(encoding="utf-8")
         self.assertIn("*.ps1 text eol=crlf", text.splitlines())
+
+    def test_no_control_character_in_scripts(self) -> None:
+        # A control byte in a script is a typing accident (the "\7" of a path once became BEL,
+        # 0x07) and makes tools read the file as binary. Only CR, LF and tab are expected.
+        for path in sorted(SCRIPTS.glob("*.ps1")):
+            for number, line in enumerate(path.read_bytes().split(b"\n"), start=1):
+                found = sorted({byte for byte in line
+                                if (byte < 0x20 and byte not in (0x09, 0x0D)) or byte == 0x7F})
+                self.assertEqual(found, [], "%s line %d holds control byte(s) %s"
+                                 % (path.name, number, ", ".join("0x%02X" % byte for byte in found)))
+
+
+def script_text(name: str) -> str:
+    return (SCRIPTS / name).read_bytes().decode("utf-8-sig")
+
+
+#: The dot-source line every script uses to load common.ps1.
+LOAD_COMMON = '. "$PSScriptRoot\\common.ps1"'
+
+#: Prints the arguments it received as a JSON list (the program the quoting test starts).
+ECHO_ARGS = "import sys,json;sys.stdout.write(json.dumps(sys.argv[1:]))"
+
+#: Loads common.ps1 (GK_COMMON), quotes every text of GK_CASES (a JSON list) with Quote-Arg, then
+#: starts GK_PROGRAM with those arguments the way Invoke-Proc of setup.ps1 and verify.ps1 does
+#: (no shell, one ProcessStartInfo.Arguments text). Prints {"quoted": [...], "received": "..."},
+#: received being what the program printed.
+QUOTE_SNIPPET = (
+    ". $env:GK_COMMON; "
+    "$cases = ConvertFrom-Json $env:GK_CASES; "
+    "$quoted = @($cases | ForEach-Object { Quote-Arg $_ }); "
+    "$psi = New-Object System.Diagnostics.ProcessStartInfo; "
+    "$psi.FileName = $env:GK_PROGRAM; "
+    "$psi.Arguments = ((@('-c', $env:GK_ECHO) + $cases | ForEach-Object { Quote-Arg $_ }) -join ' '); "
+    "$psi.UseShellExecute = $false; $psi.CreateNoWindow = $true; $psi.RedirectStandardOutput = $true; "
+    "$p = [System.Diagnostics.Process]::Start($psi); "
+    "$received = $p.StandardOutput.ReadToEnd(); $p.WaitForExit(); "
+    "ConvertTo-Json -Compress -InputObject @{ quoted = $quoted; received = $received }")
+
+#: (argument, what Quote-Arg returns for it). The last argument of the list shows whether the
+#: one before it kept its closing quote: an escaped closing quote takes the next argument with it.
+QUOTE_CASES = [
+    ("plain", "plain"),
+    ("", '""'),
+    ("a b", '"a b"'),
+    ('say "hi"', r'"say \"hi\""'),
+    ("C:\\dir with space\\", '"C:\\dir with space\\\\"'),        # one backslash at the end: doubled
+    ("C:\\dir\\", "C:\\dir\\"),                                  # nothing to quote, nothing doubled
+    ("C:\\dir with space\\\\", '"C:\\dir with space\\\\\\\\"'),  # two at the end: four
+    ('a\\"b c', '"a\\\\\\"b c"'),                                # a backslash before a quote
+    ('ends with a quote"', r'"ends with a quote\""'),
+    ('x\\"', '"x\\\\\\""'),
+    ("in\\side only", '"in\\side only"'),                        # not before a quote: left alone
+    ("tab\there", '"tab\there"'),
+    ('"', r'"\""'),
+    ("\\", "\\"),
+    (" ", '" "'),
+    ("line one\\\n", '"line one\\\n"'),                          # not at the very end: left alone
+    ("last", "last"),
+]
+
+
+class TestQuoteArg(unittest.TestCase):
+    """One Quote-Arg, in common.ps1, for both scripts that start programs. setup.ps1 used to carry
+    its own copy that did not double a backslash at the end of a quoted argument."""
+
+    def test_quote_arg_is_defined_once_in_common_ps1(self) -> None:
+        self.assertEqual(script_text("common.ps1").count("function Quote-Arg("), 1)
+        for name in ("setup.ps1", "verify.ps1", "session-check.ps1"):
+            self.assertNotIn("function Quote-Arg", script_text(name), "%s defines Quote-Arg again" % name)
+
+    def test_both_scripts_load_common_ps1_before_they_start_a_program(self) -> None:
+        for name in ("setup.ps1", "verify.ps1"):
+            text = script_text(name)
+            self.assertIn("Quote-Arg $_", text, name)
+            self.assertIn(LOAD_COMMON, text, name)
+            self.assertLess(text.index(LOAD_COMMON), text.index("\nfunction Invoke-Proc("), name)
+
+    @unittest.skipUnless(POWERSHELL.is_file(), "Windows PowerShell 5.1 not available")
+    def test_every_argument_reaches_the_program_unchanged(self) -> None:
+        arguments = [argument for argument, _ in QUOTE_CASES]
+        env = dict(os.environ, GK_COMMON=str(SCRIPTS / "common.ps1"), GK_CASES=json.dumps(arguments),
+                   GK_PROGRAM=sys.executable, GK_ECHO=ECHO_ARGS)
+        proc = subprocess.run(
+            [str(POWERSHELL), "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", QUOTE_SNIPPET],
+            capture_output=True, env=env, timeout=60)
+        out = proc.stdout.decode("utf-8", "replace")
+        self.assertEqual(proc.returncode, 0, out + proc.stderr.decode("utf-8", "replace"))
+        data = json.loads(out)
+        self.assertEqual(len(data["quoted"]), len(QUOTE_CASES))
+        for (argument, expected), quoted in zip(QUOTE_CASES, data["quoted"], strict=True):
+            with self.subTest(argument=argument):
+                self.assertEqual(quoted, expected)
+        # The round trip: a backslash at the end must not swallow the closing quote (and with it
+        # the following argument), a quote inside must not end the argument.
+        self.assertEqual(json.loads(data["received"]), arguments)
+
+    @unittest.skipUnless(POWERSHELL.is_file(), "Windows PowerShell 5.1 not available")
+    def test_verify_ps1_loads_common_ps1_and_stops_without_it(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            scripts = pathlib.Path(tmp) / ".claude" / "gatekit" / "scripts"
+            scripts.mkdir(parents=True)
+            shutil.copy(SCRIPTS / "verify.ps1", scripts / "verify.ps1")
+
+            def run_verify():
+                proc = subprocess.run(
+                    [str(POWERSHELL), "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
+                     str(scripts / "verify.ps1")], capture_output=True, timeout=60)
+                return proc.returncode, proc.stdout.decode("utf-8", "replace") + proc.stderr.decode("utf-8", "replace")
+
+            code, out = run_verify()  # no common.ps1: it says so and runs nothing
+            self.assertEqual(code, 1, out)
+            self.assertIn("[fail] scripts/common.ps1", out)
+            self.assertNotIn(".venv", out)
+
+            shutil.copy(SCRIPTS / "common.ps1", scripts / "common.ps1")
+            code, out = run_verify()  # loaded: it gets as far as the next check (this copy has no .venv)
+            self.assertEqual(code, 1, out)
+            self.assertNotIn("common.ps1", out)
+            self.assertIn(".venv missing", out)
 
 
 def base_env(bin_dir: pathlib.Path, local_app: pathlib.Path) -> dict:

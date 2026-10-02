@@ -12,6 +12,7 @@ import stat
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 # Make the `gatekit` package importable however this suite is discovered:
 # `discover -s plugin/tests` loads tests as top-level modules and puts only
@@ -784,6 +785,17 @@ class TestHooksExecForm(DoctorTestCase):
         result = self._session_hook_args(
             ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "x/scripts/session-check.ps1"])
         self.assertEqual(result["verdict"], verdict.OK)
+
+    def test_the_required_arguments_are_what_the_check_reads_and_prints(self) -> None:
+        # REQUIRED_PS_ARGS is the one list: the check looks for these, the message names these.
+        self.assertEqual(doctor.REQUIRED_PS_ARGS, ("-NoProfile", "-ExecutionPolicy", "Bypass"))
+        usual = ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "x/scripts/session-check.ps1"]
+        with mock.patch.object(doctor, "REQUIRED_PS_ARGS", ("-NoLogo", "-ExecutionPolicy", "AllSigned")):
+            result = self._session_hook_args(usual)
+            self.assertEqual(result["verdict"], verdict.FAIL)
+            self.assertIn("-NoLogo -ExecutionPolicy AllSigned", result["detail"])
+            other = ["-nologo", "-executionpolicy", "allsigned", "-File", "x/scripts/session-check.ps1"]
+            self.assertEqual(self._session_hook_args(other)["verdict"], verdict.OK)
 
     def test_real_settings_json_is_ok(self) -> None:
         project = pathlib.Path(__file__).resolve().parents[3]

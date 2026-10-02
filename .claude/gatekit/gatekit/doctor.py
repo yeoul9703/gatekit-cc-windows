@@ -85,7 +85,9 @@ AXIS_NAMES_KO = {
     "python": "파이썬", "uv": "uv",
 }
 
-#: Hook arguments every PowerShell hook must carry (no profile, no policy block).
+#: Hook arguments every PowerShell hook must carry (no profile, no policy block): a switch,
+#: then an option and the value that has to follow it. Read by
+#: :func:`_powershell_hooks_missing_args` and printed in the message of a failed check.
 REQUIRED_PS_ARGS = ("-NoProfile", "-ExecutionPolicy", "Bypass")
 
 #: Values ``.claude/settings.json`` must carry so Claude Code runs its PowerShell tool
@@ -175,6 +177,7 @@ def _powershell_hooks_missing_args(hooks):
     a hook runs, so every hook whose command is a PowerShell executable has to
     carry all of :data:`REQUIRED_PS_ARGS` (``-ExecutionPolicy`` followed by ``Bypass``).
     """
+    switch, option, value = (arg.lower() for arg in REQUIRED_PS_ARGS)
     bad = []
     for event in EXPECTED_HOOK_EVENTS:
         for hook in _hook_entries(hooks, event):
@@ -183,10 +186,10 @@ def _powershell_hooks_missing_args(hooks):
                 continue
             args = [str(a) for a in hook.get("args") or []]
             lowered = [a.lower() for a in args]
-            ok = "-noprofile" in lowered
-            if "-executionpolicy" in lowered:
-                i = lowered.index("-executionpolicy")
-                ok = ok and i + 1 < len(lowered) and lowered[i + 1] == "bypass"
+            ok = switch in lowered
+            if option in lowered:
+                i = lowered.index(option)
+                ok = ok and i + 1 < len(lowered) and lowered[i + 1] == value
             else:
                 ok = False
             if not ok and event not in bad:
@@ -304,9 +307,8 @@ def axis_hooks_registered(root) -> dict:
     no_flags = _powershell_hooks_missing_args(hooks)
     if no_flags:
         return _axis(name, verdict.FAIL,
-                     _t("PowerShell hook(s) missing -NoProfile -ExecutionPolicy Bypass: %s",
-                        "PowerShell 훅에 -NoProfile -ExecutionPolicy Bypass 가 없습니다: %s")
-                     % ", ".join(no_flags), restore)
+                     _t("PowerShell hook(s) missing %s: %s", "PowerShell 훅에 %s 가 없습니다: %s")
+                     % (" ".join(REQUIRED_PS_ARGS), ", ".join(no_flags)), restore)
     no_gate = _missing_required_hooks(hooks)
     if no_gate:
         return _axis(name, verdict.FAIL,

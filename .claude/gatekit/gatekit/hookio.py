@@ -129,6 +129,21 @@ def log_error(root: pathlib.Path, event_name: str, err: BaseException) -> None:
         pass
 
 
+def _error_log_root(event: Event) -> pathlib.Path:
+    """The project whose error log gets the line for a failed gate.
+
+    Normally :func:`event_root`. But the event itself may be what broke the
+    gate: a ``cwd`` that is not a string makes :func:`event_root` raise, and
+    asking it again from the failure path would raise the same way and leave
+    no line at all. Then the project is looked up from the process's own
+    working directory, which is where Claude Code starts a hook.
+    """
+    try:
+        return event_root(event)
+    except Exception:  # noqa: BLE001 - whatever the event holds, a root is needed
+        return paths.project_root(None)
+
+
 # --------------------------------------------------------------------------
 # the wrapper
 # --------------------------------------------------------------------------
@@ -157,7 +172,7 @@ def run(
             sys.stdout.flush()
     except BaseException as err:  # noqa: BLE001 - deliberate catch-all
         try:
-            log_error(event_root(event), str(event.get("hook_event_name") or ""), err)
+            log_error(_error_log_root(event), str(event.get("hook_event_name") or ""), err)
         except BaseException:  # pragma: no cover
             pass
         code = 0

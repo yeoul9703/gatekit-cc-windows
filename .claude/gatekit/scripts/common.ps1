@@ -1,5 +1,5 @@
-﻿# common.ps1 - helpers shared by setup.ps1 and session-check.ps1: PATH rule (Get-MergedPath, Find-App, Get-App), PowerShell 7 product rule (Get-PwshProduct), ASCII-only JSON (ConvertTo-AsciiJson), whether this project runs the claude CLI (Test-CliRequired).
-# Windows PowerShell 5.1 compatible. Both scripts load it with:  . "$PSScriptRoot\common.ps1"
+﻿# common.ps1 - helpers shared by setup.ps1, session-check.ps1 and verify.ps1: PATH rule (Get-MergedPath, Find-App, Get-App), PowerShell 7 product rule (Get-PwshProduct), ASCII-only JSON (ConvertTo-AsciiJson), whether this project runs the claude CLI (Test-CliRequired), one argument quoted for a new process (Quote-Arg).
+# Windows PowerShell 5.1 compatible. Each script loads it with:  . "$PSScriptRoot\common.ps1"
 # It only defines functions: it prints nothing, never exits and leaves $ErrorActionPreference to the caller.
 # Every function gets what it needs as a parameter, so none depends on a variable of the script that loaded it.
 # A function of this file must not be defined again in a script (the later definition would silently win).
@@ -166,6 +166,21 @@ function Test-CliRequired([string]$projectRoot) {
         }
     } catch { }
     return $false
+}
+
+# ---- One argument of a command line --------------------------------------------------------------
+# setup.ps1 and verify.ps1 start a program without a shell, so the arguments travel as one text
+# (ProcessStartInfo.Arguments) that the program splits again. This quotes one argument so that it
+# comes back unchanged: quoted only when it is empty or holds white space or a quote; inside the
+# quotes every quote becomes \" and the backslashes right before a quote are doubled, and so are
+# the ones at the very end, which would otherwise escape the closing quote and take the next
+# argument with them ("C:\dir with space\" has to be "C:\dir with space\\").
+function Quote-Arg([string]$a) {
+    if ($a -eq '') { return '""' }
+    if ($a -notmatch '[\s"]') { return $a }
+    $s = $a -replace '(\\*)"', '$1$1\"'
+    $s = $s -replace '(\\+)\z', '$1$1'
+    return '"' + $s + '"'
 }
 
 # ---- JSON that is pure ASCII ---------------------------------------------------------------------

@@ -42,7 +42,7 @@ Fix naming in one place. Tasks (04) follow these rules.
 | Types and classes | {{PascalCase}} | {{UserProfile}} |
 | Functions and variables | {{camelCase}} | {{loadUserProfile}} |
 | Environment variables | {{SCREAMING_SNAKE}} | {{DATABASE_URL}} |
-| API routes | {{/api/<plural noun>}} | {{/api/users}} |
+| API routes | {{`/api/<plural noun>`}} | {{/api/users}} |
 
 ## External integrations
 

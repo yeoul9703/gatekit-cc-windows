@@ -27,7 +27,7 @@ status: "초안"
 
 | ID | 이름 | 규칙 | 적용 화면 | 근거 |
 |---|---|---|---|---|
-| P1 | {{목록 밀도}} | {{워커가 되묻지 않고 따를 수 있는 한 문장.}} | {{S1, S2}} 또는 `all` | {{spec/design/home.png, preset:<이름>, 또는 가정 N}} |
+| P1 | {{목록 밀도}} | {{워커가 되묻지 않고 따를 수 있는 한 문장.}} | {{S1, S2}} 또는 `all` | {{spec/design/home.png, `preset:<이름>`, 또는 가정 N}} |
 
 ## 컴포넌트
 
@@ -48,7 +48,7 @@ status: "초안"
 | 그룹 | 토큰 | 값 | 근거 |
 |---|---|---|---|
 | color | {{color.primary}} | {{#000000}} | {{spec/design/home.png}} |
-| space | {{space.md}} | {{16px}} | {{preset:<이름>}} |
+| space | {{space.md}} | {{16px}} | {{`preset:<이름>`}} |
 
 ## 근거 없는 영역
 

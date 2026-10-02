@@ -27,7 +27,7 @@ the worker prompt and the token gate read.
 
 | ID | Name | Rule | Applies to | Evidence |
 |---|---|---|---|---|
-| P1 | {{list density}} | {{One sentence a worker can follow without asking.}} | {{S1, S2}} or `all` | {{spec/design/home.png, preset:<name>, or assumption N}} |
+| P1 | {{list density}} | {{One sentence a worker can follow without asking.}} | {{S1, S2}} or `all` | {{spec/design/home.png, `preset:<name>`, or assumption N}} |
 
 ## Components
 
@@ -48,7 +48,7 @@ reserved. Keep only a summary here.
 | Group | Token | Value | Evidence |
 |---|---|---|---|
 | color | {{color.primary}} | {{#000000}} | {{spec/design/home.png}} |
-| space | {{space.md}} | {{16px}} | {{preset:<name>}} |
+| space | {{space.md}} | {{16px}} | {{`preset:<name>`}} |
 
 ## Not covered
 
