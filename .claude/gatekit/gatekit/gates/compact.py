@@ -84,7 +84,7 @@ def render(state: Dict[str, Any]) -> str:
         "",
         "## Build state at last compaction",
         "",
-        "Written by gatekit's PreCompact hook (ADR-0013). The conversation was "
+        "Written by gatekit's PreCompact hook. The conversation was "
         "summarised; this is what the run actually looked like at that moment. "
         "Read it, then continue from the first task that is not `passed`.",
         "",

@@ -26,7 +26,7 @@ status: "초안"
 ## 목표가 아닌 것
 
 - {{이번 범위에서 명시적으로 제외하는 것. 나중에 범위가 새는 것을 막는다.}}
-- {{화면이 전혀 없는 프로젝트(순수 CLI·라이브러리)라면 여기에 정확히 "[non-ui] {{이유}}" 라고 적는다 — ADR-0017의 화면 명세·프로토타입 확정 게이트가 면제된다.}}
+- {{화면이 전혀 없는 프로젝트(순수 CLI·라이브러리)라면 여기에 정확히 "[non-ui] {{이유}}" 라고 적는다 — 화면 명세·프로토타입 확정 게이트가 면제된다.}}
 
 ## 사용자
 
@@ -68,7 +68,7 @@ status: "초안"
 `uv run --project .claude/gatekit --frozen python .claude/gatekit/bin/gatekit.py spec validate`가 잡아낸다. 가정이 확인되면 행을 지우지 말고
 근거 칸을 확인된 사실로 바꾸고 Confirmed 를 y 로 바꾼다.
 
-`Blocking`(ADR-0017)은 틀리면 계획 자체가 무너지는 가정에만 y 를 적는다 —
+`Blocking`은 틀리면 계획 자체가 무너지는 가정에만 y 를 적는다 —
 "실사용자가 누구인지"는 blocking, "버튼 색"은 아니다. `Blocking: y`이면서
 `Confirmed: n`인 행이 있으면 `spec validate`는 warn이 아니라 fail을 내고,
 `/gatekit-gate`는 그 행이 확인될 때까지 진행을 거부한다. 틀려도 비용이 적은
