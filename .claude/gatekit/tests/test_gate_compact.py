@@ -163,8 +163,8 @@ class TestDoesNotBreakValidation(CompactProject):
 
     def test_a_template_progress_still_validates(self) -> None:
         from gatekit import spec
-        template = (pathlib.Path(__file__).resolve().parents[1]
-                    / "spec-kit" / "templates" / "ko" / "PROGRESS.md")
+        template = (pathlib.Path(__file__).resolve().parents[2]
+                    / "skills" / "gatekit-build" / "assets" / "ko" / "PROGRESS.md")
         (self.root / "spec" / "PROGRESS.md").write_text(
             template.read_text(encoding="utf-8"), encoding="utf-8")
         self.make_job({"a": "passed"})

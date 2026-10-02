@@ -3,7 +3,7 @@
 ADR-0017 decision 1 (branch floor) and decision 2 (verdict gate): discovery
 must surface at least three distinct pains before narrowing to one, and the
 chosen pain's confirmed verdict (build|reuse|eliminate|unknown) must not be
-eliminate or reuse before /gatekit:interview proceeds.
+eliminate or reuse before /gatekit-interview proceeds.
 
 `pains` is additive to the existing single-problem fence shape: a record
 with no `pains` key at all skips every check in this file (pre-ADR-0017

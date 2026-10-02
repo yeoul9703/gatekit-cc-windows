@@ -1,6 +1,6 @@
 # ADR-0019: Commands are the only entry points; rare steps live in reference docs
 
-Status: accepted 2026-10-02. Amends ADR-0018 decision 2 (the `skills` folder is gone).
+Status: accepted 2026-10-02. Amends ADR-0018 decision 2 (the `skills` folder is gone); superseded by ADR-0020 (entry points moved to .claude/skills; the preamble and rare-path split stay).
 
 ## Context
 

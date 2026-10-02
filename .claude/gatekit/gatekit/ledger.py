@@ -34,7 +34,7 @@ VERSION = 1
 READ_ONLY = "read-only"
 
 #: The pipelines a session can have active (ARCHITECTURE.md section 4). The
-#: prompt gate sets one when the user invokes ``/gatekit:<pipeline>``; the stop
+#: prompt gate sets one when the user invokes ``/gatekit-<pipeline>``; the stop
 #: and question gates read it. ``discover`` is the optional first step and
 #: ``design`` is re-entrant: it may run at any stage, including during a build
 #: (ADR-0008). ``doctor`` and ``setup`` are commands, not pipelines, and clear it.

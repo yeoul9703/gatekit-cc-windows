@@ -116,9 +116,11 @@ class PresetTestCase(TempProject):
         super().setUp()
         self._plugin_tmp = tempfile.TemporaryDirectory()
         self.plugin = pathlib.Path(os.path.realpath(self._plugin_tmp.name))
-        (self.plugin / ".claude-plugin").mkdir()
-        (self.plugin / ".claude-plugin" / "plugin.json").write_text("{}", encoding="utf-8")
-        self.presets = self.plugin / "spec-kit" / "presets" / "design"
+        # The same shape as an install: <tmp>/.claude/gatekit beside <tmp>/.claude/skills.
+        self.plugin = self.plugin / ".claude" / "gatekit"
+        self.plugin.mkdir(parents=True)
+        self.presets = (self.plugin.parent / "skills" / "gatekit-shared" / "assets"
+                        / "presets" / "design")
         self.presets.mkdir(parents=True)
         self._orig_plugin_root = paths.gatekit_root
         paths.gatekit_root = lambda: self.plugin

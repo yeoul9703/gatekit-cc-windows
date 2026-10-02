@@ -1,10 +1,10 @@
 """Tests for ADR-0017 decision 3: spec/02-screens.md becomes a required gate
-before /gatekit:tasks for any PRD whose features imply a user-facing screen.
+before /gatekit-tasks for any PRD whose features imply a user-facing screen.
 
 Detection reuses the same signal `tasks.md` Step 2 already uses informally
 ("the surface a user touches"): a PRD is UI-bearing unless it carries an
 explicit non-UI marker in its Non-goals section, `[non-ui]`, recorded by
-/gatekit:interview for a pure-CLI or pure-library spec. Defaulting to
+/gatekit-interview for a pure-CLI or pure-library spec. Defaulting to
 UI-bearing (rather than scanning feature prose for keywords) keeps the check
 deterministic — a prose heuristic over feature text would be exactly the kind
 of guess CLAUDE.md warns against for a gate.

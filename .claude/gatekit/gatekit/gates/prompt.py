@@ -9,7 +9,7 @@ This gate never blocks. It does two things on every prompt:
    language, the active pipeline, the question budget and the number of
    unresolved gate items — the state Claude would otherwise have to guess at.
 
-3. **Records the active pipeline.** A prompt that invokes ``/gatekit:<name>``
+3. **Records the active pipeline.** A prompt that invokes ``/gatekit-<name>``
    sets ``active_pipeline`` in the ledger; that field is what arms the stop
    gate (build/verify) and the question budget (interview). It is set here, by
    code, because a command's prose asking Claude to "remember" the pipeline
@@ -36,19 +36,21 @@ from gatekit import approval, contract, hookio, lang, ledger, paths  # noqa: E40
 
 
 #: Commands that are not pipelines. Invoking one clears ``active_pipeline`` so
-#: a stop gate armed by an earlier ``/gatekit:build`` does not outlive it.
+#: a stop gate armed by an earlier ``/gatekit-build`` does not outlive it.
 NON_PIPELINE_COMMANDS = ("doctor", "setup")
 
-#: A ``/gatekit:<name>`` invocation is recognised only where Claude Code puts
+#: A ``/gatekit-<name>`` invocation is recognised only where Claude Code puts
 #: it. For a slash command the prompt body is the tagged form
-#: ``<command-message>…</command-message>\n<command-name>/gatekit:<name></command-name>\n<command-args>…``
-#: (observed in session transcripts); the bare ``/gatekit:<name>`` at the
-#: start of a prompt and the ``# /gatekit:<name>`` title line of an expanded
-#: command body are accepted too. A mention mid-sentence is conversation, not
-#: an invocation.
+#: ``<command-message>…</command-message>\n<command-name>/gatekit-<name></command-name>\n<command-args>…``
+#: (observed in session transcripts); the bare ``/gatekit-<name>`` at the
+#: start of a prompt and the ``# /gatekit-<name>`` title line of an expanded
+#: skill body are accepted too. A mention mid-sentence is conversation, not
+#: an invocation. The name is one lowercase word and must end there, so
+#: ``/gatekit-build-state`` is not ``build``. The old ``/gatekit`` + colon
+#: form is not recognised.
 _INVOCATION_RE = re.compile(
-    r"(?:<command-name>\s*/gatekit:([a-z-]+)\s*</command-name>)"
-    r"|(?:^\s*(?:#\s+)?/gatekit:([a-z-]+)\b)",
+    r"(?:<command-name>\s*/gatekit-([a-z]+)\s*</command-name>)"
+    r"|(?:^\s*(?:#\s+)?/gatekit-([a-z]+)(?![\w-]))",
     re.MULTILINE,
 )
 #: Only the leading lines of the prompt are inspected.
@@ -72,7 +74,7 @@ def language_signal(text: str) -> str:
 
 
 def detect_command(text: str) -> Optional[str]:
-    """Return the ``/gatekit:<name>`` command this prompt invokes, if any."""
+    """Return the ``/gatekit-<name>`` command this prompt invokes, if any."""
     head = "\n".join(text.splitlines()[:_HEAD_LINES])
     match = _INVOCATION_RE.search(head)
     if not match:

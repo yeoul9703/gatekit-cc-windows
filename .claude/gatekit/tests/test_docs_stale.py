@@ -27,7 +27,7 @@ LINK = re.compile(r"\[[^\]]*\]\(([^)\s]+)\)")
 def checked_files() -> list[pathlib.Path]:
     files = [PROJECT / "README.md"]
     for path in sorted(DOCS.rglob("*.md")):
-        if path.parent.name == "decisions" and not path.name.startswith("ADR-0018"):
+        if path.parent.name == "decisions" and not path.name.startswith(("ADR-0018", "ADR-0020")):
             continue
         files.append(path)
     return files
@@ -48,7 +48,8 @@ class TestDocsStale(unittest.TestCase):
     def test_expected_files_are_checked(self) -> None:
         names = {p.name for p in checked_files()}
         for expected in ("README.md", "USAGE.md", "ARCHITECTURE.md",
-                         "ADR-0018-windows-standalone-uv.md"):
+                         "ADR-0018-windows-standalone-uv.md",
+                         "ADR-0020-skills-under-claude-skills.md"):
             self.assertIn(expected, names)
 
     def test_relative_links_resolve(self) -> None:

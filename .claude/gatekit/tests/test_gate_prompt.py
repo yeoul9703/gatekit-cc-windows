@@ -202,11 +202,10 @@ class TestPipelineDetection(PromptProject):
 
     @staticmethod
     def tagged(name: str, args: str = "") -> str:
-        """The prompt body Claude Code sends for a plugin slash command, as
-        observed in real session transcripts."""
+        """The tagged prompt body Claude Code sends for a slash invocation."""
         return (
-            "<command-message>gatekit:%s</command-message>\n"
-            "<command-name>/gatekit:%s</command-name>\n"
+            "<command-message>gatekit-%s</command-message>\n"
+            "<command-name>/gatekit-%s</command-name>\n"
             "<command-args>%s</command-args>" % (name, name, args)
         )
 
@@ -224,63 +223,81 @@ class TestPipelineDetection(PromptProject):
         self.assertIsNone(self.led().data["active_pipeline"])
 
     def test_slash_command_sets_pipeline(self) -> None:
-        prompt_gate.handle(self.event("/gatekit:build"))
+        prompt_gate.handle(self.event("/gatekit-build"))
         self.assertEqual(self.led().data["active_pipeline"], "build")
 
     def test_slash_command_with_arguments(self) -> None:
-        prompt_gate.handle(self.event("  /gatekit:interview a todo app in Korean"))
+        prompt_gate.handle(self.event("  /gatekit-interview a todo app in Korean"))
         self.assertEqual(self.led().data["active_pipeline"], "interview")
 
     def test_expanded_command_heading_sets_pipeline(self) -> None:
-        body = "---\nname: verify\n---\n\n# /gatekit:verify\n\nInput: ..."
+        body = "---\nname: verify\n---\n\n# /gatekit-verify\n\nInput: ..."
         prompt_gate.handle(self.event(body))
         self.assertEqual(self.led().data["active_pipeline"], "verify")
 
     def test_plain_prompt_keeps_pipeline(self) -> None:
-        prompt_gate.handle(self.event("/gatekit:build"))
+        prompt_gate.handle(self.event("/gatekit-build"))
         prompt_gate.handle(self.event("why did task auth-token fail?"))
         self.assertEqual(self.led().data["active_pipeline"], "build")
 
     def test_mention_mid_sentence_does_not_switch(self) -> None:
-        prompt_gate.handle(self.event("/gatekit:build"))
-        prompt_gate.handle(self.event("later I will run /gatekit:verify, not now"))
+        prompt_gate.handle(self.event("/gatekit-build"))
+        prompt_gate.handle(self.event("later I will run /gatekit-verify, not now"))
         self.assertEqual(self.led().data["active_pipeline"], "build")
 
     def test_non_pipeline_command_clears(self) -> None:
-        prompt_gate.handle(self.event("/gatekit:build"))
-        prompt_gate.handle(self.event("/gatekit:doctor"))
+        prompt_gate.handle(self.event("/gatekit-build"))
+        prompt_gate.handle(self.event("/gatekit-doctor"))
         self.assertIsNone(self.led().data["active_pipeline"])
 
     def test_unknown_gatekit_command_leaves_pipeline(self) -> None:
-        prompt_gate.handle(self.event("/gatekit:build"))
-        prompt_gate.handle(self.event("/gatekit:nonsense"))
+        prompt_gate.handle(self.event("/gatekit-build"))
+        prompt_gate.handle(self.event("/gatekit-nonsense"))
         self.assertEqual(self.led().data["active_pipeline"], "build")
 
     def test_pipeline_change_resets_question_budget(self) -> None:
-        prompt_gate.handle(self.event("/gatekit:interview x"))
+        prompt_gate.handle(self.event("/gatekit-interview x"))
         led = self.led()
         led.data["questions"]["asked"] = 3
         led.data["questions"]["budget_exceeded"] = True
         led.save()
-        prompt_gate.handle(self.event("/gatekit:tasks"))
+        prompt_gate.handle(self.event("/gatekit-tasks"))
         questions = self.led().data["questions"]
         self.assertEqual(questions["asked"], 0)
         self.assertFalse(questions["budget_exceeded"])
 
     def test_same_pipeline_again_does_not_reset(self) -> None:
-        prompt_gate.handle(self.event("/gatekit:interview x"))
+        prompt_gate.handle(self.event("/gatekit-interview x"))
         led = self.led()
         led.data["questions"]["asked"] = 1
         led.save()
-        prompt_gate.handle(self.event("/gatekit:interview y"))
+        prompt_gate.handle(self.event("/gatekit-interview y"))
         self.assertEqual(self.led().data["questions"]["asked"], 1)
 
     def test_context_names_detected_pipeline(self) -> None:
-        result = prompt_gate.handle(self.event("/gatekit:build"))
+        result = prompt_gate.handle(self.event("/gatekit-build"))
         self.assertIn("pipeline=build", self.context_of(result))
 
+    def test_old_colon_form_is_not_an_invocation(self) -> None:
+        prompt_gate.handle(self.event("/gatekit" + ":build"))
+        prompt_gate.handle(self.event(
+            "<command-name>/gatekit" + ":build</command-name>\n<command-args></command-args>"))
+        self.assertIsNone(self.led().data.get("active_pipeline"))
+
+    def test_a_longer_name_is_not_its_prefix(self) -> None:
+        for text in ("/gatekit-build-state", "/gatekit-build_x"):
+            self.assertIsNone(prompt_gate.detect_command(text), text)
+        self.assertEqual(prompt_gate.detect_command("/gatekit-builder"), "builder")
+
+    def test_every_known_command_name_is_extracted(self) -> None:
+        for name in tuple(ledger.PIPELINES) + prompt_gate.NON_PIPELINE_COMMANDS:
+            tagged = "<command-name>/gatekit-%s</command-name>" % name
+            for text in ("/gatekit-" + name, "/gatekit-%s some args" % name,
+                         "# /gatekit-" + name, tagged):
+                self.assertEqual(prompt_gate.detect_command(text), name, text)
+
     def test_records_pipeline_event(self) -> None:
-        prompt_gate.handle(self.event("/gatekit:gate"))
+        prompt_gate.handle(self.event("/gatekit-gate"))
         events = [e for e in self.led().data["events"] if e["kind"] == "pipeline_set"]
         self.assertEqual(events[-1]["detail"]["pipeline"], "gate")
 
@@ -288,8 +305,8 @@ class TestPipelineDetection(PromptProject):
 class TestDiscoverPipeline(PromptProject):
     def test_discover_command_sets_pipeline(self) -> None:
         prompt_gate.handle(self.event(
-            "<command-message>gatekit:discover</command-message>\n"
-            "<command-name>/gatekit:discover</command-name>\n"
+            "<command-message>gatekit-discover</command-message>\n"
+            "<command-name>/gatekit-discover</command-name>\n"
             "<command-args></command-args>"))
         self.assertEqual(self.led().data["active_pipeline"], "discover")
 
@@ -300,8 +317,8 @@ class TestLanguageFromSlashCommand(PromptProject):
 
     def tagged(self, name: str, args: str) -> str:
         return (
-            "<command-message>gatekit:%s</command-message>\n"
-            "<command-name>/gatekit:%s</command-name>\n"
+            "<command-message>gatekit-%s</command-message>\n"
+            "<command-name>/gatekit-%s</command-name>\n"
             "<command-args>%s</command-args>" % (name, name, args)
         )
 

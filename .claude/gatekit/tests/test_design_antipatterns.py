@@ -1,4 +1,4 @@
-"""Tests for plugin/spec-kit/design-antipatterns.json (ADR-0017 decision 9).
+"""Tests for gatekit-verify/assets/design-antipatterns.json (ADR-0017 decision 9).
 
 This file is read as prose by the verify evaluator's prompt, not by any
 gatekit module — there is no merge or derive logic to unit test the way
@@ -15,8 +15,8 @@ import json
 import pathlib
 import unittest
 
-PLUGIN_DIR = pathlib.Path(__file__).resolve().parent.parent
-ANTIPATTERNS_PATH = PLUGIN_DIR / "spec-kit" / "design-antipatterns.json"
+SKILLS_DIR = pathlib.Path(__file__).resolve().parents[2] / "skills"
+ANTIPATTERNS_PATH = SKILLS_DIR / "gatekit-verify" / "assets" / "design-antipatterns.json"
 
 
 class TestDesignAntipatterns(unittest.TestCase):

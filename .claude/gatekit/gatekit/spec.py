@@ -41,11 +41,11 @@ _HEADING_MAP_CACHE: Optional[Dict[str, Any]] = None
 
 
 def heading_map() -> Dict[str, Any]:
-    """Load `plugin/spec-kit/heading-map.json` (cached)."""
+    """Load `gatekit-shared/assets/heading-map.json` (cached)."""
     global _HEADING_MAP_CACHE
     cached = _HEADING_MAP_CACHE
     if cached is None:
-        path = paths.gatekit_root() / "spec-kit" / "heading-map.json"
+        path = paths.skill_dir("shared") / "assets" / "heading-map.json"
         with path.open(encoding="utf-8") as fh:
             cached = _HEADING_MAP_CACHE = json.load(fh)
     return cached
@@ -198,8 +198,8 @@ MESSAGES = {
         "pains_chosen_count": "chosen 이 true 인 불편이 정확히 1개여야 합니다 (현재 {count}개).",
         "pain_verdict_blocks": "고른 문제의 확정 판정이 {verdict} 입니다 — 이 판정은 interview 진행을 막습니다 (ADR-0017). 없애거나 재활용할 것이면 이 문제를 만들지 않고 다른 불편을 고르세요.",
         "pain_verdict_unconfirmed": "고른 문제에 verdict_suggested 만 있고 사용자가 확정한 verdict 가 없습니다. 인터뷰어의 제안을 사용자 확인 없이 그대로 다음 단계로 넘기지 마세요 (ADR-0017).",
-        "screens_required": "spec/02-screens.md 가 없습니다. 01-prd.md 가 화면을 수반하는 프로젝트로 보이므로(비UI로 선언하려면 목표가 아닌 것에 [non-ui] 표시), /gatekit:tasks 를 실행하기 전에 /gatekit:mockup 을 먼저 실행하세요 (ADR-0017).",
-        "prototype_required": "화면 명세가 있는데 프로토타입 확정 기록이 없습니다. /gatekit:mockup 이 만든 살아있는 HTML 프로토타입을 사용자가 확인·수정한 뒤 확정해야 /gatekit:tasks 를 진행할 수 있습니다 (ADR-0017).",
+        "screens_required": "spec/02-screens.md 가 없습니다. 01-prd.md 가 화면을 수반하는 프로젝트로 보이므로(비UI로 선언하려면 목표가 아닌 것에 [non-ui] 표시), /gatekit-tasks 를 실행하기 전에 /gatekit-mockup 을 먼저 실행하세요 (ADR-0017).",
+        "prototype_required": "화면 명세가 있는데 프로토타입 확정 기록이 없습니다. /gatekit-mockup 이 만든 살아있는 HTML 프로토타입을 사용자가 확인·수정한 뒤 확정해야 /gatekit-tasks 를 진행할 수 있습니다 (ADR-0017).",
         "ok": "검사를 통과했습니다.",
     },
     "en": {
@@ -264,8 +264,8 @@ MESSAGES = {
         "pains_chosen_count": "Exactly one pain must have chosen: true (found {count}).",
         "pain_verdict_blocks": "The chosen pain's confirmed verdict is {verdict} — this verdict blocks progressing to interview (ADR-0017). If it should be eliminated or reused, pick a different pain instead of building this one.",
         "pain_verdict_unconfirmed": "The chosen pain has a verdict_suggested but no user-confirmed verdict. Do not carry the interviewer's proposal into the next stage without the user confirming it (ADR-0017).",
-        "screens_required": "spec/02-screens.md is missing. 01-prd.md appears to be a UI-bearing project (mark it [non-ui] in Non-goals to declare otherwise); run /gatekit:mockup before /gatekit:tasks (ADR-0017).",
-        "prototype_required": "A screen spec exists but no prototype confirmation is recorded. The user must open, revise, and confirm the live HTML prototype /gatekit:mockup built before /gatekit:tasks can proceed (ADR-0017).",
+        "screens_required": "spec/02-screens.md is missing. 01-prd.md appears to be a UI-bearing project (mark it [non-ui] in Non-goals to declare otherwise); run /gatekit-mockup before /gatekit-tasks (ADR-0017).",
+        "prototype_required": "A screen spec exists but no prototype confirmation is recorded. The user must open, revise, and confirm the live HTML prototype /gatekit-mockup built before /gatekit-tasks can proceed (ADR-0017).",
         "ok": "Checks passed.",
     },
 }
@@ -994,7 +994,7 @@ def _gate_filled(gate: str, record: dict) -> bool:
 #: set — see `_check_pains`'s comment on why blocking it would be a mistake.
 PAIN_VERDICTS = ("build", "reuse", "eliminate", "unknown")
 
-#: Verdicts that refuse promotion to /gatekit:interview (ADR-0017 decision 2,
+#: Verdicts that refuse promotion to /gatekit-interview (ADR-0017 decision 2,
 #: mirroring ai-dev-pm's `blocksPromote()`).
 _PAIN_VERDICTS_BLOCKING = ("eliminate", "reuse")
 
@@ -1058,7 +1058,7 @@ def _check_pains(record: dict, lang: str) -> List[dict]:
     if confirmed in _PAIN_VERDICTS_BLOCKING:
         # ai-dev-pm's promote() gate, adapted: a pain that should be
         # eliminated or that duplicates an existing tool must not reach
-        # /gatekit:interview. This mirrors VALIDATION_FAILED there — a
+        # /gatekit-interview. This mirrors VALIDATION_FAILED there — a
         # code-level refusal, not a prompt suggestion.
         findings.append(_finding(name, V.FAIL, _msg(lang, "pain_verdict_blocks", verdict=confirmed)))
     elif confirmed is None:
@@ -1291,7 +1291,7 @@ def _check_tokens(root: pathlib.Path, lang: str) -> List[dict]:
 # --------------------------------------------------------------------------
 
 #: A PRD carrying this marker in its Non-goals section is declaring itself
-#: non-UI (a pure CLI or library) — /gatekit:interview writes it when the
+#: non-UI (a pure CLI or library) — /gatekit-interview writes it when the
 #: project has no screens by design, not as something spec validate infers
 #: from feature prose. Matched literally rather than by keyword-scanning
 #: feature text: a prose heuristic over feature descriptions would be exactly
@@ -1314,12 +1314,12 @@ def _prd_implies_ui(prd_text: str) -> bool:
 
 def _check_screens_required(prd_text: Optional[str], screens_text: Optional[str], lang: str) -> List[dict]:
     """ADR-0017 decision 3: a UI-bearing PRD needs spec/02-screens.md before
-    /gatekit:tasks proceeds — the same hard-stop shape 01-prd.md's own
+    /gatekit-tasks proceeds — the same hard-stop shape 01-prd.md's own
     absence already gets, not the silent `missing_optional` warn every other
     optional file receives.
 
     Reported against 04-tasks.md (whether or not that file exists yet)
-    because the *effect* of this gap is that /gatekit:tasks must not run —
+    because the *effect* of this gap is that /gatekit-tasks must not run —
     the same file `_check_tasks` and traceability findings already use for
     "something about proceeding to tasks is wrong."
     """
@@ -1334,7 +1334,7 @@ def _check_screens_required(prd_text: Optional[str], screens_text: Optional[str]
     return [_finding("04-tasks.md", V.FAIL, _msg(lang, "screens_required"))]
 
 
-#: ADR-0017 decision 4: the confirmation line /gatekit:mockup's revision loop
+#: ADR-0017 decision 4: the confirmation line /gatekit-mockup's revision loop
 #: writes once the user has actually opened, revised, and signed off on the
 #: live prototype. Prose, not a hash-anchored approval like 05-gate.md's,
 #: because the prototype is revised in-loop until confirmed — there is no
@@ -1348,7 +1348,7 @@ _PROTOTYPE_CONFIRMED_RE = re.compile(
 
 
 def _check_prototype_required(prd_text: Optional[str], screens_text: Optional[str], lang: str) -> List[dict]:
-    """ADR-0017 decision 4: /gatekit:tasks must not run until the live HTML
+    """ADR-0017 decision 4: /gatekit-tasks must not run until the live HTML
     prototype has been opened, revised, and explicitly confirmed.
 
     Only meaningful once a screen spec exists at all — decision 3's

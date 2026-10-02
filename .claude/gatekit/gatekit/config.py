@@ -61,7 +61,7 @@ DEFAULTS: Dict[str, Any] = {
     "build": {"max_retries": 2, "parallel": 3, "task_timeout_s": 900,
               "execution": "host"},
     "questions": {"interview_max_calls": 2, "items_per_call": 4},
-    # Who grades in /gatekit:verify: "agent" spawns a read-only subagent of
+    # Who grades in /gatekit-verify: "agent" spawns a read-only subagent of
     # the host; a backend name runs that CLI with its read_only_argv, so the
     # grader can be a different model from the one that built the code.
     # Unset by design (ADR-0013): an absent evaluator resolves at call time

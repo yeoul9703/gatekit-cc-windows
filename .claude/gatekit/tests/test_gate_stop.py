@@ -345,8 +345,8 @@ class TestEndToEndViaPromptGate(StopProject):
     def test_build_command_then_failing_contract_blocks(self) -> None:
         self.failing()
         self.prompt(
-            "<command-message>gatekit:build</command-message>\n"
-            "<command-name>/gatekit:build</command-name>\n"
+            "<command-message>gatekit-build</command-message>\n"
+            "<command-name>/gatekit-build</command-name>\n"
             "<command-args></command-args>"
         )
         result = stop_gate.handle(self.event())
@@ -361,8 +361,8 @@ class TestEndToEndViaPromptGate(StopProject):
 
     def test_doctor_after_build_disarms(self) -> None:
         self.failing()
-        self.prompt("/gatekit:build")
-        self.prompt("/gatekit:doctor")
+        self.prompt("/gatekit-build")
+        self.prompt("/gatekit-doctor")
         self.assertIsNone(stop_gate.handle(self.event()))
 
 

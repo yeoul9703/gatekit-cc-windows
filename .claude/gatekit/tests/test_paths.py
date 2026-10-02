@@ -89,6 +89,15 @@ class TestDerivedDirs(TempProject):
         # The POSIX sh wrapper is gone: hooks and commands go through uv/venv python.
         self.assertFalse((found / "bin" / "gatekit").exists())
 
+    def test_skills_root_is_the_sibling_of_the_gatekit_root(self) -> None:
+        self.assertEqual(paths.skills_root(), paths.gatekit_root().parent / "skills")
+        self.assertEqual(paths.skill_dir("build"), paths.skills_root() / "gatekit-build")
+        self.assertTrue((paths.skill_dir("build") / "SKILL.md").is_file())
+        # The engine's own data files live in the shared folder.
+        shared = paths.skill_dir("shared") / "assets"
+        self.assertTrue((shared / "heading-map.json").is_file())
+        self.assertTrue((shared / "presets" / "design").is_dir())
+
     def test_cli_invocation_is_shell_neutral_uv_form(self) -> None:
         inv = paths.cli_invocation()
         self.assertEqual(

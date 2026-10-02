@@ -23,6 +23,24 @@ if str(PLUGIN_DIR) not in sys.path:
     sys.path.insert(0, str(PLUGIN_DIR))
 
 FIXTURES = pathlib.Path(__file__).resolve().parent / "fixtures" / "spec"
+SKILLS_DIR = PLUGIN_DIR.parent / "skills"
+
+#: Which skill owns each spec template (its ``assets/<lang>/<file>``).
+TEMPLATE_OWNER = {
+    "00-discovery.md": "discover",
+    "01-prd.md": "interview",
+    "02-screens.md": "mockup",
+    "02-design.md": "design",
+    "03-architecture.md": "interview",
+    "04-tasks.md": "tasks",
+    "05-gate.md": "gate",
+    "PROGRESS.md": "build",
+    "RECOVERY.md": "build",
+}
+
+
+def template_path(lang: str, name: str) -> pathlib.Path:
+    return SKILLS_DIR / ("gatekit-" + TEMPLATE_OWNER[name]) / "assets" / lang / name
 
 
 # ---------------------------------------------------------------------------
@@ -48,6 +66,8 @@ def _stub_paths() -> types.ModuleType:
     mod.state_dir = lambda root: pathlib.Path(root) / ".gatekit"
     mod.spec_dir = lambda root: pathlib.Path(root) / "spec"
     mod.gatekit_root = lambda: PLUGIN_DIR
+    mod.skills_root = lambda: SKILLS_DIR
+    mod.skill_dir = lambda name: SKILLS_DIR / ("gatekit-" + name)
     return mod
 
 
@@ -545,7 +565,7 @@ class TemplateConsistencyTests(unittest.TestCase):
         hm = spec.heading_map()
         for lang in ("ko", "en"):
             for name in hm["files"]:
-                path = PLUGIN_DIR / "spec-kit" / "templates" / lang / name
+                path = template_path(lang, name)
                 self.assertTrue(path.exists(), "missing template %s/%s" % (lang, name))
                 present = set(spec._present_headings(path.read_text(encoding="utf-8")))
                 for heading in hm[lang][name]:
@@ -558,7 +578,7 @@ class TemplateConsistencyTests(unittest.TestCase):
         for lang in ("ko", "en"):
             other = "en" if lang == "ko" else "ko"
             for name in hm["files"]:
-                path = PLUGIN_DIR / "spec-kit" / "templates" / lang / name
+                path = template_path(lang, name)
                 present = set(spec._present_headings(path.read_text(encoding="utf-8")))
                 stray = present & set(hm[other][name]) - set(hm[lang][name])
                 self.assertEqual(stray, set(), "%s/%s: %r" % (lang, name, stray))
@@ -570,7 +590,7 @@ class TemplateConsistencyTests(unittest.TestCase):
         ]
         for lang in ("ko", "en"):
             for name, fence in checks:
-                text = (PLUGIN_DIR / "spec-kit" / "templates" / lang / name).read_text(
+                text = template_path(lang, name).read_text(
                     encoding="utf-8"
                 )
                 detailed = spec._parse_fences_detailed(text, fence)
@@ -584,7 +604,7 @@ class TemplateConsistencyTests(unittest.TestCase):
         hm = spec.heading_map()
         for lang in ("ko", "en"):
             for name in hm["files"]:
-                path = PLUGIN_DIR / "spec-kit" / "templates" / lang / name
+                path = template_path(lang, name)
                 count = len(path.read_text(encoding="utf-8").splitlines())
                 self.assertLessEqual(count, 120, "%s/%s is %d lines" % (lang, name, count))
 

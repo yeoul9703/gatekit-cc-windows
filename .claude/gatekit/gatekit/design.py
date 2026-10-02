@@ -97,7 +97,7 @@ def token_groups(data: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
 
 
 def preset_file(name: str) -> pathlib.Path:
-    return paths.gatekit_root() / "spec-kit" / "presets" / "design" / ("%s.json" % name)
+    return paths.skill_dir("shared") / "assets" / "presets" / "design" / ("%s.json" % name)
 
 
 def _merge_token(preset_value: Any, name: str) -> Dict[str, Any]:

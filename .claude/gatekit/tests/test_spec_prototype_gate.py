@@ -1,5 +1,5 @@
 """Tests for ADR-0017 decision 4: a confirmed live-prototype record is
-required in spec/02-screens.md before /gatekit:tasks may proceed.
+required in spec/02-screens.md before /gatekit-tasks may proceed.
 
 The confirmation is a line of prose in 02-screens.md (parallel to how the
 assumption ledger's inline markers are prose the validator scans for), never

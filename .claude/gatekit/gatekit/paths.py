@@ -7,7 +7,8 @@ ARCHITECTURE.md section 2 is stated exactly once. Two roots matter:
   starting directory to the nearest ancestor holding ``.gatekit/`` or ``.git/``;
 * the **gatekit root** — this standalone install's own directory
   (``<project>/.claude/gatekit``), derived from ``__file__`` since there is no
-  plugin manager to ask.
+  plugin manager to ask. The skills (``<project>/.claude/skills/gatekit-<name>``)
+  sit beside it and hold the data files the engine reads.
 
 No absolute personal path is ever hardcoded: both roots are derived at runtime.
 """
@@ -117,6 +118,20 @@ def gatekit_root() -> pathlib.Path:
     """
     here = pathlib.Path(__file__).resolve()
     return here.parents[1]
+
+
+def skills_root() -> pathlib.Path:
+    """``<project>/.claude/skills`` — the sibling of :func:`gatekit_root`."""
+    return gatekit_root().parent / "skills"
+
+
+def skill_dir(name: str) -> pathlib.Path:
+    """``<project>/.claude/skills/gatekit-<name>``.
+
+    ``name`` is the bare skill name (``build``, ``verify``) or ``shared``, the
+    folder of files several skills and the engine use (heading map, presets).
+    """
+    return skills_root() / ("gatekit-" + name)
 
 
 def ensure_dir(path: pathlib.Path) -> pathlib.Path:

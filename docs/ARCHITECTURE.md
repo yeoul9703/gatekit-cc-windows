@@ -8,8 +8,8 @@ implementation needs to deviate, change this file first (with an ADR in
 **This repository runs gatekit standalone, for Claude Code only.** There is no
 plugin manager and no second host (see ADR-0006, not adopted here): opening
 this folder in Claude Code is enough — hooks are registered directly in the
-project's own `.claude/settings.json`, and commands live under
-`.claude/commands/gatekit/`. Sections below describe that standalone layout;
+project's own `.claude/settings.json`, and each pipeline is a skill folder
+under `.claude/skills/`. Sections below describe that standalone layout;
 where an ADR still describes the old plugin-distributed, multi-host design,
 this file's description of the current layout wins.
 
@@ -28,7 +28,8 @@ directories) but contains no code copied from any other project.
 | Every hook exits 0 on any internal error and writes a one-line diagnostic to `.gatekit/runs/hook-errors.log` | a broken hook must never break the user's session |
 | Verdict vocabulary is exactly `ok / warn / fail / unverified` | "not checked" must never be rounded to pass or fail |
 | No absolute personal paths anywhere in the repo | keeps the checkout portable across machines |
-| `.claude/commands/gatekit/*.md` is the only entry point per pipeline (`/gatekit:<name>`); its `description` carries the Korean and English triggers, and steps needed only sometimes live in `policy/` or `spec-kit/` reference docs the command names (ADR-0019) | one listing per pipeline; a command stays short enough to follow |
+| `.claude/skills/gatekit-<name>/SKILL.md` is the only entry point per pipeline (`/gatekit-<name>`); its `description` carries the Korean and English triggers, steps needed only sometimes live in that skill's `references/`, templates and data in its `assets/`, and what several skills share in `.claude/skills/gatekit-shared/` (ADR-0020) | one listing per pipeline; a `SKILL.md` stays short enough to follow, and everything a skill uses sits beside it |
+| `SKILL.md` and reference docs never tell the model to read `docs/` | `docs/` is written for people; what the model needs lives in the skill folder |
 | Data (templates, heading maps, presets, schemas) lives in JSON/Markdown files, not in prompt prose | keeps prompts small and data diffable |
 | Any file > 1 MB fails CI | no committed corpora |
 | Output language follows `output_lang` (see §8); Korean is never a default | open-source posture |
@@ -39,17 +40,20 @@ directories) but contains no code copied from any other project.
 <project root>/
 ├── .claude/
 │   ├── settings.json                    # 6 hook events (SessionStart, UserPromptSubmit, PreToolUse x3, PostToolUse x2, PreCompact, Stop), exec form (see §3)
-│   ├── commands/gatekit/                # execution instructions (one per pipeline), /gatekit:<name>
-│   │   ├── discover.md    /gatekit:discover    → spec/00-discovery.md (optional first step)
-│   │   ├── interview.md   /gatekit:interview   → spec/01-prd.md, spec/03-architecture.md
-│   │   ├── mockup.md      /gatekit:mockup      → spec/02-screens.md, spec/tokens.json, ledger gaps, optional preview (ADR-0011)
-│   │   ├── design.md      /gatekit:design      → spec/02-design.md, spec/tokens.json, spec/design/, gap entries in ledger
-│   │   ├── tasks.md       /gatekit:tasks       → spec/04-tasks.md
-│   │   ├── gate.md        /gatekit:gate        → spec/05-gate.md, .gatekit/contract.json, approvals
-│   │   ├── build.md       /gatekit:build       → worker jobs over spec/04-tasks.md
-│   │   ├── verify.md      /gatekit:verify      → independent E2E + report check
-│   │   ├── doctor.md      /gatekit:doctor
-│   │   └── setup.md       /gatekit:setup       → config, default worker check
+│   ├── skills/                          # one folder per pipeline, /gatekit-<name> (ADR-0020)
+│   │   ├── gatekit-discover/   SKILL.md  references/discovery-summary.md  assets/{ko,en}/00-discovery.md      → spec/00-discovery.md (optional first step)
+│   │   ├── gatekit-interview/  SKILL.md  references/interview-subjects.md, domain-research.md  assets/{ko,en}/01-prd.md, 03-architecture.md   → spec/01-prd.md, spec/03-architecture.md
+│   │   ├── gatekit-mockup/     SKILL.md  references/prototype-gate.md  assets/{ko,en}/02-screens.md           → spec/02-screens.md, spec/tokens.json, ledger gaps, optional preview (ADR-0011)
+│   │   ├── gatekit-design/     SKILL.md  assets/{ko,en}/02-design.md                                          → spec/02-design.md, spec/tokens.json, spec/design/, gap entries in ledger
+│   │   ├── gatekit-tasks/      SKILL.md  references/task-gates.md  assets/{ko,en}/04-tasks.md                 → spec/04-tasks.md
+│   │   ├── gatekit-gate/       SKILL.md  references/gate-criteria.md  assets/{ko,en}/05-gate.md               → spec/05-gate.md, .gatekit/contract.json, approvals
+│   │   ├── gatekit-build/      SKILL.md  references/build-failures.md  assets/{ko,en}/PROGRESS.md, RECOVERY.md → worker jobs over spec/04-tasks.md
+│   │   ├── gatekit-verify/     SKILL.md  references/evaluator-brief.md  assets/design-antipatterns.json       → independent E2E + report check
+│   │   ├── gatekit-doctor/     SKILL.md
+│   │   ├── gatekit-setup/      SKILL.md  references/install-programs.md, settings.md, rare-paths.md           → config, default worker check
+│   │   └── gatekit-shared/              # not a skill (no SKILL.md): what several skills and the kernel share
+│   │       ├── references/preamble.md language.md questioning.md conversation.md assumptions.md verification.md   # preamble.md is every skill's Step 0
+│   │       └── assets/heading-map.json (canonical headings per file per language), presets/design/*.json
 │   └── gatekit/                         # the standalone kernel checkout
 │       ├── bin/
 │       │   └── gatekit.py               # entry point: sys.path bootstrap, then cli.main
@@ -69,17 +73,28 @@ directories) but contains no code copied from any other project.
 │       │   ├── workers.py     worker backends (claude default; a project may add more)
 │       │   ├── doctor.py      8-axis diagnosis
 │       │   ├── config.py      .gatekit/config.json loader with defaults
-│       │   ├── paths.py       project root / gatekit root resolution
+│       │   ├── paths.py       project root / gatekit root resolution; skills_root() and skill_dir(name) locate templates, heading-map and presets
 │       │   └── gates/         hook entry points: prompt.py write.py bash.py spawn.py question.py compact.py stop.py
-│       ├── spec-kit/
-│       │   ├── templates/{ko,en}/01-prd.md … 05-gate.md, RECOVERY.md, PROGRESS.md
-│       │   ├── heading-map.json         # canonical headings per file per language
-│       │   └── *.md                     # reference docs a command reads at the step that needs them (task-gates, gate-criteria, build-failures, evaluator-brief, prototype-gate, …)
-│       ├── policy/preamble.md language.md questioning.md conversation.md assumptions.md verification.md   # loaded at runtime by commands; preamble.md is every command's Step 0
 │       └── tests/                       # unittest, run with: cd .claude/gatekit; uv run --frozen python -m unittest discover -s tests
-├── docs/ARCHITECTURE.md (this), decisions/ADR-*.md, USAGE.md
+├── docs/ARCHITECTURE.md (this), decisions/ADR-*.md, USAGE.md, SETUP-REFERENCE.md   # for people, see §1a
 └── .gitignore                           # ignores .gatekit/runs, .gatekit/jobs
 ```
+
+### 1a. Who reads which document
+
+| Location | Reader | Language | Holds |
+|---|---|---|---|
+| `.claude/skills/gatekit-<name>/SKILL.md` | the model | English | the entry point: step order, safety rules, the next command |
+| `.claude/skills/gatekit-<name>/references/` | the model | English | detail one step of that skill reads only when it needs it; the first lines say when to read it |
+| `.claude/skills/gatekit-<name>/assets/` | the model and the kernel | Korean and English | material for the output: templates, presets, JSON data |
+| `.claude/skills/gatekit-shared/` | the model and the kernel | — | rules and data several skills use |
+| `docs/` | people | Korean (this file and the ADRs are English) | `USAGE.md`, `SETUP-REFERENCE.md`, `ARCHITECTURE.md`, `decisions/` |
+
+A `SKILL.md` or a reference doc never names a `docs/` file as something to
+read; it may tell the user that a guide exists. Folders this layout replaced
+and that no longer hold anything: `.claude/commands/`, the kernel's `policy`
+folder and its template-and-reference folder (ADR-0020). Scripts stay in
+`.claude/gatekit/scripts/`: the SessionStart hook, setup and verify share them.
 
 ## 2. Project state layout (inside the user's project)
 
@@ -110,7 +125,7 @@ directories) but contains no code copied from any other project.
 
 `paths.project_root(cwd)` = nearest ancestor containing `.gatekit/` or `.git/`, else cwd.
 
-**Design preview (ADR-0011).** When `/gatekit:mockup` runs with no design
+**Design preview (ADR-0011).** When `/gatekit-mockup` runs with no design
 source, its one `AskUserQuestion` offers a preview instead of a gap question
 (a stop signal suppresses both). On a yes it writes
 `spec/design/preview-<project>.html` from `02-screens.md` plus `tokens.json`:
@@ -121,7 +136,7 @@ were drawn from the spec, not observed. The user's corrections are applied to
 that file is what §10 pushes into worker briefs. No approval is recorded and
 no assumption closes. A preview path must never appear in an evidence cell of
 `02-screens.md` or `02-design.md` — `spec.validate` fails on it, and
-`/gatekit:design` refuses one as input — because a drawing made from the spec
+`/gatekit-design` refuses one as input — because a drawing made from the spec
 cannot be evidence for the spec.
 
 ## 3. Hook I/O contract (`hookio.py`)
@@ -185,7 +200,7 @@ does not exist is silently ignored by Claude Code (measured), so a missing
 `.venv` or uv would leave every gate off with no message. `session-check.ps1`
 runs at session start, verifies uv, the `.venv` (including that its
 `pyvenv.cfg` `home` still exists) and the `claude` CLI, and prints a warning
-pointing at `/gatekit:setup` when something is missing. It targets under 10 s.
+pointing at `/gatekit-setup` when something is missing. It targets under 10 s.
 
 - **prompt**: ensure ledger exists for `session_id`; detect `output_lang` from `prompt` (§8) and store it — for a slash command only the `<command-args>` content is the user's words, and empty args keep the stored language; **set `active_pipeline`** when the prompt invokes `/gatekit:<pipeline>`. Claude Code delivers a slash command as the tagged body `<command-message>…</command-message>` / `<command-name>/gatekit:<name></command-name>` / `<command-args>…</command-args>`; that tag, a bare `/gatekit:<name>` at the start of the prompt, and the `# /gatekit:<name>` title line of an expanded command body are recognised within the first 12 lines. A mid-sentence mention is not an invocation. `doctor` and `setup` clear it; an unknown name leaves it alone; a plain prompt keeps it. Entering a different pipeline resets `questions` to its defaults. This is the **only** production writer of `active_pipeline` — commands never set it by prose. Inject `additionalContext` (≤ 600 chars) with `output_lang`, question budget state, active pipeline, and unresolved gate count, plus `build=<job> n/m passed, next: <task>` while a job is unfinished (ADR-0013 decision 1a: the session that returns from a compaction is told a build is live and reads `spec/PROGRESS.md` for the rest). The question field is `questions=<asked>/<max>`, followed by the ADR-0012 signals when any is non-zero — `questions=6/2 (2 unjustified, 1 repeat, impl-choice)` — printing only what is set so the 600-char budget holds. Never blocks.
 - **write**: deny when (a) `config.enforce_spec_before_code` is true, `spec/` exists, `.gatekit/approvals.json` has no valid approval for `spec/05-gate.md`, and the target path is outside the allowlist `spec/**, .gatekit/**, docs/**, README*, *.md at root`; or (b) env `GATEKIT_TASK_ID` is set and the target is outside that task's `write_scope` (from the job's `task.json`). Reason text is in `output_lang`.
@@ -311,7 +326,7 @@ present in `spec/tokens.json`. Its exit code is the task-gate convention,
 not the hook convention: `0` (`ok`, every literal found matches a token),
 `1` (`fail`, a literal named with the file, line, and nearest token by
 value), `3` (`unverified`, `tokens.json` absent or unparsable, or the task
-wrote no file the gate knows how to scan). `/gatekit:tasks` adds it by
+wrote no file the gate knows how to scan). `/gatekit-tasks` adds it by
 default to every task whose `write_scope` touches a stylesheet, component,
 or template path when `spec/tokens.json` exists. The scan is deliberately
 narrow — colours only at this version — so a `fail` from it stays
@@ -331,7 +346,7 @@ fails with `Cannot find module`; `gates/tokens.py` takes globs too
 ### 6b. Screen spec and prototype confirmation gates (ADR-0017 decisions 3, 4)
 
 `spec.validate` reports two more `fail` conditions against `04-tasks.md` (the
-file whose command, `/gatekit:tasks`, must not proceed while either stands),
+file whose command, `/gatekit-tasks`, must not proceed while either stands),
 both exempted when `01-prd.md`'s Non-goals section contains the literal
 marker `[non-ui]` (a pure-CLI or library spec with nothing to prototype):
 
@@ -344,7 +359,7 @@ marker `[non-ui]` (a pure-CLI or library spec with nothing to prototype):
   matching `Prototype confirmed <date>` / `프로토타입 확정 <date>`
   (`YYYY-MM-DD`). This line is prose the validator scans for — not a
   hash-anchored approval like `05-gate.md`'s (§7) — because
-  `/gatekit:mockup`'s live-prototype revision loop (Step 7b) has no single
+  `/gatekit-mockup`'s live-prototype revision loop (Step 7b) has no single
   moment to pin a hash to before the loop's last accepted edit. Only the
   user's explicit confirmation writes this line; the command must never
   infer it from "the prototype looks finished."
@@ -352,7 +367,7 @@ marker `[non-ui]` (a pure-CLI or library spec with nothing to prototype):
 ## 6a. Discovery record in `spec/00-discovery.md` (ADR-0005)
 
 The optional first stage for a user who does not yet know what to build.
-`/gatekit:discover` writes it; `/gatekit:interview` reads it as facts. One
+`/gatekit-discover` writes it; `/gatekit-interview` reads it as facts. One
 fence:
 
 ````
@@ -394,7 +409,7 @@ Once `pains` is present, `spec.validate`:
   or whose `verdict` is present but not one of the four tokens;
 - fails unless **exactly one** entry has `"chosen": true`;
 - on the chosen entry: fails if its confirmed `verdict` is `eliminate` or
-  `reuse` (mirrors `ai-dev-pm`'s `blocksPromote()` — `/gatekit:interview`
+  `reuse` (mirrors `ai-dev-pm`'s `blocksPromote()` — `/gatekit-interview`
   must not draft a spec for a pain the pipeline itself judged should not be
   built); warns (never fails) if `verdict` is `null` while
   `verdict_suggested` exists (the interviewer proposed, the user has not
@@ -540,7 +555,7 @@ which is the normal case rather than a mistake: a gate names files and commands
 that do not exist until the work is done. Tasks no longer in the file are
 returned in `missing`, never silently skipped.
 
-**ADR-0013 decision 4 — the shape is approved before it is written.** `jobs.shape(root)` reports `{tasks, rounds, waves, serial, unevidenced, rounds_if_pruned}` from `spec/04-tasks.md`, and `/gatekit:tasks` shows it — rounds as prominently as the count — before writing the file. A `depends_on` is evidenced when the depending task's title or instruction names the dependency's id or a leaf from its write scope, matched on identifier boundaries so a short id is not found inside a word and a shared ancestor like `src` never counts. `rounds_if_pruned` recomputes depth from the evidenced links alone, ignoring the declared `round`, since that field is a consequence of the links. Advisory only: deciding whether an instruction *needs* a dependency requires understanding both, so nothing refuses. On gk-trial2 this reports 9 tasks / 7 rounds with three unevidenced links and 3 rounds without them.
+**ADR-0013 decision 4 — the shape is approved before it is written.** `jobs.shape(root)` reports `{tasks, rounds, waves, serial, unevidenced, rounds_if_pruned}` from `spec/04-tasks.md`, and `/gatekit-tasks` shows it — rounds as prominently as the count — before writing the file. A `depends_on` is evidenced when the depending task's title or instruction names the dependency's id or a leaf from its write scope, matched on identifier boundaries so a short id is not found inside a word and a shared ancestor like `src` never counts. `rounds_if_pruned` recomputes depth from the evidenced links alone, ignoring the declared `round`, since that field is a consequence of the links. Advisory only: deciding whether an instruction *needs* a dependency requires understanding both, so nothing refuses. On gk-trial2 this reports 9 tasks / 7 rounds with three unevidenced links and 3 rounds without them.
 
 **ADR-0013 decision 5 — a verification task is not a task.** `spec.validate` warns when a task's `write_scope` holds only test material (a path segment in `_TEST_DIR_SEGMENTS`, or a test-runner config stem) **and** its transitive dependency reach is ≥ 2. A check that passes only once several tasks are done is a completion criterion in `05-gate.md`: as a task it fails on every attempt until the last dependency lands. Reach is transitive because a chain end names one dependency and waits on all of them — the real `e2e-full-flow` declared one and waited on seven. A `warn`, never a `fail`: a legitimate test-only task exists.
 
@@ -629,7 +644,7 @@ prompt through `read_only_argv`: answered → ok, non-zero exit → `fail` with
 the output tail, since a binary that cannot run a prompt here — not logged
 in, or sandboxed away from its credentials — will fail every task; timed out
 → unverified), `set-default <name>`, `enable <name>`, `set-evaluator
-<agent|name>`. `/gatekit:build` runs the live probe before `jobs start`.
+<agent|name>`. `/gatekit-build` runs the live probe before `jobs start`.
 `claude` is the only backend enabled by default; a project may add and enable
 more in `.gatekit/config.json`.
 

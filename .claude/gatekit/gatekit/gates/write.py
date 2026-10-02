@@ -51,7 +51,7 @@ _MESSAGES = {
     "en": {
         "spec_first": (
             "gatekit: writing code is blocked until spec/05-gate.md is approved "
-            "(current status: {status}). Run the /gatekit:gate pipeline and have "
+            "(current status: {status}). Run the /gatekit-gate pipeline and have "
             "the user approve the gate, or write to spec/, docs/ or *.md first. "
             "Blocked path: {path}"
         ),
@@ -75,7 +75,7 @@ _MESSAGES = {
     "ko": {
         "spec_first": (
             "gatekit: spec/05-gate.md 승인 전에는 코드를 쓸 수 없습니다 "
-            "(현재 상태: {status}). /gatekit:gate 파이프라인을 실행해 사용자 승인을 "
+            "(현재 상태: {status}). /gatekit-gate 파이프라인을 실행해 사용자 승인을 "
             "받거나, 먼저 spec/·docs/·*.md 에 작성하세요. 차단된 경로: {path}"
         ),
         "scope": (

@@ -37,7 +37,7 @@ GATE_TIMEOUT_S = 60.0
 
 #: ADR-0013 decision 1. Who implements a task.
 #:
-#: ``host``   — the session running `/gatekit:build` writes the code itself.
+#: ``host``   — the session running `/gatekit-build` writes the code itself.
 #:              A worker is a *cold* session of the same model; spawning one
 #:              per task pays a fresh project discovery each time and buys a
 #:              second opinion from the model that is already here.
@@ -1354,7 +1354,7 @@ def _dependency_depth(task_id: str, by_id: dict, unevidenced_pairs=(), _seen=())
 def shape(root, task_ids=None) -> dict:
     """How the task file would run: counts, waves, and unevidenced links.
 
-    `/gatekit:tasks` shows this before writing `spec/04-tasks.md`, because
+    `/gatekit-tasks` shows this before writing `spec/04-tasks.md`, because
     rounds are what cost time and nothing today makes them visible. On the
     gk-trial2 run nine tasks — a reasonable count — were spread over seven
     rounds, five holding a single task, and every pair at the same dependency

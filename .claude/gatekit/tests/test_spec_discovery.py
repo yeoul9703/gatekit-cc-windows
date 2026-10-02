@@ -235,7 +235,7 @@ class TestGates(DiscoveryProject):
 class TestTemplates(unittest.TestCase):
     def test_discovery_templates_exist_and_fence_parses(self) -> None:
         for lang in ("ko", "en"):
-            path = PLUGIN_DIR / "spec-kit" / "templates" / lang / "00-discovery.md"
+            path = PLUGIN_DIR.parent / "skills" / "gatekit-discover" / "assets" / lang / "00-discovery.md"
             self.assertTrue(path.exists(), path)
             detailed = spec._parse_fences_detailed(path.read_text(encoding="utf-8"), "gatekit-discovery")
             self.assertEqual(len(detailed), 1)

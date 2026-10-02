@@ -1925,7 +1925,7 @@ class TestHostExecution(JobTestCase):
 
 
 class TestTaskShape(JobTestCase):
-    """`/gatekit:tasks` must show rounds as prominently as the count.
+    """`/gatekit-tasks` must show rounds as prominently as the count.
 
     On gk-trial2 nine tasks — a reasonable number — were spread over seven
     rounds, five of them holding one task. The count alone would have looked
