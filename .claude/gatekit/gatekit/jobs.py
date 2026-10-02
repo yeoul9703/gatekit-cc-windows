@@ -2,8 +2,10 @@
 
 `jobs start` builds `.gatekit/jobs/<job_id>/`, writes one directory per task
 (`task.json`, the brief `prompt.md`, `status.json`) and hands back the ordered
-plan. It starts nothing: the session that runs the build implements each task
-and calls `jobs complete`, which runs the task's gates. A task whose gates do
+plan. It starts nothing: the session that runs the build implements a task
+itself when it is alone in its round and hands the tasks of a wider round to
+subagents, one each, with the text `jobs start` prints. Whoever implements a
+task calls `jobs complete`, which runs the task's gates. A task whose gates do
 not pass is `failed`, never `passed` — a report of success never decides the
 verdict.
 
@@ -37,10 +39,12 @@ NOT_DONE_STATES = ("failed", "timeout", "stopped")
 
 GATE_TIMEOUT_S = 60.0
 
-#: A round with at least this many independent tasks is marked
-#: `parallel_candidate` in the plan: wide enough to be handed out and done at
-#: once instead of one after another.
-HOST_PARALLEL_HANDOFF = 3
+#: Who builds a task is this one rule, not a setting. A round with two or more
+#: tasks is handed out, one subagent per task; a round with a single task is
+#: done by the session that runs the build. The plan marks the tasks of a
+#: handed-out round `parallel_candidate`, and `jobs start` prints the text to
+#: hand each of them over with (`handoff_text`).
+HOST_PARALLEL_HANDOFF = 2
 
 #: ADR-0009 decision 1. A failing gate is a broken *command* only when the
 #: shell or interpreter itself reports that something the gate's argv names
@@ -396,16 +400,68 @@ def _screens_for(task: dict, root) -> list:
         return []
 
 
-def build_prompt(task: dict, job_id: str, root=None) -> str:
+def _scope_text(scope) -> str:
+    """A write scope on one line: its globs, or `read-only`."""
+    if isinstance(scope, list):
+        return ", ".join(str(s) for s in scope) or "(none)"
+    return str(scope or "read-only")
+
+
+def _read_first_lines(task: dict, tasks) -> list:
+    """The ``## Read first`` body: what to read before writing, and no more.
+
+    Two sources. The task's own `read` list is written by whoever cut the
+    tasks, when the most was known about the project. The paths of the tasks
+    it depends on are taken from their `write_scope` in *tasks* (every task of
+    the spec), so the work it builds on is named without anyone remembering to.
+    Whoever takes the task reads these and does not explore further: reading
+    the repository again is what a written brief is there to save.
+    """
+    read = task.get("read")
+    files = [p.strip() for p in read if isinstance(p, str) and p.strip()] \
+        if isinstance(read, list) else []
+    by_id = {str(t.get("id")): t for t in (tasks or []) if isinstance(t, dict)}
+    built_on = []
+    for dep in task.get("depends_on") or []:
+        earlier = by_id.get(str(dep))
+        if earlier is not None:
+            built_on.append("- %s: %s" % (dep, _scope_text(earlier.get("write_scope"))))
+    if not files and not built_on:
+        return ["Nothing is listed to read first. Do not explore the repository beyond",
+                "your own write scope.", ""]
+
+    lines = []
+    if files:
+        lines += ["Read these files before you write anything:", ""]
+        lines += ["- %s" % path for path in files]
+        lines.append("")
+    if built_on:
+        lines += ["This task builds on earlier tasks. Each line is a task id and the",
+                  "paths that task wrote:", ""]
+        lines += built_on
+        lines.append("")
+    lines += [
+        "Do not explore beyond what is listed here and your own write scope. Skip a",
+        "listed file that does not exist.",
+        "",
+    ]
+    return lines
+
+
+def build_prompt(task: dict, job_id: str, root=None, tasks=None) -> str:
     """The self-contained brief for one task, written to its `prompt.md`.
 
-    Whoever implements the task reads it: the instruction, the paths it may
-    write, the gates that judge it, and the design and screens it names.
+    Whoever implements the task, a subagent or the session itself, works from
+    this file alone: the instruction, what to read first, the paths it may
+    write, the gates that judge it and how to run them, what it may and may
+    not do, the design and screens it names, and the one line to answer with.
 
-    *root* is optional so existing callers keep working: without it, and
-    whenever ``spec/tokens.json`` is absent or unparsable, the prompt is
-    byte-identical to the one this function produced before ADR-0008.
+    *tasks* is every task of the spec; the paths written by the tasks this one
+    depends on are taken from it. *root* is optional so existing callers keep
+    working: without it, and whenever ``spec/tokens.json`` is absent or
+    unparsable, the prompt carries no design or screens section.
     """
+    task_id = str(task.get("id", "?"))
     scope = task.get("write_scope")
     if isinstance(scope, list):
         scope_text = "\n".join("- %s" % s for s in scope) or "- (none)"
@@ -422,7 +478,7 @@ def build_prompt(task: dict, job_id: str, root=None) -> str:
         gate_text = "- (none declared)"
 
     parts = [
-        "# Task %s — %s" % (task.get("id", "?"), task.get("title", "")),
+        "# Task %s — %s" % (task_id, task.get("title", "")),
         "",
         "job: %s" % job_id,
         "",
@@ -430,6 +486,11 @@ def build_prompt(task: dict, job_id: str, root=None) -> str:
         "",
         str(task.get("instruction", "")).strip(),
         "",
+        "## Read first",
+        "",
+    ]
+    parts += _read_first_lines(task, tasks)
+    parts += [
         "## Write scope",
         "",
         "You may create or modify ONLY these paths. Do not change anything outside",
@@ -442,6 +503,30 @@ def build_prompt(task: dict, job_id: str, root=None) -> str:
         "These commands decide whether the task passed.",
         "",
         gate_text,
+        "",
+        "Before you answer, run them yourself from the project root:",
+        "",
+        "    %s jobs complete %s --job %s" % (paths.cli_invocation(), task_id, job_id),
+        "",
+        "It prints `%s passed` or `%s failed`. On `failed`, fix the code and run it"
+        % (task_id, task_id),
+        "again until it prints `passed`. Every failed run is counted against the",
+        "task: use the project's test runner while you work, and this command when",
+        "you expect it to pass.",
+        "",
+        "## Tools",
+        "",
+        "You may run the project's own test runner and the `jobs complete` command",
+        "above.",
+        "",
+        "Do not:",
+        "",
+        "- install a program on this computer",
+        "- write outside the write scope above",
+        "- edit a gate command or anything under `spec/`",
+        "- edit `.gatekit/approvals.json`, `.gatekit/contract.json`, the gate code",
+        "  under `.claude/`, or `.claude/settings.json`",
+        "- start another agent",
         "",
     ]
 
@@ -461,10 +546,62 @@ def build_prompt(task: dict, job_id: str, root=None) -> str:
     parts += [
         "## Reporting",
         "",
-        "When you are done, reply with a short report: what you changed and what",
-        "you could not do. Do not claim success; the gates decide.",
+        "Reply with one line and nothing else: `passed`, or `blocked: <reason>` when",
+        "you could not make the gates pass. Do not keep running a gate you cannot",
+        "make pass. Do not paste output.",
+        "Do not claim success; the gates decide.",
     ]
     return "\n".join(parts) + "\n"
+
+
+def handoff_text(job_id: str, task: dict) -> str:
+    """The prompt to hand one task to a subagent with, to be passed on as it is.
+
+    One line that points at the task's brief, and the scope declaration the
+    spawn gate reads (`gates/spawn.py`: a ```gatekit-scope fence holding one
+    JSON object). Nothing else is handed over: what to read, what to run and
+    what to answer are in the brief, so the session that hands the task over
+    does not write it a second time. Paths are relative to the project root.
+    """
+    task_id = str(task.get("id", "?"))
+    scope = task.get("write_scope")
+    if isinstance(scope, list):
+        scope = [str(s) for s in scope]
+    else:
+        scope = "read-only"
+    fence = json.dumps(
+        {
+            "write_scope": scope,
+            "stop_when": "jobs complete %s prints passed" % task_id,
+            "tools": "inherit",
+        },
+        ensure_ascii=False,
+    )
+    brief = "%s/jobs/%s/tasks/%s/prompt.md" % (paths.STATE_DIRNAME, job_id, task_id)
+    return "\n".join([
+        "Read %s and do that task. Reply with one line." % brief,
+        "",
+        "```gatekit-scope",
+        fence,
+        "```",
+    ])
+
+
+def handoffs(root, job: dict) -> list:
+    """`(plan row, handoff text)` for every task of *job* that is handed out.
+
+    A task is handed out when its round holds two or more tasks
+    (`parallel_candidate`); the single task of a round is not in the list.
+    """
+    jdir = job_dir(root, str(job.get("job_id")))
+    out = []
+    for row in job.get("plan") or []:
+        if not row.get("parallel_candidate"):
+            continue
+        task = read_json(_task_dir(jdir, str(row.get("id"))) / "task.json", None)
+        if isinstance(task, dict):
+            out.append((row, handoff_text(str(job.get("job_id")), task)))
+    return out
 
 
 # --------------------------------------------------------------- task running
@@ -751,6 +888,9 @@ def start(root, task_ids=None, dry_run=False, no_preflight=False) -> dict:
     cfg = config.load(root)
     build_cfg = cfg.get("build") or {}
     tasks = load_tasks(root)
+    # Every task of the spec, kept apart from the selection below: a brief names
+    # the paths of the tasks it depends on, and `--tasks` may leave those out.
+    all_tasks = list(tasks)
     if task_ids:
         wanted = [t.strip() for t in task_ids if t.strip()]
         by_id = {str(t.get("id")): t for t in tasks}
@@ -804,7 +944,7 @@ def start(root, task_ids=None, dry_run=False, no_preflight=False) -> dict:
         tdir.mkdir(parents=True, exist_ok=True)
         write_json(tdir / "task.json", task)
         (tdir / "prompt.md").write_text(
-            build_prompt(task, job_id, root=root), encoding="utf-8"
+            build_prompt(task, job_id, root=root, tasks=all_tasks), encoding="utf-8"
         )
         _set_status(jdir, task_id, state="queued", attempt=1, created_at=_now())
 
@@ -821,10 +961,11 @@ def start(root, task_ids=None, dry_run=False, no_preflight=False) -> dict:
     else:
         tasks_to_run = list(tasks)
 
-    # ADR-0013 decision 1: hand the ordered plan back and stop. The session
-    # that called this already knows the project; it implements each task and
-    # calls `complete_task`, which runs the task's gates. The plan marks the
-    # rounds wide enough to be handed out rather than done one after another.
+    # ADR-0013 decision 1: hand the ordered plan back and stop. Nothing is
+    # started here. A round with one task is done by the session that called
+    # this; a round with more is handed out, one subagent per task, and the
+    # plan marks those tasks (`HOST_PARALLEL_HANDOFF`). Either way the task is
+    # recorded by `complete_task`, which runs its gates.
     plan = []
     for index, wave in enumerate(order_tasks(tasks_to_run), start=1):
         for task in wave:
@@ -895,38 +1036,43 @@ def record_attempt(root, task_id: str, state: str, job_id: str = "",
     leaves the count alone.
     """
     task_id = str(task_id)
-    data = read_attempts(root)
-    tasks = data.setdefault("tasks", {})
-    entry: dict = tasks.get(task_id)
-    if not isinstance(entry, dict):
-        entry = {"failures": 0}
-
-    if state == "passed":
-        entry = {"failures": 0}
-    elif state in ATTEMPT_FAILURE_STATES:
-        try:
-            entry["failures"] = int(entry.get("failures", 0) or 0) + 1
-        except (TypeError, ValueError):
-            entry["failures"] = 1
-        entry["last_job"] = str(job_id)
-        entry["last_gate"] = str(gate)
-    else:
+    if state != "passed" and state not in ATTEMPT_FAILURE_STATES:
         return consecutive_failures(root, task_id)
 
-    entry["updated_at"] = _now()
-    tasks[task_id] = entry
-    data["version"] = 1
-    write_json(_attempts_path(root), data)
+    # The tasks of a round are built at the same time, each ending in its own
+    # `jobs complete`: without the lock one run's count overwrites another's.
+    with _file_lock(_attempts_path(root)):
+        data = read_attempts(root)
+        tasks = data.setdefault("tasks", {})
+        entry: dict = tasks.get(task_id)
+        if not isinstance(entry, dict):
+            entry = {"failures": 0}
+
+        if state == "passed":
+            entry = {"failures": 0}
+        else:
+            try:
+                entry["failures"] = int(entry.get("failures", 0) or 0) + 1
+            except (TypeError, ValueError):
+                entry["failures"] = 1
+            entry["last_job"] = str(job_id)
+            entry["last_gate"] = str(gate)
+
+        entry["updated_at"] = _now()
+        tasks[task_id] = entry
+        data["version"] = 1
+        write_json(_attempts_path(root), data)
     return int(entry.get("failures", 0) or 0)
 
 
 def clear_attempts(root, task_id: str) -> None:
     """Forget one task's failures — `--force-retry`, the operator saying they
     changed something. Per task, never global."""
-    data = read_attempts(root)
-    if str(task_id) in (data.get("tasks") or {}):
-        del data["tasks"][str(task_id)]
-        write_json(_attempts_path(root), data)
+    with _file_lock(_attempts_path(root)):
+        data = read_attempts(root)
+        if str(task_id) in (data.get("tasks") or {}):
+            del data["tasks"][str(task_id)]
+            write_json(_attempts_path(root), data)
 
 
 def _dependency_evidence(task: dict, dependency: dict) -> bool:
@@ -1047,8 +1193,8 @@ def shape(root, task_ids=None) -> dict:
 def complete_task(root, task_id: str, job_id: Optional[str] = None) -> dict:
     """Run an implemented task's gates and record the verdict.
 
-    The session wrote the code; the gates alone decide whether the task
-    passed. Writes the task's `gates.json` and `status.json`.
+    Whoever wrote the code, a subagent or the session, the gates alone decide
+    whether the task passed. Writes the task's `gates.json` and `status.json`.
     """
     job_id = job_id or latest_job_id(root)
     if not job_id:
@@ -1079,7 +1225,8 @@ def complete_task(root, task_id: str, job_id: Optional[str] = None) -> dict:
         gates_passed=gates["passed"],
         gates_total=gates["total"],
         finished_at=_now(),
-        detail="implemented by the host session; %d/%d gates %s"
+        # Who wrote the code is not recorded: a subagent and the session run the same command.
+        detail="complete: %d/%d gates %s"
         % (gates["passed"], gates["total"], gates["verdict"]),
     )
 
@@ -1143,7 +1290,7 @@ def _merge_job_json(jdir, fields: dict, fallback: Optional[dict] = None) -> dict
     write itself is atomic, so the surviving loser is a lost field, never a
     corrupt file.
     """
-    with _job_json_lock(jdir):
+    with _file_lock(jdir / "job.json"):
         job = read_json(jdir / "job.json", None)
         if not isinstance(job, dict):
             job = dict(fallback or {})
@@ -1153,17 +1300,23 @@ def _merge_job_json(jdir, fields: dict, fallback: Optional[dict] = None) -> dict
 
 
 @contextlib.contextmanager
-def _job_json_lock(jdir, wait_s: float = 5.0, stale_s: float = 30.0):
-    """Cross-process mutex around a `job.json` read-modify-write.
+def _file_lock(path, wait_s: float = 5.0, stale_s: float = 30.0):
+    """Cross-process mutex around a read-modify-write of the JSON file *path*.
 
-    Re-reading right before the write narrows the lost-update window between
-    two commands that write `job.json` but does not close it (they are
-    separate processes). `os.mkdir` is atomic on every platform, so a lock directory
-    serialises them. A lock older than *stale_s* is a crashed holder's and is
+    Used for `job.json` and for `attempts.json`. Re-reading right before the
+    write narrows the lost-update window between two commands that write the
+    same file but does not close it (they are separate processes). `os.mkdir`
+    is atomic on every platform, so a lock directory (`<path>.lock`) serialises
+    them. A lock older than *stale_s* is a crashed holder's and is
     broken; if the lock cannot be taken within *wait_s* the write proceeds
     unlocked rather than hanging a hook or a stop.
+
+    On Windows `os.mkdir` raises PermissionError, not FileExistsError, while
+    another process is still removing the folder (measured: about one call in
+    a hundred under contention). That is a held lock too, so it waits; treating
+    it as "cannot lock" let two writers in at once.
     """
-    lock = str(jdir / "job.json.lock")
+    lock = str(path) + ".lock"
     held = False
     deadline = time.time() + wait_s
     while True:
@@ -1171,13 +1324,14 @@ def _job_json_lock(jdir, wait_s: float = 5.0, stale_s: float = 30.0):
             os.mkdir(lock)
             held = True
             break
-        except FileExistsError:
-            try:
-                if time.time() - os.path.getmtime(lock) > stale_s:
-                    os.rmdir(lock)
-                    continue
-            except OSError:
-                pass
+        except (FileExistsError, PermissionError) as exc:
+            if isinstance(exc, FileExistsError):
+                try:
+                    if time.time() - os.path.getmtime(lock) > stale_s:
+                        os.rmdir(lock)
+                        continue
+                except OSError:
+                    pass
             if time.time() >= deadline:
                 break
             time.sleep(0.01)
@@ -1426,12 +1580,23 @@ def run(argv: list) -> int:
                 no_preflight="--no-preflight" in rest,
             )
             payload = status(root, job["job_id"])
+            # The text to hand a task over with is printed here and kept nowhere:
+            # `job.json` holds the plan, and the text is built from it on the spot.
+            texts = {row["id"]: text for row, text in handoffs(root, job)}
             if "--json" in rest:
+                payload["plan"] = [
+                    dict(row, handoff=texts[row["id"]]) if row["id"] in texts else dict(row)
+                    for row in job.get("plan") or []
+                ]
                 print(json.dumps(payload, indent=2))
             else:
                 _print_table(payload)
                 for line in payload.get("preflight_warnings") or []:
                     print("  warn: %s" % line)
+                for row in job.get("plan") or []:
+                    if row["id"] in texts:
+                        print("\nhand off %s (round %d):" % (row["id"], row["round"]))
+                        print(texts[row["id"]])
             return 0 if payload["verdict"] != verdict.FAIL else 1
 
         if cmd == "stop":

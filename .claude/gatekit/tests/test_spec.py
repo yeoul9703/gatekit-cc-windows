@@ -380,6 +380,39 @@ class TaskTests(unittest.TestCase):
         msgs = [f["message"] for f in self._validate_tasks(body)]
         self.assertTrue(any("gate" in m.lower() for m in msgs), msgs)
 
+    def _task_with_read(self, read) -> str:
+        task = {"id": "a", "write_scope": ["src/x/**"],
+                "gates": [{"name": "t", "argv": ["true"]}], "round": 1, "read": read}
+        return "```gatekit-task\n%s\n```\n" % json.dumps(task)
+
+    def test_read_is_optional_and_takes_relative_paths(self):
+        # a listed file need not exist: an earlier task may be the one that writes it
+        for read in ([], ["spec/01-prd.md", "src/store/index.ts", "docs/a..b.md", "src/**"]):
+            with self.subTest(read=read):
+                self.assertEqual(self._validate_tasks(self._task_with_read(read)), [])
+
+    def test_read_of_the_wrong_shape_fails(self):
+        for read in (
+            "spec/01-prd.md",            # not a list
+            ["C:/dev/app/src/a.ts"],     # an absolute path
+            ["/etc/hosts"],              # an absolute path
+            ["../other/README.md"],      # leaves the project
+            ["src/../../x.md"],          # leaves the project
+            ["@spec/01-prd.md"],         # `@` reaches a subagent as text, not as the file
+            ["src\\a.ts"],               # a backslash
+            ["spec/01-prd.md", ""],      # an empty string
+            ["spec/01-prd.md", 3],       # not a string
+        ):
+            with self.subTest(read=read):
+                findings = self._validate_tasks(self._task_with_read(read))
+                self.assertEqual([f["verdict"] for f in findings], ["fail"], findings)
+                self.assertIn("Task a has an invalid read", findings[0]["message"])
+        # the message shows the entry that is wrong, in both languages
+        bad = self._task_with_read(["spec/01-prd.md", "@src/a.ts"])
+        self.assertIn("@src/a.ts", self._validate_tasks(bad)[0]["message"])
+        korean = self._validate_tasks(bad, "ko")[0]["message"]
+        self.assertIn("작업 a의 read가 잘못되었습니다: @src/a.ts", korean)
+
     def test_malformed_fence_reports_line_number(self):
         report = spec.validate(FIXTURES / "malformed-fence")
         self.assertEqual(report["verdict"], "fail")

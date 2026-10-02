@@ -11,7 +11,9 @@ Input: `$ARGUMENTS` — optional criterion id to focus the report on.
 
 **You own this verification.** What counts as done was settled before the code
 existed: the user approved `spec/05-gate.md` in `/gatekit-gate` and its hash is
-pinned. So nothing here is judged by opinion. Commands decide everything a
+pinned. So nothing here is judged by opinion. That file is the standard; you
+write the reviewer's brief, and the reviewer reads it and checks only what it
+lists. Commands decide everything a
 command can decide; only what a command cannot decide — how a screen looks, a
 check the gate file describes in words — goes to a read-only reviewer, and you
 hand it exactly those items, not the whole job. The reviewer is a subagent
@@ -82,7 +84,9 @@ Rules for the report:
   out, a step nobody could run, a missing artifact that could not be checked —
   none of these are passes and none are failures.
 - Never restate a subagent's or the reviewer's claim of success as a verdict
-  for a command criterion. The contract run decides.
+  for a command criterion. The contract run decides. The same holds for the
+  build behind it: a task a subagent built passed because its gates passed,
+  not because the subagent said so.
 - **The `contract run` aggregate (`ok`/`fail`/`unverified`) only ever counts
   code criteria — it has no way to see a `-visual` verdict, since that comes
   from the reviewer reading an image, not from running a command.** Never

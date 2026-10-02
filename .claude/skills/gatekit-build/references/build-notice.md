@@ -1,6 +1,6 @@
 # What to tell the user before a build, and how a stopped build continues
 
-Read this at Step 1.5 of `/gatekit-build`, before `jobs start`, and again
+Read this at Step 2 of `/gatekit-build`, before `jobs start`, and again
 when a session opens on a build that was interrupted. The user may be new to
 this: a build is the first step that runs for a long time without asking
 anything, so say once what is about to happen.
@@ -28,8 +28,10 @@ Then tell the user, in plain words:
 1. **How much**: the task count and the round count from `jobs shape`.
    Rounds run one after another; tasks inside a round do not depend on each
    other.
-2. **Who writes the code**: this session writes each task itself, one at
-   a time, and the gates judge each one.
+2. **Who builds**: a round with two or more tasks is handed out, one
+   subagent per task, working at the same time; a round with a single task
+   this session builds itself. Each task is built from a written brief, and
+   its gates judge it either way.
 3. **It can take long and it uses the plan's usage.** More tasks and more
    rounds mean more of both. Say this without a number.
 4. **A failed task can be tried again, up to `max_retries` times**; after
@@ -64,7 +66,17 @@ Before the job starts, the command runs every task's gates once:
 Every waiting task reads `queued` with the detail `awaiting the host
 session`, and the round order is in the `plan` list of
 `.gatekit/jobs/<job id>/job.json` (`id`, `round`, `parallel_candidate`).
-Each task's prompt is `.gatekit/jobs/<job id>/tasks/<task id>/prompt.md`.
+Each task's brief is `.gatekit/jobs/<job id>/tasks/<task id>/prompt.md`:
+the instruction, what to read first, the write scope, the gates and how to
+run them, the tools, and the one line to answer with.
+
+After the table and the warnings comes one block for every task whose round
+holds two or more tasks (`parallel_candidate` true): a `hand off <task id>
+(round <n>):` line, then the text to give that task's subagent, which is one
+line pointing at the brief and a `gatekit-scope` fence with the task's write
+scope. A task that is alone in its round gets no block: this session builds
+it. The text is printed by `jobs start` only and is not saved; `jobs status`
+does not print it.
 
 Exit codes: `0` nothing failed, `1` a task is `failed` or `stopped`, `2`
 bad arguments or no tasks, `3` a task is out of retries, `4`
@@ -83,12 +95,18 @@ uv run --project .claude/gatekit --frozen python .claude/gatekit/bin/gatekit.py 
 It shows the newest job. Tell the user which tasks are `passed` and which
 are not, then:
 
-- **Tasks still `queued`**: keep the same job. Implement the next queued
-  task from its `prompt.md` and record it with `jobs complete <task_id>`. A
-  task that was half written when the session ended is simply finished and
-  completed the same way; the gates decide.
-- **A job that will not be finished** (the task list changed, or the user
-  wants only some of the tasks): run `jobs stop` once so the old job is
+- **Tasks still `queued`, each alone in its round**: keep the same job.
+  Build the next queued task from its `prompt.md` and record it with
+  `jobs complete <task_id>`. A task that was half written when the session
+  ended is simply finished and completed the same way; the gates decide.
+- **Two or more tasks of one round still not `passed`** (the `round` of each
+  task is in the `plan` list of `job.json`): they are handed out, and the
+  text to hand them out with was printed by the `jobs start` of the session
+  that ended. Close the old job with `jobs stop` and start a new one for
+  what is left, as below; it prints the text again.
+- **A job that will not be finished** (the task list changed, the user
+  wants only some of the tasks, or tasks have to be handed out again): run
+  `jobs stop` once so the old job is
   closed and no longer named as the live build, then start a new job for
   what is left:
 
@@ -97,7 +115,9 @@ are not, then:
   ```
 
   The new job runs every listed task's gates first, so a task whose work
-  was already finished is recorded `passed` without being done again.
+  was already finished is recorded `passed` without being done again. What
+  is left is then split by the same rule: a round with one task left is
+  built here, a round with more is handed out with the printed text.
 - **A task that `jobs start` refuses with exit 3** has used its retries.
   Follow `.claude/skills/gatekit-build/references/build-failures.md`; do
   not reach for `--force-retry` before the diagnosis is written.

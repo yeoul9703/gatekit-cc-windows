@@ -166,6 +166,7 @@ MESSAGES = {
         "task_duplicate_id": "작업 id가 중복됩니다: {id}",
         "task_scope_empty": "작업 {id}의 write_scope가 비어 있습니다. 글롭 목록이거나 \"read-only\"여야 합니다.",
         "task_depends_unknown": "작업 {id}의 depends_on에 존재하지 않는 id가 있습니다: {dep}",
+        "task_read_invalid": "작업 {id}의 read가 잘못되었습니다: {value}. 프로젝트 루트 기준 상대 경로의 목록이어야 합니다 (빈 문자열, 절대 경로, \"..\", \"@\"로 시작하는 것, 역슬래시는 쓸 수 없습니다).",
         "task_scope_collision": "같은 라운드({round})의 작업 {a}와 {b}의 write_scope가 겹칩니다: {glob_a} ↔ {glob_b}",
         "task_no_gate": "작업 {id}에 게이트가 없습니다. 최소 1개가 필요합니다.",
         "crit_no_fences": "```gatekit-criterion 블록이 하나도 없습니다.",
@@ -231,6 +232,7 @@ MESSAGES = {
         "task_duplicate_id": "Duplicate task id: {id}",
         "task_scope_empty": "Task {id} has an empty write_scope. Use a list of globs or \"read-only\".",
         "task_depends_unknown": "Task {id} depends on an unknown id: {dep}",
+        "task_read_invalid": "Task {id} has an invalid read: {value}. Use a list of paths relative to the project root (no empty string, no absolute path, no \"..\", nothing starting with \"@\", no backslash).",
         "task_scope_collision": "Tasks {a} and {b} in round {round} have intersecting write_scope: {glob_a} vs {glob_b}",
         "task_no_gate": "Task {id} has no gate. At least one is required.",
         "crit_no_fences": "No ```gatekit-criterion blocks found.",
@@ -642,6 +644,37 @@ def _globs_intersect(a: str, b: str) -> bool:
     return globs_intersect(a, b)
 
 
+#: An absolute path as it is written on Windows: `C:/…`, `C:\…` or `C:…`.
+_DRIVE_RE = re.compile(r"^[A-Za-z]:")
+
+
+def _read_problem(read: Any) -> Optional[str]:
+    """What is wrong with a task's `read`, as text to show; ``None`` when fine.
+
+    `read` lists the files to read before the task is written, relative to the
+    project root. It is optional. Only its shape is checked: a listed file may
+    not exist yet, because an earlier task writes it, and the brief tells the
+    reader to skip a file that is not there. `@path` is refused because it
+    reaches a subagent as those characters, not as the file.
+    """
+    if read is None:
+        return None
+    if not isinstance(read, list):
+        return json.dumps(read, ensure_ascii=False)
+    for item in read:
+        if not isinstance(item, str) or not item.strip():
+            return json.dumps(item, ensure_ascii=False)
+        path = item.strip()
+        if (
+            path.startswith(("/", "@"))
+            or "\\" in path
+            or _DRIVE_RE.match(path)
+            or ".." in path.split("/")
+        ):
+            return path
+    return None
+
+
 def _check_tasks(text: str, lang: str) -> List[dict]:
     name = "04-tasks.md"
     findings: List[dict] = []
@@ -693,6 +726,11 @@ def _check_tasks(text: str, lang: str) -> List[dict]:
                         name, V.FAIL, _msg(lang, "task_depends_unknown", id=tid, dep=dep)
                     )
                 )
+        bad_read = _read_problem(task.get("read"))
+        if bad_read is not None:
+            findings.append(
+                _finding(name, V.FAIL, _msg(lang, "task_read_invalid", id=tid, value=bad_read))
+            )
         gates = task.get("gates")
         if not isinstance(gates, list) or not gates:
             findings.append(_finding(name, V.FAIL, _msg(lang, "task_no_gate", id=tid)))

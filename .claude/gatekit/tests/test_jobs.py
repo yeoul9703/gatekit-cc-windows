@@ -28,6 +28,10 @@ def task_fence(task: dict) -> str:
     return "```gatekit-task\n%s\n```\n" % json.dumps(task)
 
 
+def one_line(text: str) -> str:
+    return " ".join(text.split())
+
+
 class JobTestCase(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
@@ -109,6 +113,198 @@ class TestPrompt(JobTestCase):
         self.assertIn("file-exists", prompt)
         self.assertIn("Do not claim success", prompt)
         self.assertIn("gates decide", prompt)
+
+    def test_the_sections_come_in_one_order(self) -> None:
+        prompt = jobs.build_prompt(self.simple_task(), "job-1")
+        titles = [line for line in prompt.splitlines() if line.startswith("## ")]
+        self.assertEqual(titles, ["## Instruction", "## Read first", "## Write scope",
+                                  "## Gates that will judge this task", "## Tools",
+                                  "## Reporting"])
+
+    def test_read_first_carries_the_tasks_read_list_and_what_earlier_tasks_wrote(self) -> None:
+        store = self.simple_task("note-store", write_scope=["src/store/**", "tests/store/**"])
+        screen = self.simple_task(
+            "note-ui", target="src/ui/list.txt", depends_on=["note-store"], round=2,
+            read=["spec/01-prd.md", "src/store/index.txt"])
+        prompt = jobs.build_prompt(screen, "job-1", tasks=[store, screen])
+        section = prompt.split("## Read first")[1].split("## Write scope")[0]
+        self.assertIn("- spec/01-prd.md\n", section)
+        self.assertIn("- src/store/index.txt\n", section)
+        # the earlier task by id, with the paths it wrote
+        self.assertIn("- note-store: src/store/**, tests/store/**\n", section)
+        self.assertIn("Do not explore beyond what is listed here", section)
+        self.assertIn("Skip a listed file that does not exist", one_line(section))
+
+    def test_read_first_with_nothing_listed_says_not_to_explore(self) -> None:
+        for tasks in (None, [self.simple_task()]):
+            prompt = jobs.build_prompt(self.simple_task(), "job-1", tasks=tasks)
+            section = prompt.split("## Read first")[1].split("## Write scope")[0]
+            self.assertEqual(one_line(section),
+                             "Nothing is listed to read first. Do not explore the repository "
+                             "beyond your own write scope.")
+
+    def test_a_malformed_read_is_left_out_and_the_brief_is_still_written(self) -> None:
+        # `spec validate` reports the shape; the brief must not fail on it.
+        for read in ("spec/01-prd.md", [3, "", None], {"a": 1}):
+            prompt = jobs.build_prompt(self.simple_task(read=read), "job-1")
+            self.assertIn("Nothing is listed to read first", prompt)
+
+    def test_the_gates_section_says_how_to_run_them(self) -> None:
+        prompt = jobs.build_prompt(self.simple_task(), "job-7")
+        section = prompt.split("## Gates that will judge this task")[1].split("## Tools")[0]
+        self.assertIn("    %s jobs complete write-note --job job-7\n" % jobs.paths.cli_invocation(),
+                      section)
+        self.assertIn("until it prints `passed`", one_line(section))
+
+    def test_the_tools_section_says_what_may_run_and_what_may_not(self) -> None:
+        prompt = jobs.build_prompt(self.simple_task(), "job-1")
+        section = one_line(prompt.split("## Tools")[1].split("## Reporting")[0])
+        self.assertIn("the project's own test runner and the `jobs complete` command", section)
+        for banned in ("install a program", "write outside the write scope",
+                       "edit a gate command or anything under `spec/`",
+                       "`.gatekit/approvals.json`", "`.gatekit/contract.json`",
+                       "the gate code under `.claude/`", "`.claude/settings.json`",
+                       "start another agent"):
+            self.assertIn(banned, section, banned)
+
+    def test_the_answer_is_one_line_and_no_hook_is_promised(self) -> None:
+        prompt = jobs.build_prompt(self.simple_task(), "job-1")
+        report = one_line(prompt.split("## Reporting")[1])
+        self.assertIn("Reply with one line and nothing else: `passed`, or `blocked: <reason>`",
+                      report)
+        self.assertIn("Do not paste output", report)
+        # nothing stops a subagent from writing outside its scope: the brief asks, no hook denies
+        self.assertNotIn("denied by a hook", prompt)
+        self.assertNotIn("hook", prompt.lower())
+
+    def test_start_writes_the_brief_with_the_scope_of_a_task_left_out_of_the_selection(self) -> None:
+        self.write_config()
+        first = self.simple_task()
+        second = self.simple_task("second", target="src/second.txt", round=2,
+                                  depends_on=["write-note"], read=["spec/04-tasks.md"])
+        self.write_tasks(first, second)
+        job = jobs.start(self.root, task_ids=["second"], dry_run=True)
+        brief = (self.task_dir(job["job_id"], "second") / "prompt.md").read_text(encoding="utf-8")
+        self.assertIn("- write-note: src/note.txt\n", brief)
+        self.assertIn("- spec/04-tasks.md\n", brief)
+
+
+class TestHandoff(JobTestCase):
+    """Who builds a task is one rule: a round of two or more tasks is handed out, one
+    subagent per task; the single task of a round is done by the session itself.
+    `jobs start` prints the text to hand each task over with, so nobody rewrites the brief."""
+
+    def two_then_one(self) -> None:
+        self.write_config()
+        self.write_tasks(
+            self.simple_task("left", target="src/left.txt"),
+            self.simple_task("right", target="src/right.txt"),
+            self.simple_task("last", target="src/last.txt", round=2, depends_on=["left"]),
+        )
+
+    def start_output(self, *flags) -> str:
+        import contextlib
+        import io
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            self.assertEqual(jobs.run(["start", "--root", str(self.root)] + list(flags)), 0)
+        return out.getvalue()
+
+    def test_two_tasks_in_a_round_are_handed_out_and_one_is_not(self) -> None:
+        self.assertEqual(jobs.HOST_PARALLEL_HANDOFF, 2)
+        self.two_then_one()
+        plan = jobs.start(self.root)["plan"]
+        self.assertEqual([(row["id"], row["round"], row["parallel_candidate"]) for row in plan],
+                         [("left", 1, True), ("right", 1, True), ("last", 2, False)])
+
+    def test_start_prints_the_handoff_for_each_task_of_a_round_of_two(self) -> None:
+        self.two_then_one()
+        out = self.start_output()
+        job_id = jobs.latest_job_id(self.root)
+        for task_id in ("left", "right"):
+            self.assertIn(
+                "\nhand off %s (round 1):\n"
+                "Read .gatekit/jobs/%s/tasks/%s/prompt.md and do that task. "
+                "Reply with one line.\n"
+                "\n"
+                "```gatekit-scope\n"
+                '{"write_scope": ["src/%s.txt"], "stop_when": "jobs complete %s prints passed", '
+                '"tools": "inherit"}\n'
+                "```\n" % (task_id, job_id, task_id, task_id, task_id),
+                out)
+        # the single task of round 2 is done by the session: nothing to hand over
+        self.assertEqual(out.count("hand off "), 2)
+        self.assertNotIn("hand off last", out)
+        self.assertNotIn("tasks/last/prompt.md", out)
+        # the table still comes first, and no path of this computer is printed
+        self.assertRegex(out, r"^job \S+  verdict=unverified\n")
+        self.assertNotIn(str(self.root), out)
+        self.assertNotIn(self.root.as_posix(), out)
+
+    def test_start_prints_no_handoff_when_every_round_holds_one_task(self) -> None:
+        self.write_config()
+        self.write_tasks(
+            self.simple_task(),
+            self.simple_task("second", target="src/second.txt", round=2, depends_on=["write-note"]),
+        )
+        out = self.start_output()
+        self.assertNotIn("hand off", out)
+        self.assertNotIn("gatekit-scope", out)
+
+    def test_a_task_that_passed_at_preflight_is_not_counted_into_the_round(self) -> None:
+        # Two tasks in the round, one already done: what is left is one task, done here.
+        self.two_then_one()
+        (self.root / "src" / "left.txt").write_text("done", encoding="utf-8")
+        out = self.start_output()
+        self.assertNotIn("hand off", out)
+
+    def test_the_printed_text_passes_the_spawn_gate(self) -> None:
+        from gatekit.gates import spawn
+        self.two_then_one()
+        job = jobs.start(self.root)
+        texts = dict((row["id"], text) for row, text in jobs.handoffs(self.root, job))
+        self.assertEqual(sorted(texts), ["left", "right"])
+        declaration, problem = spawn.parse_scope(texts["left"])
+        self.assertEqual(problem, "")
+        self.assertEqual(declaration, {"write_scope": ["src/left.txt"],
+                                       "stop_when": "jobs complete left prints passed",
+                                       "tools": "inherit"})
+        # and so does everything `jobs start` prints for that task, heading line included
+        printed = "hand off left (round 1):\n" + texts["left"]
+        self.assertEqual(spawn.parse_scope(printed)[1], "")
+
+    def test_a_read_only_task_is_handed_over_as_read_only(self) -> None:
+        from gatekit.gates import spawn
+        text = jobs.handoff_text("job-1", self.simple_task("look", write_scope="read-only"))
+        declaration, problem = spawn.parse_scope(text)
+        self.assertEqual(problem, "")
+        assert declaration is not None
+        self.assertEqual(declaration["write_scope"], "read-only")
+
+    def test_json_output_carries_the_same_text_and_job_json_does_not(self) -> None:
+        self.two_then_one()
+        payload = json.loads(self.start_output("--json"))
+        job_id = payload["job_id"]
+        saved = json.loads((self.root / ".gatekit" / "jobs" / job_id / "job.json").read_text())
+        texts = dict((row["id"], text) for row, text in jobs.handoffs(self.root, saved))
+        self.assertEqual([row["id"] for row in payload["plan"]], ["left", "right", "last"])
+        self.assertEqual(payload["plan"][0]["handoff"], texts["left"])
+        self.assertEqual(payload["plan"][1]["handoff"], texts["right"])
+        self.assertNotIn("handoff", payload["plan"][2])
+        # printed, kept nowhere: the plan on disk holds the three fields it held before
+        for row in saved["plan"]:
+            self.assertEqual(sorted(row), ["id", "parallel_candidate", "round"])
+        # and `jobs status`, which is called often, does not print it again
+        import contextlib
+        import io
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            jobs.run(["status", "--root", str(self.root)])
+        self.assertNotIn("hand off", out.getvalue())
+
+    def test_dry_run_prints_no_handoff(self) -> None:
+        self.two_then_one()
+        self.assertNotIn("hand off", self.start_output("--dry-run"))
 
 
 class TestOrdering(unittest.TestCase):
@@ -1504,6 +1700,25 @@ class TestAttemptLedger(JobTestCase):
         jobs.record_attempt(self.root, "b", "failed", job_id="j1")
         jobs.clear_attempts(self.root, "a")
         self.assertEqual((self.failures("a"), self.failures("b")), (0, 1))
+
+    def test_runs_at_the_same_time_do_not_lose_each_others_count(self) -> None:
+        # The tasks of a handed-out round end in `jobs complete` runs that overlap. Measured
+        # before the lock: of eight processes started together, one to four counts survived.
+        import subprocess
+        kit = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        child = ("import sys; sys.path.insert(0, sys.argv[1])\n"
+                 "from gatekit import jobs\n"
+                 "jobs.record_attempt(sys.argv[2], sys.argv[3], 'failed', job_id='j', gate='g')\n")
+        procs = [subprocess.Popen([sys.executable, "-c", child, kit, str(self.root), "t%d" % i],
+                                  stdin=subprocess.DEVNULL, stderr=subprocess.PIPE)
+                 for i in range(8)]
+        for proc in procs:
+            _, err = proc.communicate(timeout=60)
+            self.assertEqual(proc.returncode, 0, err.decode("utf-8", "replace"))
+        self.assertEqual(sorted(self.ledger().get("tasks") or {}), ["t%d" % i for i in range(8)])
+        self.assertEqual([self.failures("t%d" % i) for i in range(8)], [1] * 8)
+        # the lock is a folder beside the file, gone once the write is done
+        self.assertFalse((self.root / ".gatekit" / "attempts.json.lock").exists())
 
 
 class TestBudgetBindsAcrossJobs(JobTestCase):

@@ -80,6 +80,18 @@ uv run --project .claude/gatekit --frozen python .claude/gatekit/bin/gatekit.py 
 
 The check must print `ok`. Never edit the file to make a hash match.
 
+**Never edit these by hand: `.gatekit/approvals.json`,
+`.gatekit/contract.json`, the gate code and scripts under `.claude/`, and
+the `hooks` in `.claude/settings.json`.** They hold what the user approved;
+changing one passes nothing, it removes the check. The approval is recorded
+only by the `approve` command above, and only after the user chose to
+approve in this step: writing the record yourself is approving for them.
+The Stop gate reads the approval and `spec/05-gate.md` itself, so a build
+whose criteria or contract were edited after approval is refused when it
+tries to end. When a criterion does not pass there are two ways forward: fix
+the code, or, if the criterion is wrong, return to `/gatekit-gate` and have
+the user approve it again.
+
 ## Step 7 — report
 
 In `output_lang`: (1) the file path and the number of criteria; (2) the

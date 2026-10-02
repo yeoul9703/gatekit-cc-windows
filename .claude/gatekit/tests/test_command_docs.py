@@ -219,6 +219,61 @@ class TestSkillBodies(unittest.TestCase):
                 self.assertNotIn(gone, text, "%s: %s" % (rel(path), gone))
         self.assertGreater(seen, 20)
 
+    def test_build_and_gate_say_what_is_never_edited_by_hand(self) -> None:
+        # The approval record, the derived contract, the gate code and the hook registration
+        # are what holds the user's approval. Both skills say it in the same words, and name
+        # the two ways forward when a criterion does not pass.
+        never = ("Never edit these by hand: `.gatekit/approvals.json`, `.gatekit/contract.json`, "
+                 "the gate code and scripts under `.claude/`, and the `hooks` in "
+                 "`.claude/settings.json`.")
+        ways = ("When a criterion does not pass there are two ways forward: fix the code, or, "
+                "if the criterion is wrong, return to `/gatekit-gate` and have the user approve "
+                "it again.")
+        for name in ("build", "gate"):
+            flat = one_line(read(skill(name) / "SKILL.md"))
+            self.assertIn(never, flat, "gatekit-" + name)
+            self.assertIn(ways, flat, "gatekit-" + name)
+            self.assertIn("The Stop gate reads the approval and `spec/05-gate.md` itself", flat,
+                          "gatekit-" + name)
+        # build says it where failures are routed, gate where the approval is recorded
+        build = read(skill("build") / "SKILL.md")
+        self.assertIn("Never edit these by hand", build.split("\n## Step 6 — route failures\n")[1]
+                      .split("\n## ")[0])
+        gate = read(skill("gate") / "SKILL.md")
+        self.assertIn("Never edit these by hand", gate.split("\n## Step 6 — approve\n")[1]
+                      .split("\n## ")[0])
+
+    def test_build_hands_a_round_of_two_out_and_builds_a_single_task_itself(self) -> None:
+        text = read(skill("build") / "SKILL.md")
+        flat = one_line(text)
+        allowed = re.search(r"^allowed-tools: (.*)$", text, re.M)
+        assert allowed is not None
+        self.assertIn("Agent", [t.strip() for t in allowed.group(1).split(",")])
+        self.assertIn("**One task in the round — you build it.**", flat)
+        self.assertIn("**Two or more tasks in the round — hand every one out.**", flat)
+        self.assertIn("**passed on exactly as printed**", flat)
+        # the result of a round is the record, not what a subagent answered
+        self.assertIn(CLI + " jobs results --compact", text)
+        self.assertIn("Do not read a subagent's transcript", flat)
+        # a returned task is fixed here, and a gate edit is rechecked: neither is handed out again
+        failures = one_line(read(skill("build") / "references" / "build-failures.md"))
+        self.assertIn("**Do not hand the same task out again.**", failures)
+        self.assertIn("never hand the task out again for one", failures)
+        # the text the skill shows is the text `jobs start` prints
+        from gatekit import jobs
+        printed = jobs.handoff_text("<job id>", {"id": "<task id>",
+                                                 "write_scope": ["<the task's write scope>"]})
+        self.assertIn("hand off <task id> (round <n>):\n" + printed + "\n", text)
+
+    def test_tasks_names_the_read_field_the_brief_is_built_from(self) -> None:
+        flat = one_line(read(skill("tasks") / "SKILL.md"))
+        self.assertIn("`read`", flat)
+        self.assertIn("relative to the project root", flat)
+        self.assertIn("never with an `@`", flat)
+        template = read(skill("tasks") / "assets" / "04-tasks.md")
+        self.assertIn('"read": [', template)
+        self.assertRegex(template, r"(?m)^\| `read` \|")
+
     def test_rare_paths_live_in_reference_docs(self) -> None:
         build = read(skill("build") / "SKILL.md")
         self.assertIn(".claude/skills/gatekit-build/references/build-failures.md", build)

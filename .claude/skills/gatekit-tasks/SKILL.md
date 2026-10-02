@@ -77,6 +77,8 @@ Rules that `spec validate` enforces:
 - ids unique across the file
 - `write_scope` non-empty, or exactly `"read-only"`
 - every `depends_on` id exists in this file
+- `read`, when a task has one, is a list of paths relative to the project
+  root
 - **no two tasks in the same round have intersecting write scopes**
 - every task has at least one gate
 
@@ -115,8 +117,21 @@ after a stop signal.
 Then fill the template, including its YAML frontmatter block (`title`/`date`/
 `status`) at the top, headings verbatim from the heading map. Each task is one
 ` ```gatekit-task ` fence holding a single JSON object, and the instruction must
-be self-contained — it is read on its own, with only its scope beside it. Fill the
-execution-order table so a human can see the rounds at a glance.
+be self-contained — `/gatekit-build` turns each fence into a written brief, and
+whoever builds the task (a subagent, or the session itself when the task is
+alone in its round) works from that brief alone. Fill the execution-order
+table so a human can see the rounds at a glance.
+
+**Fill `read` for each task**: the files to read before building it — the
+spec file that holds its feature or screen, the code it changes, existing
+code it must follow. Write paths relative to the project root, never with an
+`@` (a subagent receives `@path` as those characters, not as the file). Now
+is when you know the project best; the build may run in a later session
+that knows nothing, and the brief tells its reader to read these files and
+not to explore further. The paths written by the tasks in `depends_on` are
+added to the brief by code, so do not repeat them. `read` is optional, a
+path an earlier task will create is fine, and `spec validate` checks only
+the shape.
 
 ## Step 6 — validate
 
