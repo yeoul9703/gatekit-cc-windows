@@ -70,6 +70,21 @@
         ]
       },
       {
+        "matcher": "PowerShell",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PROJECT_DIR}/.claude/gatekit/.venv/Scripts/python.exe",
+            "args": [
+              "${CLAUDE_PROJECT_DIR}/.claude/gatekit/bin/gatekit.py",
+              "_gate",
+              "powershell"
+            ],
+            "timeout": 10
+          }
+        ]
+      },
+      {
         "matcher": "Agent|Task",
         "hooks": [
           {
@@ -79,6 +94,21 @@
               "${CLAUDE_PROJECT_DIR}/.claude/gatekit/bin/gatekit.py",
               "_gate",
               "spawn"
+            ],
+            "timeout": 10
+          }
+        ]
+      },
+      {
+        "matcher": "Skill",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PROJECT_DIR}/.claude/gatekit/.venv/Scripts/python.exe",
+            "args": [
+              "${CLAUDE_PROJECT_DIR}/.claude/gatekit/bin/gatekit.py",
+              "_gate",
+              "skill"
             ],
             "timeout": 10
           }

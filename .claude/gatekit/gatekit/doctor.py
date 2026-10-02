@@ -17,8 +17,8 @@ import sys
 from gatekit import paths, verdict
 
 #: Gate scripts that must exist and be non-empty for axis 1.
-GATE_SCRIPTS = ("prompt.py", "write.py", "bash.py", "spawn.py", "question.py", "stop.py",
-                "compact.py")
+GATE_SCRIPTS = ("prompt.py", "write.py", "bash.py", "powershell.py", "spawn.py", "skill.py",
+                "question.py", "stop.py", "compact.py")
 
 #: PowerShell scripts under ``<gatekit root>/scripts`` that axis 1 requires.
 POWERSHELL_SCRIPTS = ("common.ps1", "session-check.ps1", "setup.ps1", "verify.ps1")
@@ -29,6 +29,14 @@ PROJECT_FILES = ("bin/gatekit.py", "pyproject.toml", "uv.lock")
 #: Hook events axis 2 expects to find registered in ``.claude/settings.json``.
 EXPECTED_HOOK_EVENTS = ("SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse",
                         "PreCompact", "Stop")
+
+#: PreToolUse registrations axis 2 requires by tool: ``(tool name, gate name)``.
+#: A hook group covers a tool when its ``matcher`` matches the tool name (no
+#: matcher matches every tool) and one of its hooks runs ``_gate <gate name>``.
+#: These two are named because a missing one fails silently: the ``Bash``
+#: matcher does not fire for a PowerShell call, and a skill the model starts
+#: itself reaches no other hook (ADR-0021).
+REQUIRED_PRETOOLUSE_GATES = (("PowerShell", "powershell"), ("Skill", "skill"))
 
 #: Fallback when ``scripts/packages.json`` has no readable ``python_min``.
 MIN_PYTHON = (3, 14)
@@ -80,8 +88,8 @@ def _axis(name, v, detail, fix=""):
 
 
 def axis_plugin_files(root) -> dict:
-    """Standalone layout check: ``bin/gatekit.py``, the seven gate scripts, the
-    three ``scripts/*.ps1``, ``pyproject.toml`` and ``uv.lock`` must exist and be
+    """Standalone layout check: ``bin/gatekit.py``, the gate scripts, the
+    ``scripts/*.ps1`` files, ``pyproject.toml`` and ``uv.lock`` must exist and be
     non-empty under ``<root>/.claude/gatekit``. There is no plugin manager in
     standalone mode, so nothing is "installed" — the files simply have to be
     present on disk, checked out with the rest of the project."""
@@ -168,6 +176,40 @@ def _powershell_hooks_missing_args(hooks):
     return bad
 
 
+def _matcher_covers(matcher, tool) -> bool:
+    """True when a hook group's *matcher* fires for *tool*.
+
+    No matcher, an empty one and ``*`` match every tool; anything else is a
+    pattern (``Write|Edit``) that must match the whole tool name.
+    """
+    if matcher is None or matcher in ("", "*"):
+        return True
+    if not isinstance(matcher, str):
+        return False
+    try:
+        return re.fullmatch(matcher, tool) is not None
+    except re.error:
+        return matcher == tool
+
+
+def _missing_pretooluse_gates(hooks) -> list:
+    """The :data:`REQUIRED_PRETOOLUSE_GATES` no PreToolUse group provides, written
+    ``PowerShell (_gate powershell)``."""
+    missing = []
+    for tool, gate in REQUIRED_PRETOOLUSE_GATES:
+        found = False
+        for group in hooks.get("PreToolUse") or []:
+            if not isinstance(group, dict) or not _matcher_covers(group.get("matcher"), tool):
+                continue
+            for hook in group.get("hooks") or []:
+                args = [str(a) for a in hook.get("args") or []] if isinstance(hook, dict) else []
+                if args[-2:] == ["_gate", gate]:
+                    found = True
+        if not found:
+            missing.append("%s (_gate %s)" % (tool, gate))
+    return missing
+
+
 def _missing_powershell_settings(settings) -> list:
     """The :data:`REQUIRED_POWERSHELL_SETTINGS` values that ``settings.json`` lacks,
     written the way ``setup.ps1`` (S12) names them."""
@@ -186,7 +228,9 @@ def axis_hooks_registered(root) -> dict:
     globally). Every expected event must be registered, every hook must be in
     exec form (a shell string would need Git Bash), the gate events must run
     ``bin/gatekit.py``, SessionStart must run ``session-check.ps1`` and every
-    PowerShell hook must pass ``-NoProfile -ExecutionPolicy Bypass``. Last, the
+    PowerShell hook must pass ``-NoProfile -ExecutionPolicy Bypass``. PreToolUse
+    must route the PowerShell tool to ``_gate powershell`` and the Skill tool to
+    ``_gate skill`` (:data:`REQUIRED_PRETOOLUSE_GATES`). Last, the
     two PowerShell settings must be there (PowerShell 7 is the shell of this
     kit): ``env.CLAUDE_CODE_USE_POWERSHELL_TOOL = "1"`` and
     ``defaultShell = "powershell"``."""
@@ -237,6 +281,11 @@ def axis_hooks_registered(root) -> dict:
                      _t("PowerShell hook(s) missing -NoProfile -ExecutionPolicy Bypass: %s",
                         "PowerShell 훅에 -NoProfile -ExecutionPolicy Bypass 가 없습니다: %s")
                      % ", ".join(no_flags), restore)
+    no_gate = _missing_pretooluse_gates(hooks)
+    if no_gate:
+        return _axis(name, verdict.FAIL,
+                     _t("PreToolUse has no hook for: %s", "PreToolUse 에 등록되지 않은 훅: %s")
+                     % ", ".join(no_gate), restore)
     missing_ps = _missing_powershell_settings(settings)
     if missing_ps:
         return _axis(name, verdict.FAIL,

@@ -13,7 +13,10 @@ This gate never blocks. It does two things on every prompt:
    sets ``active_pipeline`` in the ledger; that field is what arms the stop
    gate (build/verify) and the question budget (interview). It is set here, by
    code, because a command's prose asking Claude to "remember" the pipeline
-   is exactly the kind of instruction that fires nondeterministically.
+   is exactly the kind of instruction that fires nondeterministically. A skill
+   the model starts by itself never appears in a prompt; the Skill hook
+   (:mod:`gatekit.gates.skill`) records that case with the same two functions,
+   :func:`skill_command` and :func:`apply_name`.
 
 An empty prompt leaves the stored language alone: submitting a blank line is
 not evidence that the user switched to English.
@@ -48,11 +51,16 @@ NON_PIPELINE_COMMANDS = ("doctor", "setup")
 #: an invocation. The name is one lowercase word and must end there, so
 #: ``/gatekit-build-state`` is not ``build``. The old ``/gatekit`` + colon
 #: form is not recognised.
+#: The one spelling of a gatekit skill name; the group is the command name.
+_SKILL_NAME = r"gatekit-([a-z]+)"
+
 _INVOCATION_RE = re.compile(
-    r"(?:<command-name>\s*/gatekit-([a-z]+)\s*</command-name>)"
-    r"|(?:^\s*(?:#\s+)?/gatekit-([a-z]+)(?![\w-]))",
+    r"(?:<command-name>\s*/" + _SKILL_NAME + r"\s*</command-name>)"
+    r"|(?:^\s*(?:#\s+)?/" + _SKILL_NAME + r"(?![\w-]))",
     re.MULTILINE,
 )
+#: A skill name on its own, as the Skill tool carries it (``gatekit-build``).
+_SKILL_RE = re.compile(r"/?" + _SKILL_NAME)
 #: Only the leading lines of the prompt are inspected.
 _HEAD_LINES = 12
 
@@ -82,20 +90,38 @@ def detect_command(text: str) -> Optional[str]:
     return match.group(1) or match.group(2)
 
 
+def skill_command(skill: str) -> Optional[str]:
+    """Return the command name of the skill ``gatekit-<name>``, if it is one.
+
+    The whole string must be the skill name, so ``gatekit-build-state`` and a
+    plugin skill such as ``other:gatekit-build`` are not ``build``.
+    """
+    match = _SKILL_RE.fullmatch(skill.strip())
+    return match.group(1) if match else None
+
+
+def apply_name(led: "ledger.Ledger", name: Optional[str]) -> bool:
+    """Update ``active_pipeline`` for the command *name*; ``True`` if it applied.
+
+    Pipelines set it, ``doctor``/``setup`` clear it, and an unknown name is
+    left alone (a typo must not disarm a running build).
+    """
+    if name in ledger.PIPELINES:
+        led.set_pipeline(name)
+        return True
+    if name in NON_PIPELINE_COMMANDS:
+        led.set_pipeline(None)
+        return True
+    return False
+
+
 def apply_command(led: "ledger.Ledger", text: str) -> None:
     """Update ``active_pipeline`` from the command the prompt invokes.
 
-    Pipelines set it, ``doctor``/``setup`` clear it, an unknown name is left
-    alone (a typo must not disarm a running build), and a plain prompt keeps
-    whatever was active.
+    A plain prompt keeps whatever was active; see :func:`apply_name` for the
+    rest.
     """
-    name = detect_command(text)
-    if name is None:
-        return
-    if name in ledger.PIPELINES:
-        led.set_pipeline(name)
-    elif name in NON_PIPELINE_COMMANDS:
-        led.set_pipeline(None)
+    apply_name(led, detect_command(text))
 
 
 def _gate_state(root) -> str:

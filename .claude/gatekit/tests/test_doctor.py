@@ -27,6 +27,19 @@ GATE_ENTRY = {"hooks": [{
     "type": "command",
     "command": "${CLAUDE_PROJECT_DIR}/.claude/gatekit/.venv/Scripts/python.exe",
     "args": ["${CLAUDE_PROJECT_DIR}/.claude/gatekit/bin/gatekit.py", "_gate", "write"]}]}
+
+
+def gate_entry(gate, matcher=None) -> dict:
+    """One hook group routed to ``_gate <gate>``, shaped like the real settings.json."""
+    entry = {"hooks": [{
+        "type": "command",
+        "command": "${CLAUDE_PROJECT_DIR}/.claude/gatekit/.venv/Scripts/python.exe",
+        "args": ["${CLAUDE_PROJECT_DIR}/.claude/gatekit/bin/gatekit.py", "_gate", gate]}]}
+    if matcher is not None:
+        entry["matcher"] = matcher
+    return entry
+
+
 SESSION_ENTRY = {"hooks": [{
     "type": "command", "command": "powershell.exe",
     "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
@@ -67,6 +80,13 @@ class DoctorTestCase(unittest.TestCase):
         with every expected event routed through bin/gatekit.py (exec form)."""
         hooks = {event: [GATE_ENTRY] for event in doctor.EXPECTED_HOOK_EVENTS}
         hooks["SessionStart"] = [SESSION_ENTRY]
+        hooks["PreToolUse"] = [
+            gate_entry("write", "Write|Edit|MultiEdit|NotebookEdit"),
+            gate_entry("bash", "Bash"),
+            gate_entry("powershell", "PowerShell"),
+            gate_entry("spawn", "Agent|Task"),
+            gate_entry("skill", "Skill"),
+        ]
         return hooks
 
     def stub_claude(self) -> None:
@@ -247,6 +267,66 @@ class TestAxisHooksRegistered(DoctorTestCase):
         self.write_project_settings(hooks)
         result = doctor.axis_hooks_registered(self.root)
         self.assertEqual(result["verdict"], verdict.FAIL)
+
+    def test_missing_powershell_matcher_fails(self) -> None:
+        hooks = self.standalone_hooks()
+        hooks["PreToolUse"] = [g for g in hooks["PreToolUse"] if g["matcher"] != "PowerShell"]
+        self.write_project_settings(hooks)
+        result = doctor.axis_hooks_registered(self.root)
+        self.assertEqual(result["verdict"], verdict.FAIL, result)
+        self.assertIn("PowerShell (_gate powershell)", result["detail"])
+        self.assertNotIn("Skill", result["detail"])
+        self.assertTrue(result["fix"])
+
+    def test_missing_skill_matcher_fails(self) -> None:
+        hooks = self.standalone_hooks()
+        hooks["PreToolUse"] = [g for g in hooks["PreToolUse"] if g["matcher"] != "Skill"]
+        self.write_project_settings(hooks)
+        result = doctor.axis_hooks_registered(self.root)
+        self.assertEqual(result["verdict"], verdict.FAIL, result)
+        self.assertIn("Skill (_gate skill)", result["detail"])
+        self.assertNotIn("PowerShell", result["detail"])
+
+    def test_both_missing_matchers_are_named(self) -> None:
+        # Spelled out (not derived from doctor.REQUIRED_PRETOOLUSE_GATES) so the
+        # test fails if doctor stops requiring either one.
+        hooks = self.standalone_hooks()
+        hooks["PreToolUse"] = [gate_entry("write", "Write|Edit|MultiEdit|NotebookEdit"),
+                               gate_entry("bash", "Bash"), gate_entry("spawn", "Agent|Task")]
+        self.write_project_settings(hooks)
+        result = doctor.axis_hooks_registered(self.root)
+        self.assertEqual(result["verdict"], verdict.FAIL)
+        self.assertIn("PowerShell", result["detail"])
+        self.assertIn("Skill", result["detail"])
+
+    def test_bash_matcher_does_not_stand_in_for_powershell(self) -> None:
+        hooks = self.standalone_hooks()
+        hooks["PreToolUse"] = [gate_entry("powershell", "Bash"), gate_entry("skill", "Skill")]
+        self.write_project_settings(hooks)
+        result = doctor.axis_hooks_registered(self.root)
+        self.assertEqual(result["verdict"], verdict.FAIL)
+        self.assertIn("PowerShell", result["detail"])
+
+    def test_matcher_routed_to_the_wrong_gate_fails(self) -> None:
+        hooks = self.standalone_hooks()
+        hooks["PreToolUse"] = [gate_entry("bash", "PowerShell"), gate_entry("skill", "Skill")]
+        self.write_project_settings(hooks)
+        result = doctor.axis_hooks_registered(self.root)
+        self.assertEqual(result["verdict"], verdict.FAIL)
+        self.assertIn("PowerShell (_gate powershell)", result["detail"])
+
+    def test_alternation_and_catch_all_matchers_cover_the_tool(self) -> None:
+        for matcher in ("Bash|PowerShell", "*", None):
+            with self.subTest(matcher=matcher):
+                hooks = self.standalone_hooks()
+                hooks["PreToolUse"] = [gate_entry("powershell", matcher),
+                                       gate_entry("skill", "Skill")]
+                self.write_project_settings(hooks)
+                self.assertEqual(doctor.axis_hooks_registered(self.root)["verdict"], verdict.OK)
+
+    def test_gate_scripts_include_powershell_and_skill(self) -> None:
+        self.assertIn("powershell.py", doctor.GATE_SCRIPTS)
+        self.assertIn("skill.py", doctor.GATE_SCRIPTS)
 
     def test_no_hooks_object_fails(self) -> None:
         directory = self.root / ".claude"

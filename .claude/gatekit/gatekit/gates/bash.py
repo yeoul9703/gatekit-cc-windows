@@ -28,7 +28,7 @@ import os
 import posixpath
 import re
 import shlex
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 if __name__ == "__main__" or __package__ in (None, ""):  # pragma: no cover
     from _bootstrap import ensure_package_path
@@ -507,9 +507,21 @@ def extract_write_targets(command: str, cwd: Optional[str]) -> WriteTargets:
 # --------------------------------------------------------------------------
 # the gate
 # --------------------------------------------------------------------------
-def handle(event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-    """Judge every file this Bash command would write."""
-    if event.get("tool_name") != "Bash":
+def judge_command(
+    event: Dict[str, Any],
+    tool_name: str,
+    extract: Callable[[str, Optional[str]], WriteTargets],
+) -> Optional[Dict[str, Any]]:
+    """Judge every file the shell command in *event* would write.
+
+    Shared by the Bash gate and the PowerShell gate
+    (:mod:`gatekit.gates.powershell`): the two differ only in *extract*, the
+    function that reads the write targets off the command text. The fast path
+    (nothing could be denied, so nothing is parsed), the per-target verdict
+    from :func:`write.decide_path` and the denial of an unreadable command are
+    the same for both, so they are stated once.
+    """
+    if event.get("tool_name") != tool_name:
         return hookio.allow()
     tool_input = event.get("tool_input") or {}
     command = tool_input.get("command") if isinstance(tool_input, dict) else None
@@ -522,7 +534,7 @@ def handle(event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
 
     lang = write.session_lang(root, event)
     cwd = event.get("cwd") if isinstance(event.get("cwd"), str) else None
-    found = extract_write_targets(command, cwd or str(root))
+    found = extract(command, cwd or str(root))
 
     for target in found.targets:
         decision = write.decide_path(root, target, lang)
@@ -535,6 +547,11 @@ def handle(event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
             shown = shown[:119] + "…"
         return hookio.deny(_message(lang, "opaque", why=found.why, cmd=shown))
     return hookio.allow()
+
+
+def handle(event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Judge every file this Bash command would write."""
+    return judge_command(event, "Bash", extract_write_targets)
 
 
 def main() -> None:  # pragma: no cover - exercised via subprocess tests
