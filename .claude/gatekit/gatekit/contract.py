@@ -270,8 +270,13 @@ def _parse_budget(text: str) -> float:
     return value
 
 
-def derive(root: pathlib.Path) -> Dict[str, Any]:
-    """Parse ``spec/05-gate.md`` into ``.gatekit/contract.json`` and return it."""
+def _declared(root: pathlib.Path) -> Dict[str, Any]:
+    """What ``spec/05-gate.md`` states right now: its budget and its criteria.
+
+    Raises :class:`FileNotFoundError` when the file cannot be read and
+    :class:`ValueError` when a fence does not parse, a criterion is invalid or
+    two share an id.
+    """
     source = gate_file(root)
     try:
         text = source.read_text(encoding="utf-8")
@@ -288,16 +293,80 @@ def derive(root: pathlib.Path) -> Dict[str, Any]:
             raise ValueError(f"duplicate criterion id '{crit['id']}'")
         seen.add(crit["id"])
 
+    return {"total_budget_s": total_budget_s, "criteria": criteria}
+
+
+def derive(root: pathlib.Path) -> Dict[str, Any]:
+    """Parse ``spec/05-gate.md`` into ``.gatekit/contract.json`` and return it."""
+    declared = _declared(root)
     data = {
         "version": VERSION,
-        "source_sha256": approval.sha256_file(source),
+        "source_sha256": approval.sha256_file(gate_file(root)),
         "inputs": input_hashes(root),
-        "total_budget_s": total_budget_s,
-        "criteria": criteria,
+        "total_budget_s": declared["total_budget_s"],
+        "criteria": declared["criteria"],
         "derived_at": _now(),
     }
     config.write_json_atomic(paths.contract_file(root), data)
     return data
+
+
+#: The gate file as ``approvals.json`` names it.
+GATE_TARGET = "spec/05-gate.md"
+
+#: ``spec/05-gate.md`` is not, or is no longer, what the user approved.
+UNAPPROVED_REASON = "gate_not_approved"
+
+#: The criteria in ``contract.json`` are not the ones ``spec/05-gate.md`` states.
+MISMATCH_REASON = "contract_mismatch"
+
+
+def refusal(root: pathlib.Path) -> Optional[Dict[str, Any]]:
+    """Why completion must not be judged from this contract, or ``None``.
+
+    The answer has :func:`execute`'s shape and is ``unverified``, so a caller
+    treats it like a run that could not tell. No criterion runs here. Two
+    things are checked, in this order:
+
+    * **The approval of ``spec/05-gate.md`` holds.** Criteria loosened after
+      the sign-off and derived again would otherwise be judged as if the user
+      had agreed to them. The answer carries the state under ``approval``:
+      ``fail`` (the file changed after it was approved) or ``unverified`` (it
+      was never approved).
+    * **The frozen criteria and budget are the ones the gate file states.**
+      :func:`status` compares the recorded hash of the gate file, which an
+      edit to ``contract.json`` leaves as it was.
+
+    An absent or unreadable ``contract.json`` is not reported here:
+    :func:`execute` says so.
+    """
+    approved = approval.check(root, GATE_TARGET)
+    if approved != verdict.OK:
+        return {
+            "verdict": verdict.UNVERIFIED,
+            "criteria": [],
+            "reasons": [UNAPPROVED_REASON],
+            "approval": approved,
+        }
+
+    data = load(root)
+    if data is None:
+        return None
+    try:
+        declared = _declared(root)
+    except (OSError, ValueError):
+        declared = None  # an approved file that no longer parses matches nothing
+    if (
+        declared is None
+        or data.get("criteria") != declared["criteria"]
+        or data.get("total_budget_s", TOTAL_BUDGET_S) != declared["total_budget_s"]
+    ):
+        return {
+            "verdict": verdict.UNVERIFIED,
+            "criteria": [],
+            "reasons": [MISMATCH_REASON],
+        }
+    return None
 
 
 def load(root: pathlib.Path) -> Optional[Dict[str, Any]]:

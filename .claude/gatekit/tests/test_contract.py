@@ -685,3 +685,115 @@ class TestStatusOutput(TempProject):
             code = contract.run(["status", "--root", str(self.root)])
         self.assertEqual(code, 1)
         self.assertIn("fail", out.getvalue())
+
+
+class TestRefusal(TempProject):
+    """refusal: only approved criteria, and only the ones the gate file states."""
+
+    TARGET = "spec/05-gate.md"
+
+    def settle(self, *criteria: dict) -> None:
+        """Write the gate file, approve it, derive the contract."""
+        self.write_gate(*(criteria or ({"id": "a", "argv": ["true"]},)))
+        approval.approve(self.root, self.TARGET)
+        contract.derive(self.root)
+
+    def frozen(self) -> dict:
+        return json.loads((self.root / ".gatekit" / "contract.json").read_text(encoding="utf-8"))
+
+    def freeze(self, data: dict) -> None:
+        (self.root / ".gatekit" / "contract.json").write_text(json.dumps(data), encoding="utf-8")
+
+    def test_approved_and_matching_is_not_refused(self) -> None:
+        self.settle()
+        self.assertIsNone(contract.refusal(self.root))
+
+    def test_never_approved_is_refused_as_unverified(self) -> None:
+        self.write_gate({"id": "a", "argv": ["true"]})
+        contract.derive(self.root)
+        result = contract.refusal(self.root)
+        self.assertEqual(result["verdict"], "unverified")
+        self.assertEqual(result["reasons"], [contract.UNAPPROVED_REASON])
+        self.assertEqual(result["approval"], "unverified")
+        self.assertEqual(result["criteria"], [])
+
+    def test_changed_after_approval_is_refused_even_when_derived_again(self) -> None:
+        self.settle({"id": "a", "argv": ["false"]})
+        self.write_gate({"id": "a", "argv": ["true"]})
+        contract.derive(self.root)
+        self.assertEqual(contract.status(self.root), "ok")
+        result = contract.refusal(self.root)
+        self.assertEqual(result["verdict"], "unverified")
+        self.assertEqual(result["reasons"], [contract.UNAPPROVED_REASON])
+        self.assertEqual(result["approval"], "fail")
+
+    def test_edited_criteria_are_refused(self) -> None:
+        self.settle({"id": "a", "argv": ["false"]})
+        for field, value in (("argv", ["true"]), ("expect", {"exit": 1}),
+                             ("timeout_s", 500.0), ("artifacts", ["x.txt"]), ("id", "b")):
+            with self.subTest(field):
+                data = self.frozen()
+                data["criteria"][0][field] = value
+                self.freeze(data)
+                self.assertEqual(contract.status(self.root), "ok")
+                result = contract.refusal(self.root)
+                self.assertEqual(result["verdict"], "unverified")
+                self.assertEqual(result["reasons"], [contract.MISMATCH_REASON])
+                contract.derive(self.root)
+                self.assertIsNone(contract.refusal(self.root))
+
+    def test_a_removed_or_an_added_criterion_is_refused(self) -> None:
+        self.settle({"id": "a", "argv": ["false"]}, {"id": "b", "argv": ["true"]})
+        original = self.frozen()
+        for name, criteria in (("removed", original["criteria"][1:]), ("none", []),
+                               ("added", original["criteria"] + [dict(original["criteria"][1], id="c")])):
+            with self.subTest(name):
+                self.freeze(dict(original, criteria=criteria))
+                self.assertEqual(contract.refusal(self.root)["reasons"], [contract.MISMATCH_REASON])
+
+    def test_an_edited_budget_is_refused(self) -> None:
+        self.settle()
+        data = self.frozen()
+        data["total_budget_s"] = contract.MAX_BUDGET_S
+        self.freeze(data)
+        self.assertEqual(contract.refusal(self.root)["reasons"], [contract.MISMATCH_REASON])
+
+    def test_a_contract_from_before_budgets_matches_the_default_budget(self) -> None:
+        self.settle()
+        data = self.frozen()
+        del data["total_budget_s"]
+        self.freeze(data)
+        self.assertIsNone(contract.refusal(self.root))
+
+    def test_an_approved_gate_that_does_not_parse_is_refused_without_raising(self) -> None:
+        self.settle()
+        self.gate.write_text("```gatekit-criterion\n{not json}\n```\n", encoding="utf-8")
+        approval.approve(self.root, self.TARGET)
+        self.assertEqual(contract.refusal(self.root)["reasons"], [contract.MISMATCH_REASON])
+
+    def test_no_contract_is_left_to_execute(self) -> None:
+        self.write_gate({"id": "a", "argv": ["true"]})
+        approval.approve(self.root, self.TARGET)
+        self.assertIsNone(contract.refusal(self.root))
+        (self.root / ".gatekit" / "contract.json").write_text("{broken", encoding="utf-8")
+        self.assertIsNone(contract.refusal(self.root))
+        self.assertEqual(contract.execute(self.root)["verdict"], "unverified")
+
+    def test_runs_no_criterion_and_writes_nothing(self) -> None:
+        marker = self.root / "ran.txt"
+        self.settle({"id": "a", "argv": [PY, "-c", "open('ran.txt', 'w').close()"]})
+        before = (self.root / ".gatekit" / "contract.json").read_bytes()
+        self.assertIsNone(contract.refusal(self.root))
+        self.assertFalse(marker.exists())
+        self.assertEqual((self.root / ".gatekit" / "contract.json").read_bytes(), before)
+
+    def test_derive_writes_what_the_gate_file_states(self) -> None:
+        # derive and refusal read the gate file through the same function.
+        self.write_gate({"id": "a", "argv": ["true"], "timeout_s": 7},
+                        prose="# Gate\n\n```gatekit-budget\n{\"total_budget_s\": 90}\n```\n")
+        data = contract.derive(self.root)
+        self.assertEqual(data["total_budget_s"], 90.0)
+        self.assertEqual(data["criteria"], [{"id": "a", "argv": ["true"], "expect": {"exit": 0},
+                                             "timeout_s": 7.0, "artifacts": []}])
+        self.assertEqual(sorted(data), ["criteria", "derived_at", "inputs", "source_sha256",
+                                        "total_budget_s", "version"])

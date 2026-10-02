@@ -10,7 +10,7 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from gatekit import contract, ledger  # noqa: E402
+from gatekit import approval, contract, ledger  # noqa: E402
 from gatekit.gates import stop as stop_gate  # noqa: E402
 from tests import isolation  # noqa: E402
 
@@ -30,12 +30,28 @@ class StopProject(unittest.TestCase):
     def tearDown(self) -> None:
         self._tmp.cleanup()
 
-    def write_contract(self, *criteria: dict) -> None:
+    def write_gate(self, *criteria: dict) -> None:
         body = "# Gate\n\n" + "".join(
             "```gatekit-criterion\n" + json.dumps(c) + "\n```\n" for c in criteria
         )
         self.gate_md.write_text(body, encoding="utf-8")
+
+    def approve(self) -> None:
+        approval.approve(self.root, "spec/05-gate.md")
+
+    def write_contract(self, *criteria: dict) -> None:
+        """The state /gatekit-gate leaves: criteria written, approved, derived."""
+        self.write_gate(*criteria)
+        self.approve()
         contract.derive(self.root)
+
+    def edit_contract_json(self, argv: list) -> None:
+        """Rewrite the frozen criteria by hand; the recorded gate hash stays."""
+        target = self.root / ".gatekit" / "contract.json"
+        data = json.loads(target.read_text(encoding="utf-8"))
+        for crit in data["criteria"]:
+            crit["argv"] = argv
+        target.write_text(json.dumps(data), encoding="utf-8")
 
     def passing(self) -> None:
         self.write_contract({"id": "ok-crit", "argv": [PY, "-c", "pass"], "timeout_s": 20})
@@ -169,11 +185,21 @@ class TestAllowing(StopProject):
         self.assertEqual(self.led().data["stop"]["final_verdict"], "fail")
 
     def test_stale_contract_blocks_with_stale_reason(self) -> None:
+        # The approval holds; a design input changed after the contract was derived.
+        self.passing()
+        self.set_pipeline("build")
+        (self.root / "spec" / "02-design.md").write_text("# design\n", encoding="utf-8")
+        result = stop_gate.handle(self.event())
+        self.assertIsNotNone(result)
+        self.assertIn("contract_stale", result["reason"])
+
+    def test_reapproved_gate_not_derived_again_is_stale(self) -> None:
         self.passing()
         self.set_pipeline("build")
         self.gate_md.write_text(
             self.gate_md.read_text(encoding="utf-8") + "\nedited\n", encoding="utf-8"
         )
+        self.approve()
         result = stop_gate.handle(self.event())
         self.assertIsNotNone(result)
         self.assertIn("contract_stale", result["reason"])
@@ -190,9 +216,7 @@ class TestLanguage(StopProject):
     def test_korean_stale_reason_by_default(self) -> None:
         self.passing()
         self.set_pipeline("build")
-        self.gate_md.write_text(
-            self.gate_md.read_text(encoding="utf-8") + "\nedited\n", encoding="utf-8"
-        )
+        (self.root / "spec" / "02-design.md").write_text("# design\n", encoding="utf-8")
         reason = stop_gate.handle(self.event())["reason"]
         self.assertIn("판정할 수 없습니다", reason)
         self.assertIn("contract derive", reason)
@@ -232,6 +256,27 @@ class TestSubprocess(StopProject):
         self.assertEqual(payload["decision"], "block")
         self.assertIn("bad-crit", payload["reason"])
         self.assertIn("완료 계약", payload["reason"])
+
+    def test_loosened_gate_file_blocks_via_subprocess(self) -> None:
+        self.failing()
+        self.set_pipeline("build")
+        self.write_gate({"id": "bad-crit", "argv": [PY, "-c", "pass"], "timeout_s": 20})
+        contract.derive(self.root)
+        code, out, err = self._run(self.event())
+        self.assertEqual(code, 0, err)
+        payload = json.loads(out)
+        self.assertEqual(payload["decision"], "block")
+        self.assertIn("승인이 유효하지 않아", payload["reason"])
+
+    def test_edited_contract_json_blocks_via_subprocess(self) -> None:
+        self.failing()
+        self.set_pipeline("build")
+        self.edit_contract_json([PY, "-c", "pass"])
+        code, out, err = self._run(self.event())
+        self.assertEqual(code, 0, err)
+        payload = json.loads(out)
+        self.assertEqual(payload["decision"], "block")
+        self.assertIn("contract derive", payload["reason"])
 
     def test_internal_error_exits_zero_and_logs(self) -> None:
         self.failing()
@@ -309,6 +354,7 @@ class TestStopGateCapsDeclaredBudget(StopProject):
             + "\n```\n"
         )
         self.gate_md.write_text(body, encoding="utf-8")
+        self.approve()
         contract.derive(self.root)
         self.set_pipeline("build")
         seen = {}
@@ -459,9 +505,50 @@ class TestReuse(StopProject):
         self.cli_run()
         self.gate_md.write_text(self.gate_md.read_text(encoding="utf-8") + "\nedited\n",
                                 encoding="utf-8")
+        self.approve()
         self.assertIsNone(contract.reusable(self.root))
         result = stop_gate.handle(self.event())
         self.assertEqual(result["decision"], "block")
+        self.assertIn("contract_stale", result["reason"])
+
+    def test_an_unapproved_gate_runs_nothing_and_reuses_nothing(self) -> None:
+        # A passing run of the re-derived contract is on record and reusable.
+        # The gate file is not the approved one, so the record does not decide
+        # and no criterion runs either.
+        self.passing()
+        self.set_pipeline("build")
+        self.gate_md.write_text(self.gate_md.read_text(encoding="utf-8") + "\nedited\n",
+                                encoding="utf-8")
+        contract.derive(self.root)
+        self.cli_run()
+        self.assertIsNotNone(contract.reusable(self.root))
+        result = stop_gate.handle(self.event())
+        self.assertEqual(result["decision"], "block")
+        self.assertEqual(self.runs, 1)
+        self.assertNotEqual(self.led().data["stop"]["final_verdict"], "ok")
+
+    def test_a_run_recorded_from_an_edited_contract_is_not_reused(self) -> None:
+        # contract.json edited to pass, then `contract run` records ok for exactly
+        # that file. The record matches the file byte for byte; the gate still
+        # refuses, because the file is not what spec/05-gate.md states.
+        self.failing()
+        self.set_pipeline("build")
+        self.edit_contract_json([PY, "-c", "pass"])
+        self.cli_run()
+        self.assertIsNotNone(contract.reusable(self.root))
+        result = stop_gate.handle(self.event())
+        self.assertEqual(result["decision"], "block")
+        self.assertEqual(self.runs, 1)
+        self.assertNotEqual(self.led().data["stop"]["final_verdict"], "ok")
+
+    def test_an_approved_unchanged_project_still_reuses(self) -> None:
+        # The two checks before the run do not cost a run of their own.
+        self.passing()
+        self.set_pipeline("build")
+        self.cli_run()
+        for _ in range(3):
+            self.assertIsNone(stop_gate.handle(self.event()))
+        self.assertEqual(self.runs, 1)
 
     def test_an_old_run_is_not_reused(self) -> None:
         self.passing()
@@ -511,6 +598,184 @@ class TestReuse(StopProject):
         for junk in ("not json", "[]", json.dumps({"ran_at": "now", "result": {}})):
             record.write_text(junk, encoding="utf-8")
             self.assertIsNone(contract.reusable(self.root), junk)
+
+
+class TestApprovedCriteriaOnly(StopProject):
+    """The stop is judged on the criteria the user approved, or not at all.
+
+    Both roads were walked against the old gate and let the session end with
+    ``final_verdict: ok``: edit ``contract.json``, or loosen ``spec/05-gate.md``
+    and derive again. ``contract status`` says ``ok`` on both.
+    """
+
+    PASS = [PY, "-c", "pass"]
+
+    def loosen_gate_and_derive(self) -> None:
+        self.write_gate({"id": "bad-crit", "argv": self.PASS, "timeout_s": 20})
+        contract.derive(self.root)
+
+    def stop_state(self) -> dict:
+        return self.led().data["stop"]
+
+    def test_gate_file_loosened_after_approval_blocks(self) -> None:
+        self.failing()
+        self.set_pipeline("build")
+        self.assertIn("bad-crit", stop_gate.handle(self.event())["reason"])
+        self.loosen_gate_and_derive()
+        self.assertEqual(contract.status(self.root), "ok")
+        self.assertEqual(approval.check(self.root, "spec/05-gate.md"), "fail")
+        result = stop_gate.handle(self.event())
+        self.assertIsNotNone(result)
+        self.assertEqual(result["decision"], "block")
+        self.assertIn("/gatekit-gate", result["reason"])
+        self.assertIn("fail", result["reason"])
+        self.assertEqual(self.stop_state()["last_reasons"], [contract.UNAPPROVED_REASON])
+        self.assertNotEqual(self.stop_state()["final_verdict"], "ok")
+
+    def test_contract_json_edited_after_approval_blocks(self) -> None:
+        self.failing()
+        self.set_pipeline("build")
+        self.assertIn("bad-crit", stop_gate.handle(self.event())["reason"])
+        self.edit_contract_json(self.PASS)
+        self.assertEqual(contract.status(self.root), "ok")
+        self.assertEqual(approval.check(self.root, "spec/05-gate.md"), "ok")
+        result = stop_gate.handle(self.event())
+        self.assertIsNotNone(result)
+        self.assertEqual(result["decision"], "block")
+        self.assertIn("contract derive", result["reason"])
+        self.assertIn("/gatekit-gate", result["reason"])
+        self.assertEqual(self.stop_state()["last_reasons"], [contract.MISMATCH_REASON])
+        self.assertNotEqual(self.stop_state()["final_verdict"], "ok")
+
+    def test_a_raised_budget_in_contract_json_blocks(self) -> None:
+        self.passing()
+        self.set_pipeline("build")
+        target = self.root / ".gatekit" / "contract.json"
+        data = json.loads(target.read_text(encoding="utf-8"))
+        data["total_budget_s"] = 600
+        target.write_text(json.dumps(data), encoding="utf-8")
+        result = stop_gate.handle(self.event())
+        self.assertIsNotNone(result)
+        self.assertIn("contract_mismatch", result["reason"])
+
+    def test_never_approved_gate_blocks(self) -> None:
+        self.write_gate({"id": "ok-crit", "argv": self.PASS, "timeout_s": 20})
+        contract.derive(self.root)
+        self.set_pipeline("build")
+        result = stop_gate.handle(self.event())
+        self.assertIsNotNone(result)
+        self.assertIn("unverified", result["reason"])
+        self.assertIn("/gatekit-gate", result["reason"])
+
+    def test_deriving_again_judges_by_the_gate_file(self) -> None:
+        # The way the mismatch message names: after it, the approved criteria decide.
+        self.failing()
+        self.set_pipeline("build")
+        self.edit_contract_json(self.PASS)
+        stop_gate.handle(self.event())
+        contract.derive(self.root)
+        result = stop_gate.handle(self.event())
+        self.assertIsNotNone(result)
+        self.assertIn("bad-crit", result["reason"])
+
+    def test_approving_again_opens_the_stop(self) -> None:
+        # The way the approval message names: /gatekit-gate approves and derives.
+        self.failing()
+        self.set_pipeline("build")
+        self.loosen_gate_and_derive()
+        self.assertIsNotNone(stop_gate.handle(self.event()))
+        self.approve()
+        self.assertIsNone(stop_gate.handle(self.event()))
+        self.assertEqual(self.stop_state()["final_verdict"], "ok")
+
+    def test_putting_the_approved_criteria_back_judges_the_code(self) -> None:
+        self.failing()
+        self.set_pipeline("build")
+        approved = self.gate_md.read_bytes()
+        self.loosen_gate_and_derive()
+        self.assertIn("/gatekit-gate", stop_gate.handle(self.event())["reason"])
+        self.gate_md.write_bytes(approved)
+        contract.derive(self.root)
+        self.assertIn("bad-crit", stop_gate.handle(self.event())["reason"])
+
+    def test_messages_say_the_way_out_in_korean(self) -> None:
+        self.failing()
+        self.set_pipeline("build")
+        failing = stop_gate.handle(self.event())["reason"]
+        self.edit_contract_json(self.PASS)
+        edited = stop_gate.handle(self.event())["reason"]
+        self.loosen_gate_and_derive()
+        unapproved = stop_gate.handle(self.event())["reason"]
+        for reason in (failing, edited, unapproved):
+            self.assertIn("코드를 고", reason)  # 고친 뒤 / 고치세요
+            self.assertIn("/gatekit-gate 로 돌아가 사용자에게 다시 승인받으세요", reason)
+        self.assertIn("승인이 유효하지 않아", unapproved)
+        self.assertIn("승인 상태: fail", unapproved)
+        self.assertIn("contract.json 의 기준이", edited)
+
+    def test_both_languages_have_every_message_and_none_cites_a_decision_number(self) -> None:
+        tables = stop_gate._MESSAGES
+        self.assertEqual(sorted(tables["en"]), sorted(tables["ko"]))
+        for table in tables.values():
+            for text in table.values():
+                self.assertNotRegex(text, r"ADR-\d")
+
+
+class TestStandingDown(StopProject):
+    """Where the gate does not block it still never records a pass it did not see."""
+
+    PASS = [PY, "-c", "pass"]
+
+    def unapproved(self) -> None:
+        self.failing()
+        self.set_pipeline("build")
+        self.write_gate({"id": "bad-crit", "argv": self.PASS, "timeout_s": 20})
+        contract.derive(self.root)
+
+    def edited(self) -> None:
+        self.failing()
+        self.set_pipeline("build")
+        self.edit_contract_json(self.PASS)
+
+    def final(self) -> str:
+        return self.led().data["stop"]["final_verdict"]
+
+    def test_three_blocks_then_unverified(self) -> None:
+        for name, arrange in (("unapproved", self.unapproved), ("edited", self.edited)):
+            with self.subTest(name):
+                self.session = "sess-" + name
+                arrange()
+                for _ in range(stop_gate.MAX_BLOCKS):
+                    self.assertIsNotNone(stop_gate.handle(self.event()))
+                self.assertIsNone(stop_gate.handle(self.event()))
+                self.assertEqual(self.final(), "unverified")
+
+    def test_stop_hook_active_allows_and_records_unverified(self) -> None:
+        for name, arrange in (("unapproved", self.unapproved), ("edited", self.edited)):
+            with self.subTest(name):
+                self.session = "sess-" + name
+                arrange()
+                self.assertIsNone(stop_gate.handle(self.event(stop_hook_active=True)))
+                self.assertEqual(self.final(), "unverified")
+                self.assertEqual(self.led().data["stop"]["block_count"], 0)
+
+    def test_no_pipeline_is_unverified_even_when_unapproved(self) -> None:
+        self.failing()
+        self.write_gate({"id": "bad-crit", "argv": self.PASS, "timeout_s": 20})
+        contract.derive(self.root)
+        self.assertIsNone(stop_gate.handle(self.event()))
+        self.assertEqual(self.final(), "unverified")
+
+    def test_no_contract_is_unverified(self) -> None:
+        self.set_pipeline("build")
+        self.assertIsNone(stop_gate.handle(self.event()))
+        self.assertEqual(self.final(), "unverified")
+
+    def test_project_without_spec_is_unverified(self) -> None:
+        (self.root / "spec").rmdir()
+        self.set_pipeline("build")
+        self.assertIsNone(stop_gate.handle(self.event()))
+        self.assertEqual(self.final(), "unverified")
 
 
 class TestUnmanagedProject(unittest.TestCase):
