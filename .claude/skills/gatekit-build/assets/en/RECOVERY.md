@@ -22,7 +22,7 @@ One step at a time, in order. Do not skip ahead.
    not survive, return to step 2.
 5. **Make the smallest fix.** Change one cause. Changing several at once makes
    it impossible to know which one mattered.
-6. **Re-run the same criterion.** `python3 -m gatekit contract run`.
+6. **Re-run the same criterion.** `uv run --project .claude/gatekit --frozen python .claude/gatekit/bin/gatekit.py contract run`.
 
 ## Retry limit
 

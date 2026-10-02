@@ -62,6 +62,17 @@ class TestDocsStale(unittest.TestCase):
                     broken.append("%s -> %s" % (path.relative_to(PROJECT), target))
         self.assertEqual(broken, [])
 
+    def test_templates_name_no_python3_command(self) -> None:
+        """A template is copied into the user's spec/, so a command in it must run here."""
+        templates = sorted((PROJECT / ".claude" / "skills").glob("*/assets/**/*.md"))
+        self.assertTrue(templates, "no template found under .claude/skills/*/assets")
+        hits = []
+        for path in templates:
+            for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+                if "python3 " in line:
+                    hits.append("%s:%d %s" % (path.relative_to(PROJECT), lineno, line.strip()[:80]))
+        self.assertEqual(hits, [], "a template names python3:\n" + "\n".join(hits))
+
 
 if __name__ == "__main__":
     unittest.main()

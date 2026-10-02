@@ -19,7 +19,7 @@ status: "초안"
 4. **관찰한다.** 로그·테스트·최소 재현. 가설이 살아남지 못하면 2로 돌아간다.
 5. **최소 수정을 한다.** 원인 한 곳만 고친다. 여러 곳을 동시에 고치면
    무엇이 효과가 있었는지 알 수 없게 된다.
-6. **같은 기준을 다시 실행한다.** `python3 -m gatekit contract run`.
+6. **같은 기준을 다시 실행한다.** `uv run --project .claude/gatekit --frozen python .claude/gatekit/bin/gatekit.py contract run`.
 
 ## 재시도 한도
 

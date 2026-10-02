@@ -55,6 +55,6 @@ status: "초안"
 ## 범위 규칙
 
 - 같은 라운드의 두 작업은 `write_scope`가 겹칠 수 없다. 겹치면
-  `python3 -m gatekit spec validate`가 `fail`을 낸다.
+  `uv run --project .claude/gatekit --frozen python .claude/gatekit/bin/gatekit.py spec validate`가 `fail`을 낸다.
 - 워커는 자기 `write_scope` 밖을 쓸 수 없다. 쓰기 게이트가 막는다.
 - 범위를 넓혀야 하면 워커가 임의로 넓히지 말고 작업을 다시 나눈다.

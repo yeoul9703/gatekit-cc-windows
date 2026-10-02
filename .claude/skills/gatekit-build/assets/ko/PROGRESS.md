@@ -45,7 +45,7 @@ STATUS: {{not-started | in-progress | blocked | done}} · {{iso 타임스탬프}
 
 | 항목 | 값 |
 |---|---|
-| 실행 명령 | `python3 -m gatekit contract run --json` |
+| 실행 명령 | `uv run --project .claude/gatekit --frozen python .claude/gatekit/bin/gatekit.py contract run --json` |
 | 실행 시각 | {{iso}} |
 | 판정 | {{ok / warn / fail / unverified}} |
 | 실패·미검증 기준 | {{id 목록, 없으면 "없음"}} |

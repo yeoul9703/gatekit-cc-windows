@@ -65,7 +65,7 @@ status: "초안"
 | 1 | {{가정한 내용}} | {{왜 그렇게 생각했는가}} | {{무엇이 무너지는가}} | {{누구에게·어떻게 확인하는가}} | {{y \| n}} | {{y \| n}} |
 
 규칙: 본문 표기와 표의 행은 번호로 1:1 대응해야 한다. 한쪽만 있으면
-`python3 -m gatekit spec validate`가 잡아낸다. 가정이 확인되면 행을 지우지 말고
+`uv run --project .claude/gatekit --frozen python .claude/gatekit/bin/gatekit.py spec validate`가 잡아낸다. 가정이 확인되면 행을 지우지 말고
 근거 칸을 확인된 사실로 바꾸고 Confirmed 를 y 로 바꾼다.
 
 `Blocking`(ADR-0017)은 틀리면 계획 자체가 무너지는 가정에만 y 를 적는다 —

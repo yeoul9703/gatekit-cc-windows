@@ -59,11 +59,11 @@ Any of the following means the work is not done. Each one yields `fail` or
 
 | Criterion | How it runs | Evidence left behind |
 |---|---|---|
-| tests-pass | `python3 -m gatekit contract run` | exit code, stdout tail |
+| tests-pass | `uv run --project .claude/gatekit --frozen python .claude/gatekit/bin/gatekit.py contract run` | exit code, stdout tail |
 | {{task-one-works}} | {{}} | {{sha256 of the artifact file}} |
 
 Approval: once a human has read and agreed to this document, run
-`python3 -m gatekit approve spec/05-gate.md`. Editing the document afterwards
+`uv run --project .claude/gatekit --frozen python .claude/gatekit/bin/gatekit.py approve spec/05-gate.md`. Editing the document afterwards
 expires the approval and it must be granted again.
 
 ## Run budget (optional)

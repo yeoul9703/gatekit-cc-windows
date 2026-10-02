@@ -55,10 +55,10 @@ status: "초안"
 
 | 기준 | 실행 방법 | 남는 증거 |
 |---|---|---|
-| tests-pass | `python3 -m gatekit contract run` | 종료 코드, stdout 꼬리 |
+| tests-pass | `uv run --project .claude/gatekit --frozen python .claude/gatekit/bin/gatekit.py contract run` | 종료 코드, stdout 꼬리 |
 | {{task-one-works}} | {{}} | {{산출물 파일의 sha256}} |
 
-승인 절차: 이 문서를 사람이 읽고 동의하면 `python3 -m gatekit approve spec/05-gate.md`
+승인 절차: 이 문서를 사람이 읽고 동의하면 `uv run --project .claude/gatekit --frozen python .claude/gatekit/bin/gatekit.py approve spec/05-gate.md`
 를 실행한다. 이후 문서가 바뀌면 승인이 만료되고 다시 승인해야 한다.
 
 ## 실행 예산 (선택)

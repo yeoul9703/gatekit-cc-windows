@@ -47,7 +47,7 @@ empty, the record is incomplete.
 
 | Item | Value |
 |---|---|
-| Command | `python3 -m gatekit contract run --json` |
+| Command | `uv run --project .claude/gatekit --frozen python .claude/gatekit/bin/gatekit.py contract run --json` |
 | Run at | {{iso}} |
 | Verdict | {{ok / warn / fail / unverified}} |
 | Failing or unverified criteria | {{list of ids, or "none"}} |

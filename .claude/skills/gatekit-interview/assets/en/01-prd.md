@@ -68,7 +68,7 @@ matching a row in this table.
 | 1 | {{what you assumed}} | {{why you believed it}} | {{what breaks}} | {{who to ask, how}} | {{y \| n}} | {{y \| n}} |
 
 Rule: inline markers and table rows correspond one-to-one by number. If only
-one side exists, `python3 -m gatekit spec validate` reports it. When an
+one side exists, `uv run --project .claude/gatekit --frozen python .claude/gatekit/bin/gatekit.py spec validate` reports it. When an
 assumption is confirmed, do not delete the row — replace the basis with the
 confirmed fact, and flip `Confirmed` to `y`.
 
