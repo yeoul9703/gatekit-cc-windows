@@ -1995,24 +1995,43 @@ def clean(root, all_jobs: bool = False) -> list:
 # --------------------------------------------------------------------------- CLI
 
 
+#: Every `jobs` subcommand, in help order: (name, argument synopsis, extra help
+#: lines). The one list `run` dispatches against and `_usage` prints from, so
+#: a command cannot be reachable without being listed (tests/test_jobs.py
+#: holds the other direction: every branch in `run` and every flag it reads).
+COMMANDS = (
+    ("start", "[--tasks id,id] [--backend name] [--parallel N] [--dry-run] [--no-preflight]",
+     ("[--force-retry id,id] [--json]",
+      "--force-retry clears the listed tasks' consecutive-failure",
+      "count before starting (ADR-0014)")),
+    ("shape", "[--tasks id,id] [--json]",
+     ("task count and rounds of the current spec/04-tasks.md;",
+      "starts nothing")),
+    ("status", "[--job ID] [--compact|--json]", ()),
+    ("wait", "[--job ID] [--timeout S] [--json]", ()),
+    ("results", "[--job ID] [--compact|--json]", ()),
+    ("complete", "<task_id> [--job ID]",
+     ("run a host-implemented task's gates and record",
+      "the verdict (build.execution=host, ADR-0013)")),
+    ("recheck", "[task_id ...] [--task a,b] [--job ID] [--json]",
+     ("re-run gates from the current spec/04-tasks.md;",
+      "no worker, no new job (ADR-0013)")),
+    ("redelegate", "<task_id> [--job ID]", ()),
+    ("stop", "[--job ID]", ()),
+    ("evaluate", "[--backend name] [--prompt FILE] [--lang ko|en] [--json]", ()),
+    ("clean", "[--all]", ()),
+)
+COMMAND_NAMES = tuple(name for name, _synopsis, _notes in COMMANDS)
+
+_USAGE_NOTE_INDENT = " " * 25
+
+
 def _usage() -> str:
-    return (
-        "usage: python3 -m gatekit jobs <command>\n"
-        "  start [--tasks id,id] [--backend name] [--parallel N] [--dry-run] [--no-preflight]\n"
-        "  status [--job ID] [--json]\n"
-        "  wait [--job ID] [--timeout S]\n"
-        "  results [--job ID] [--compact|--json]\n"
-        "  complete <task_id> [--job ID]\n"
-        "                         run a host-implemented task's gates and record\n"
-        "                         the verdict (build.execution=host, ADR-0013)\n"
-        "  recheck [task_id ...] [--task a,b] [--job ID] [--json]\n"
-        "                         re-run gates from the current spec/04-tasks.md;\n"
-        "                         no worker, no new job (ADR-0013)\n"
-        "  redelegate <task_id> [--job ID]\n"
-        "  stop [--job ID]\n"
-        "  evaluate [--backend name] [--prompt FILE] [--lang ko|en] [--json]\n"
-        "  clean [--all]\n"
-    )
+    lines = ["usage: python3 -m gatekit jobs <command> [--root DIR]"]
+    for name, synopsis, notes in COMMANDS:
+        lines.append("  %s %s" % (name, synopsis))
+        lines.extend(_USAGE_NOTE_INDENT + note for note in notes)
+    return "\n".join(lines) + "\n"
 
 
 def _opt(argv: list, flag: str):
@@ -2075,6 +2094,10 @@ def run(argv: list) -> int:
         sys.stdout.write(_usage())
         return 0 if argv else 1
     cmd, rest = argv[0], argv[1:]
+    if cmd not in COMMAND_NAMES:
+        print("jobs: unknown command %r\n" % cmd, file=sys.stderr)
+        sys.stderr.write(_usage())
+        return 2
     job_id = _opt(rest, "--job")
 
     try:
@@ -2213,6 +2236,6 @@ def run(argv: list) -> int:
         print("jobs: %s" % exc, file=sys.stderr)
         return 2
 
-    print("jobs: unknown command %r\n" % cmd, file=sys.stderr)
-    sys.stderr.write(_usage())
-    return 2
+    # Listed in COMMANDS but handled by no branch above: a bug in this file,
+    # not in what the caller typed.
+    raise AssertionError("jobs: command %r is listed but not dispatched" % cmd)

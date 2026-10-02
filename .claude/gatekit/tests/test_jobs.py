@@ -2290,3 +2290,71 @@ class TestEvaluatorSandbox(JobTestCase):
         saved = json.loads(
             (self.root / ".gatekit" / "jobs" / job_id / "job.json").read_text())
         self.assertTrue(saved["backend"]["read_only"])
+
+
+# --------------------------------------------------------------- help text
+
+
+class TestUsageMatchesDispatch(unittest.TestCase):
+    """`jobs --help` and what `jobs.run` really handles must not drift apart.
+
+    `shape` and `--force-retry` were once dispatched but absent from the help.
+    """
+
+    #: Read by `run` but deliberately not in the help: the help switch itself,
+    #: and a flag `evaluate` accepts as a no-op (read-only is its only mode).
+    UNLISTED_FLAGS = {"--help", "--force-read-only-evaluator"}
+
+    def _run_source(self) -> str:
+        import inspect
+        return inspect.getsource(jobs.run)
+
+    def _flags_read(self) -> set:
+        import re
+        return set(re.findall(r'"(--[a-z-]+)"', self._run_source()))
+
+    def _dispatched(self) -> set:
+        import re
+        src = self._run_source()
+        names = set(re.findall(r'cmd == "([a-z-]+)"', src))
+        for group in re.findall(r"cmd in \(([^)]*)\)", src):
+            names.update(re.findall(r'"([a-z-]+)"', group))
+        return names
+
+    def test_every_dispatched_command_is_listed(self) -> None:
+        dispatched = self._dispatched()
+        self.assertIn("start", dispatched)    # the `==` scan still works
+        self.assertIn("results", dispatched)  # and the `in (...)` scan
+        self.assertEqual(dispatched, set(jobs.COMMAND_NAMES))
+
+    def test_usage_prints_every_command_once(self) -> None:
+        import re
+        printed = re.findall(r"^  ([a-z-]+)", jobs._usage(), re.M)
+        self.assertEqual(printed, list(jobs.COMMAND_NAMES))
+        self.assertEqual(len(set(printed)), len(printed))
+
+    def test_every_flag_run_reads_is_in_usage(self) -> None:
+        flags = self._flags_read()
+        self.assertIn("--force-retry", flags)  # the scan still works
+        usage = jobs._usage()
+        missing = sorted(f for f in flags - self.UNLISTED_FLAGS if f not in usage)
+        self.assertEqual(missing, [])
+
+    def test_usage_names_no_flag_run_does_not_read(self) -> None:
+        import re
+        listed = set(re.findall(r"--[a-z-]+", jobs._usage()))
+        self.assertEqual(sorted(listed - self._flags_read()), [])
+
+    def test_help_and_unknown_command_exit_codes(self) -> None:
+        import contextlib
+        import io
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            self.assertEqual(jobs.run(["--help"]), 0)
+            self.assertEqual(jobs.run([]), 1)
+        self.assertEqual(out.getvalue(), jobs._usage() * 2)
+        self.assertEqual(err.getvalue(), "")
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            self.assertEqual(jobs.run(["bogus"]), 2)
+        self.assertEqual(err.getvalue(),
+                         "jobs: unknown command 'bogus'\n\n" + jobs._usage())
