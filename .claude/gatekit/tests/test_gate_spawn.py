@@ -209,23 +209,27 @@ class TestDeny(SpawnProject):
         prompt = 'Please use write_scope: ["src/**"] and stop_when: "done".'
         self.assertTrue(self.is_deny(spawn_gate.handle(self.event(prompt))))
 
-    def test_korean_reason_when_ledger_says_ko(self) -> None:
-        led = self.led()
-        led.set_output_lang("ko")
-        led.save()
+    def test_reason_is_korean_by_default(self) -> None:
+        """No language was ever stored for this session: the denial is Korean."""
         result = spawn_gate.handle(self.event("no fence"))
         reason = result["hookSpecificOutput"]["permissionDecisionReason"]
-        self.assertTrue(any("가" <= ch <= "힣" for ch in reason), reason)
+        self.assertIn("펜스가 없습니다", reason)
+        self.assertIn("gatekit-scope", reason)
+        self.assertNotIn("this spawn has no", reason)
 
 
 class TestSubprocess(SpawnProject):
     def _run(self, event: dict) -> "tuple[int, str, str]":
         env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
+        # The reason is Korean. The registered hook goes through bin/gatekit.py, which
+        # makes stdout UTF-8; the script run on its own takes the encoding from here.
+        env["PYTHONIOENCODING"] = "utf-8"
         proc = subprocess.run(
             [sys.executable, str(GATE_SCRIPT)],
             input=json.dumps(event),
             capture_output=True,
             text=True,
+            encoding="utf-8",
             env=env,
             timeout=30,
         )
@@ -240,9 +244,9 @@ class TestSubprocess(SpawnProject):
     def test_deny_via_subprocess(self) -> None:
         code, out, err = self._run(self.event("no fence"))
         self.assertEqual(code, 0, err)
-        self.assertEqual(
-            json.loads(out)["hookSpecificOutput"]["permissionDecision"], "deny"
-        )
+        block = json.loads(out)["hookSpecificOutput"]
+        self.assertEqual(block["permissionDecision"], "deny")
+        self.assertIn("펜스가 없습니다", block["permissionDecisionReason"])
 
     def test_internal_error_exits_zero_and_logs(self) -> None:
         runs = self.root / ".gatekit" / "runs"

@@ -2,9 +2,10 @@
 
 This gate never blocks. It does two things on every prompt:
 
-1. **Ensures a ledger exists** for the session and refreshes ``output_lang``
-   from the prompt text, so the language decision is made once, from the user's
-   own words, and every later gate and command reads the same answer.
+1. **Ensures a ledger exists** for the session and sets ``output_lang`` to
+   Korean, the one output language of this kit, so every later gate and
+   command reads the same answer. A ledger an earlier version stored as
+   English is overwritten here on the next prompt.
 2. **Injects a short context block** (≤ 600 characters) naming the output
    language, the active pipeline, the question budget and the number of
    unresolved gate items — the state Claude would otherwise have to guess at.
@@ -17,9 +18,6 @@ This gate never blocks. It does two things on every prompt:
    the model starts by itself never appears in a prompt; the Skill hook
    (:mod:`gatekit.gates.skill`) records that case with the same two functions,
    :func:`skill_command` and :func:`apply_name`.
-
-An empty prompt leaves the stored language alone: submitting a blank line is
-not evidence that the user switched to English.
 """
 from __future__ import annotations
 
@@ -63,22 +61,6 @@ _INVOCATION_RE = re.compile(
 _SKILL_RE = re.compile(r"/?" + _SKILL_NAME)
 #: Only the leading lines of the prompt are inspected.
 _HEAD_LINES = 12
-
-
-_ARGS_RE = re.compile(r"<command-args>(.*?)</command-args>", re.DOTALL)
-
-
-def language_signal(text: str) -> str:
-    """The part of *text* that is the user's own words.
-
-    For a slash command Claude Code sends a tagged body; the tags and the
-    command name are Latin letters that would drag a Korean session to
-    English. Only the ``<command-args>`` content is the user's language.
-    """
-    if "<command-name>" in text:
-        match = _ARGS_RE.search(text)
-        return match.group(1) if match else ""
-    return text
 
 
 def detect_command(text: str) -> Optional[str]:
@@ -232,15 +214,9 @@ def handle(event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
 
     led = ledger.Ledger.load(root, session)
 
-    # Keep the stored language unless this prompt actually says something
-    # about which language the user is writing in. An empty prompt carries no
-    # signal; neither does "1", "2." or a bare path, which are the same
-    # keystrokes in either language — a Korean interview answered "1" must
-    # not flip the session to English. A slash command's tag body is not the
-    # user's words either: only the <command-args> content counts.
-    signal = language_signal(text)
-    if lang.carries_signal(signal):
-        led.set_output_lang(lang.detect(signal))
+    # The output language is Korean whatever the prompt is written in. Setting
+    # it on every prompt also rewrites a ledger that was stored as English.
+    led.set_output_lang(lang.detect(text))
 
     apply_command(led, text)
 

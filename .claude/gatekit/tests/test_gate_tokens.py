@@ -66,8 +66,8 @@ class VerdictTests(_Base):
         self.write("src/a.css", ".a { color: #3366fe; }")
         code, out = self.run_gate("src/**/*.css")
         self.assertEqual(code, 1, out)
-        self.assertIn("src/a.css:1: #3366fe is not a design token", out)
-        self.assertIn("nearest: color.primary = #3366FF", out)
+        self.assertIn("src/a.css:1: #3366fe 은(는) 디자인 토큰이 아닙니다", out)
+        self.assertIn("가장 가까운 토큰: color.primary = #3366FF", out)
 
     def test_line_numbers_are_reported(self) -> None:
         self.tokens(V2)
@@ -92,7 +92,7 @@ class VerdictTests(_Base):
         self.tokens(V2)
         code, out = self.run_gate("src/**/*.css")
         self.assertEqual(code, 3, out)
-        self.assertIn("0 files", out)
+        self.assertIn("파일 0개", out)
 
     def test_unparsable_tokens_file_is_unverified(self) -> None:
         (self.root / "spec" / "tokens.json").write_text("{not json", encoding="utf-8")
@@ -187,8 +187,8 @@ class IgnoreTests(_Base):
             code, out = self.run_gate(pattern)
             self.assertEqual(code, 3, out)
             self.assertNotIn("#123456", out)
-            self.assertNotIn("internal error", out)
-            self.assertIn("0 files", out)
+            self.assertNotIn("내부 오류", out)
+            self.assertIn("파일 0개", out)
 
     def test_symlink_to_outside_file_is_not_scanned(self) -> None:
         outside = pathlib.Path(self.tmp.name).parent / ("gk_outside_link_%d" % os.getpid())
@@ -200,7 +200,7 @@ class IgnoreTests(_Base):
         code, out = self.run_gate("src/*.css")
         self.assertEqual(code, 3, out)
         self.assertNotIn("Traceback", out)
-        self.assertNotIn("internal error", out)
+        self.assertNotIn("내부 오류", out)
 
     def test_large_files_are_skipped(self) -> None:
         self.write("src/big.css", ".a{color:#123456}" + " " * 1_100_000)
@@ -223,12 +223,24 @@ class OutputTests(_Base):
         self.assertEqual(data["violations"][0]["literal"], "#123456")
         self.assertIn("nearest", data["violations"][0])
 
-    def test_korean_summary(self) -> None:
+    def test_summary_is_korean_by_default(self) -> None:
         self.tokens(V2)
         self.write("src/a.css", ".a { color: #3366ff; }")
-        code, out = self.run_gate("src/a.css", extra=("--lang", "ko"))
+        code, out = self.run_gate("src/a.css")
         self.assertEqual(code, 0)
-        self.assertIn("리터럴", out)
+        self.assertEqual(out.strip(), "tokens: ok — 리터럴 1개, 위반 0개, 파일 1개 검사")
+        self.assertEqual(self.run_gate("src/a.css", extra=("--lang", "ko")), (code, out))
+
+    def test_lang_en_is_still_accepted(self) -> None:
+        """Task fences written before the kit became Korean-only pass ``--lang en``:
+        the argument must not be an error, and the verdict does not depend on it."""
+        self.tokens(V2)
+        self.write("src/a.css", ".a { color: #3366ff; }")
+        self.write("src/b.css", ".b { color: #123456; }")
+        self.assertEqual(self.run_gate("src/a.css", extra=("--lang", "en"))[0], 0)
+        code, out = self.run_gate("src/b.css", extra=("--lang", "en"))
+        self.assertEqual(code, 1, out)
+        self.assertIn("src/b.css:1: #123456", out)
 
     def test_internal_error_exits_3_without_traceback(self) -> None:
         self.tokens(V2)
@@ -243,20 +255,22 @@ class OutputTests(_Base):
         code, out = self.run_gate("src/a.css")
         self.assertEqual(code, 3)
         self.assertNotIn("Traceback", out)
-        self.assertIn("injected", out)
+        self.assertIn("내부 오류: injected", out)
 
     def test_runs_as_a_script(self) -> None:
         self.tokens(V2)
         self.write("src/a.css", ".a { color: #123456; }")
         env = {k: v for k, v in os.environ.items() if not k.startswith("GATEKIT_")}
         env.pop("PYTHONPATH", None)
+        env["PYTHONIOENCODING"] = "utf-8"  # the lines are Korean; `_gate tokens` sets this itself
         proc = subprocess.run(
             [sys.executable, str(GATE_SCRIPT), "src/a.css"],
-            cwd=str(self.root), capture_output=True, text=True, env=env, timeout=30,
+            cwd=str(self.root), capture_output=True, text=True, encoding="utf-8",
+            env=env, timeout=30,
         )
         self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
         self.assertNotIn("Traceback", proc.stderr)
-        self.assertIn("#123456", proc.stdout)
+        self.assertIn("src/a.css:1: #123456 은(는) 디자인 토큰이 아닙니다", proc.stdout)
 
 
 if __name__ == "__main__":

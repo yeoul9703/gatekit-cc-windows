@@ -409,12 +409,16 @@ class TestExtractCwd(unittest.TestCase):
 def run_gate_subprocess(event: dict, env_extra: "dict | None" = None, raw: "str | None" = None):
     env = {k: v for k, v in os.environ.items() if not k.startswith("GATEKIT_")}
     env.pop("PYTHONPATH", None)
+    # The reason is Korean. The registered hook goes through bin/gatekit.py, which
+    # makes stdout UTF-8; the script run on its own takes the encoding from here.
+    env["PYTHONIOENCODING"] = "utf-8"
     env.update(env_extra or {})
     proc = subprocess.run(
         [sys.executable, str(GATE_SCRIPT)],
         input=raw if raw is not None else json.dumps(event),
         capture_output=True,
         text=True,
+        encoding="utf-8",
         env=env,
         timeout=30,
     )
@@ -523,7 +527,7 @@ class TestSpecBeforeCode(BashGateProject):
         for cmd in ("git apply p.diff", "python3 -c \"open('x','w')\"", 'eval "$c"'):
             result = bash_gate.handle(self.event(cmd))
             self.assertIsNotNone(result, cmd)
-            self.assertIn("cannot determine", self.reason(result))
+            self.assertIn("판별할 수 없고", self.reason(result))  # the opaque denial
 
     def test_opaque_write_allowed_after_approval(self) -> None:
         self.approve()
@@ -538,14 +542,15 @@ class TestSpecBeforeCode(BashGateProject):
         result = bash_gate.handle(self.event("cat > x.ts", cwd=str(self.root / "src")))
         self.assertIsNotNone(result)
 
-    def test_reason_in_korean_when_session_is_ko(self) -> None:
-        led = ledger.Ledger.load(self.root, "sess-bash")
-        led.set_output_lang("ko")
-        led.save()
+    def test_reason_is_korean_by_default(self) -> None:
+        self.assertFalse(ledger.Ledger.exists(self.root, "sess-bash"))  # nothing stored a language
         result = bash_gate.handle(self.event("cat > src/x.ts"))
         self.assertIn("승인", self.reason(result))
+        self.assertNotIn("writing code is blocked", self.reason(result))
         opaque = bash_gate.handle(self.event("git apply p.diff"))
         self.assertIn("파일", self.reason(opaque))
+        self.assertIn("git apply p.diff", self.reason(opaque))
+        self.assertNotIn("cannot determine", self.reason(opaque))
 
     def test_non_bash_tool_is_ignored(self) -> None:
         self.assertIsNone(bash_gate.handle(self.event("cat > src/x.ts", tool="Read")))

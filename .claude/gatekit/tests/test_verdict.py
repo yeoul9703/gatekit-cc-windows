@@ -81,8 +81,12 @@ class TestRender(unittest.TestCase):
         self.assertNotEqual(ko, verdict.render("ok", "ko"))
         self.assertNotEqual(ko, verdict.render("fail", "ko"))
 
-    def test_unknown_lang_falls_back_to_english(self) -> None:
-        self.assertEqual(verdict.render("ok", "fr"), "OK")
+    def test_no_lang_and_unknown_lang_render_korean(self) -> None:
+        for v in verdict.ORDER:
+            self.assertEqual(verdict.render(v), verdict.render(v, "ko"), v)
+            self.assertEqual(verdict.render(v, "fr"), verdict.render(v, "ko"), v)
+        self.assertEqual(verdict.render("unverified"), "미검증")
+        self.assertEqual(verdict.render("banana"), "미검증")
 
     def test_unknown_verdict_renders_unverified_label(self) -> None:
         self.assertEqual(verdict.render("banana", "en"), "UNVERIFIED")

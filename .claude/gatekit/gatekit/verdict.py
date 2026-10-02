@@ -26,7 +26,7 @@ _LABELS: Dict[str, Dict[str, str]] = {
     "ko": {OK: "통과", WARN: "주의", FAIL: "실패", UNVERIFIED: "미검증"},
 }
 
-_DEFAULT_LANG = "en"
+_DEFAULT_LANG = "ko"
 
 
 def is_valid(value: Any) -> bool:
@@ -65,8 +65,7 @@ def aggregate(verdicts: Iterable[Any]) -> str:
 def render(verdict: str, lang: Optional[str] = None) -> str:
     """Return the human-readable label for *verdict* in *lang*.
 
-    Unknown languages fall back to English (never to Korean — see the
-    open-source posture rule in ARCHITECTURE.md section 0). Unknown verdicts
+    No language, or an unknown one, renders in Korean. Unknown verdicts
     render as ``unverified``.
     """
     table = _LABELS.get(lang or _DEFAULT_LANG, _LABELS[_DEFAULT_LANG])

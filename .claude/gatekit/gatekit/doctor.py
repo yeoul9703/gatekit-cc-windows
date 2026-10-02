@@ -75,8 +75,8 @@ def min_python(packages_json=None) -> tuple:
     return MIN_PYTHON
 
 
-#: Output language of the axis texts: "en" (default) or "ko" (``--lang ko``).
-_LANG = "en"
+#: Output language of the axis texts: "ko" (default) or "en" (``--lang en``).
+_LANG = "ko"
 
 #: Korean display names for the axes (the ``axis`` key of the JSON stays English).
 AXIS_NAMES_KO = {
@@ -606,7 +606,7 @@ def run(argv: list) -> int:
         if i + 1 < len(argv):
             root_arg = argv[i + 1]
     global _LANG
-    lang = "en"
+    lang = "ko"
     if "--lang" in argv:
         i = argv.index("--lang")
         if i + 1 < len(argv):
@@ -618,7 +618,7 @@ def run(argv: list) -> int:
     try:
         return _run(argv, root_arg)
     finally:
-        _LANG = "en"
+        _LANG = "ko"
 
 
 def _run(argv: list, root_arg) -> int:

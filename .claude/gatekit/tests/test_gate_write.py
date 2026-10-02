@@ -21,12 +21,16 @@ def run_gate_subprocess(event: dict, env_extra: "dict | None" = None) -> "tuple[
     """Invoke the gate exactly as Claude Code would: a script fed JSON on stdin."""
     env = {k: v for k, v in os.environ.items() if not k.startswith("GATEKIT_")}
     env.pop("PYTHONPATH", None)
+    # The reason is Korean. The registered hook goes through bin/gatekit.py, which
+    # makes stdout UTF-8; the script run on its own takes the encoding from here.
+    env["PYTHONIOENCODING"] = "utf-8"
     env.update(env_extra or {})
     proc = subprocess.run(
         [sys.executable, str(GATE_SCRIPT)],
         input=json.dumps(event),
         capture_output=True,
         text=True,
+        encoding="utf-8",
         env=env,
         timeout=30,
     )
@@ -145,20 +149,35 @@ class TestSpecBeforeCode(WriteGateProject):
         )
         self.assertIsNone(write_gate.handle(self.event(str(self.root / "src" / "app.ts"))))
 
-    def test_reason_is_korean_when_ledger_says_ko(self) -> None:
+    def test_reason_is_korean_by_default(self) -> None:
+        """No prompt was seen and no ledger exists: the denial is Korean and names the path."""
+        result = write_gate.handle(self.event(str(self.root / "src" / "app.ts")))
+        reason = result["hookSpecificOutput"]["permissionDecisionReason"]
+        self.assertIn("승인 전에는 코드를 쓸 수 없습니다", reason)
+        self.assertIn("차단된 경로: src/app.ts", reason)
+        self.assertNotIn("writing code is blocked", reason)
+
+    def test_an_english_prompt_still_gets_a_korean_denial(self) -> None:
+        """The user writes only English: the ledger says ko and the gate denies in Korean."""
         from gatekit import ledger
+        from gatekit.gates import prompt as prompt_gate
 
-        led = ledger.Ledger.load(self.root, "sess-write")
-        led.set_output_lang("ko")
-        led.save()
-        result = write_gate.handle(self.event(str(self.root / "src" / "app.ts")))
-        reason = result["hookSpecificOutput"]["permissionDecisionReason"]
-        self.assertTrue(any("가" <= ch <= "힣" for ch in reason), reason)
+        prompt_gate.handle({
+            "session_id": "sess-write", "hook_event_name": "UserPromptSubmit",
+            "cwd": str(self.root),
+            "prompt": "Please build the login screen and write the source files now.",
+        })
+        stored = json.loads(
+            (self.root / ".gatekit" / "runs" / "sess-write.json").read_text(encoding="utf-8"))
+        self.assertEqual(stored["output_lang"], "ko")
+        self.assertEqual(ledger.Ledger.load(self.root, "sess-write").output_lang, "ko")
 
-    def test_reason_is_english_by_default(self) -> None:
         result = write_gate.handle(self.event(str(self.root / "src" / "app.ts")))
+        self.assertEqual(result["hookSpecificOutput"]["permissionDecision"], "deny")
         reason = result["hookSpecificOutput"]["permissionDecisionReason"]
-        self.assertFalse(any("가" <= ch <= "힣" for ch in reason), reason)
+        self.assertIn("승인 전에는 코드를 쓸 수 없습니다", reason)
+        self.assertIn("차단된 경로: src/app.ts", reason)
+        self.assertNotIn("writing code is blocked", reason)
 
     def test_edit_tool_uses_file_path(self) -> None:
         self.assertIsNotNone(
@@ -454,6 +473,9 @@ class TestSubprocessInvocation(WriteGateProject):
         code, out, err = run_gate_subprocess(self.event(str(self.root / "src" / "app.ts")))
         self.assertEqual(code, 0, err)
         self.assertEqual(decision(out), "deny")
+        reason = json.loads(out)["hookSpecificOutput"]["permissionDecisionReason"]
+        self.assertIn("승인 전에는 코드를 쓸 수 없습니다", reason)
+        self.assertIn("src/app.ts", reason)
 
     def test_task_scope_deny_via_subprocess(self) -> None:
         approval.approve(self.root, "spec/05-gate.md")

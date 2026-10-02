@@ -83,7 +83,9 @@ class TestMeasuredHookInput(SkillProject):
                             "prompt": "please run the gatekit build"})
         self.assertIsNone(ledger.Ledger.load(self.root, session).data["active_pipeline"])
         skill_gate.handle(self.measured("gatekit-build"))
-        self.assertEqual(ledger.Ledger.load(self.root, session).data["active_pipeline"], "build")
+        led = ledger.Ledger.load(self.root, session)
+        self.assertEqual(led.data["active_pipeline"], "build")
+        self.assertEqual(led.data["output_lang"], "ko")  # the prompt was English
 
 
 class TestPipelineSkills(SkillProject):
@@ -118,12 +120,12 @@ class TestPipelineSkills(SkillProject):
         self.assertEqual(events[0]["detail"]["pipeline"], "gate")
         self.assertEqual(events[1]["detail"], {"skill": "gate"})
 
-    def test_keeps_the_stored_language(self) -> None:
-        led = self.led()
-        led.set_output_lang("ko")
-        led.save()
+    def test_a_ledger_the_skill_hook_creates_is_korean(self) -> None:
+        """A model-started skill can be the first hook of a session: the ledger it
+        writes carries Korean, and a skill name in Latin letters changes nothing."""
+        self.assertFalse(ledger.Ledger.exists(self.root, self.session))
         self.run_skill("gatekit-build")
-        self.assertEqual(self.led().output_lang, "ko")
+        self.assertEqual(self.led().data["output_lang"], "ko")
 
     def test_leading_slash_is_accepted(self) -> None:
         self.run_skill("/gatekit-verify")

@@ -261,6 +261,32 @@ class TestRunWithACwdThatIsNotText(unittest.TestCase):
         self.assertIn("TypeError", lines[0])
 
 
+class TestResultIsUtf8OnAnyConsole(unittest.TestCase):
+    """A Korean denial must reach the caller even when the console is cp1252.
+
+    Written through ``sys.stdout`` it raised ``UnicodeEncodeError``, ``run``
+    swallowed that, and the gate printed nothing: a denial became an allow.
+    """
+
+    def test_a_korean_reason_is_written_as_utf8_under_a_cp1252_console(self) -> None:
+        kit = pathlib.Path(__file__).resolve().parents[1]
+        code = (
+            "import sys; sys.path.insert(0, %r)\n"
+            "from gatekit import hookio\n"
+            "hookio.run(lambda event: hookio.deny('\\uc774 \\ud30c\\uc77c\\uc740 \\ub9c9\\ud600 \\uc788\\uc2b5\\ub2c8\\ub2e4'))\n"
+        ) % str(kit)
+        env = {k: v for k, v in os.environ.items() if k not in ("PYTHONUTF8", "PYTHONIOENCODING")}
+        env["PYTHONIOENCODING"] = "cp1252"
+        with tempfile.TemporaryDirectory() as tmp:
+            proc = subprocess.run([sys.executable, "-c", code], input=b"{}", cwd=tmp,
+                                  capture_output=True, env=env, timeout=30)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        payload = json.loads(proc.stdout.decode("utf-8"))
+        reason = payload["hookSpecificOutput"]["permissionDecisionReason"]
+        self.assertEqual(payload["hookSpecificOutput"]["permissionDecision"], "deny")
+        self.assertIn("이 파일은 막혀 있습니다", reason)
+
+
 class TestLogError(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()

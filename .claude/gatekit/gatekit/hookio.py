@@ -147,6 +147,24 @@ def _error_log_root(event: Event) -> pathlib.Path:
 # --------------------------------------------------------------------------
 # the wrapper
 # --------------------------------------------------------------------------
+def _write_result(text: str) -> None:
+    """Write the hook's JSON as UTF-8 bytes, whatever the console code page is.
+
+    The reason of a denial is Korean. Written through a cp1252 ``sys.stdout`` it
+    raised, the catch-all in :func:`run` swallowed that, and the denial turned
+    into an allow. The registered hooks go through ``bin/gatekit.py``, which
+    sets UTF-8; a gate started any other way must not depend on that.
+    """
+    buffer = getattr(sys.stdout, "buffer", None)
+    if buffer is None:  # a text-only stand-in (tests)
+        sys.stdout.write(text)
+        sys.stdout.flush()
+        return
+    sys.stdout.flush()
+    buffer.write(text.encode("utf-8"))
+    buffer.flush()
+
+
 def run(
     handler: Handler,
     stdin: Optional[TextIO] = None,
@@ -167,9 +185,7 @@ def run(
         event = read_event(stdin)
         payload = handler(event)
         if payload:
-            sys.stdout.write(json.dumps(payload, ensure_ascii=False))
-            sys.stdout.write("\n")
-            sys.stdout.flush()
+            _write_result(json.dumps(payload, ensure_ascii=False) + "\n")
     except BaseException as err:  # noqa: BLE001 - deliberate catch-all
         try:
             log_error(_error_log_root(event), str(event.get("hook_event_name") or ""), err)

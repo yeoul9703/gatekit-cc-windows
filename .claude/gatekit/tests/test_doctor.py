@@ -184,7 +184,7 @@ class TestAxisPluginFiles(DoctorTestCase):
     def test_real_checkout_has_every_gate_script_or_reports_which_is_missing(self) -> None:
         result = doctor.axis_gatekit_files(self.root)
         if result["verdict"] == verdict.FAIL:
-            self.assertIn("missing", result["detail"])
+            self.assertIn("없거나 비어 있음", result["detail"])
         else:
             self.assertEqual(result["verdict"], verdict.OK)
 
@@ -545,7 +545,8 @@ class TestAxisContractFreshness(DoctorTestCase):
         result = doctor.axis_contract_freshness(self.root)
         self.assertEqual(result["verdict"], verdict.FAIL)
         self.assertIn("spec/tokens.json", result["detail"])
-        self.assertNotIn("05-gate.md changed", result["detail"])
+        self.assertIn("계약이 낡았습니다", result["detail"])
+        self.assertNotIn("05-gate.md", result["detail"])  # the file that changed is named, not the gate
 
     def test_absent_contract_is_unverified(self) -> None:
         self._patch_status(lambda root: verdict.UNVERIFIED)
@@ -599,17 +600,9 @@ class TestAxisWorkers(DoctorTestCase):
                     self.write_config(data)
                 result = doctor.axis_workers(self.root)
                 self.assertEqual(result["verdict"], verdict.OK)
-                self.assertIn("claude not found on PATH", result["detail"])
-                self.assertIn("not used with the current settings (build.execution=host)",
-                              result["detail"])
+                self.assertIn("기본 워커 claude: PATH 에서 찾지 못함", result["detail"])
+                self.assertIn("지금 설정(build.execution=host)에서는 쓰지 않는다", result["detail"])
                 self.assertEqual(result["fix"], "")
-
-    def test_korean_detail_says_the_backend_is_not_used(self) -> None:
-        doctor._LANG = "ko"
-        self.addCleanup(setattr, doctor, "_LANG", "en")
-        result = doctor.axis_workers(self.root)
-        self.assertEqual(result["verdict"], verdict.OK)
-        self.assertIn("지금 설정(build.execution=host)에서는 쓰지 않는다", result["detail"])
 
     def test_cli_required_reads_the_two_settings(self) -> None:
         self.assertFalse(doctor.cli_required(self.root))  # no config file
@@ -677,14 +670,14 @@ class TestAxisPython(DoctorTestCase):
     def test_real_venv_meets_the_floor(self) -> None:
         result = doctor.axis_python(self.root)
         self.assertEqual(result["verdict"], verdict.OK, result)
-        self.assertIn("venv python", result["detail"])
+        self.assertRegex(result["detail"], r"^\.venv 파이썬 3\.\d+\.\d+$")
 
     def test_missing_venv_fails_and_says_hooks_are_inactive(self) -> None:
         kit = self.root / "kit"
         kit.mkdir()
         result = self.run_axis(kit)
         self.assertEqual(result["verdict"], verdict.FAIL)
-        self.assertIn("silently inactive", result["detail"])
+        self.assertIn("python.exe 가 없어 gatekit 훅이 모두 조용히 꺼져 있습니다", result["detail"])
         self.assertIn("/gatekit-setup", result["fix"])
 
     def test_uv_style_cfg_at_the_floor_is_ok(self) -> None:
@@ -740,8 +733,8 @@ class TestHooksExecForm(DoctorTestCase):
         self.write_project_settings(hooks)
         result = doctor.axis_hooks_registered(self.root)
         self.assertEqual(result["verdict"], verdict.FAIL)
-        self.assertIn("exec form", result["detail"])
-        self.assertIn("Stop", result["detail"])
+        self.assertIn("exec 형식", result["detail"])
+        self.assertTrue(result["detail"].endswith("아닌 훅: Stop"), result["detail"])
 
     def test_missing_session_start_fails(self) -> None:
         hooks = self.standalone_hooks()
@@ -852,25 +845,31 @@ class TestCli(DoctorTestCase):
             code = doctor.run([*argv, "--root", str(self.root)])
         return code, buf.getvalue()
 
-    def test_lang_ko_prints_korean_lines_and_keeps_json_axis_keys(self) -> None:
-        _, text = self._output("--lang", "ko")
+    def test_default_output_is_korean_and_keeps_json_axis_keys(self) -> None:
+        _, text = self._output()
         self.assertIn("gatekit 닥터", text)
         self.assertIn("설치 파일", text)
+        self.assertIn("이 프로젝트에 spec/ 폴더가 없습니다", text)
         self.assertIn("해결:", text)
         self.assertNotIn("fix:", text)
-        self.assertNotIn("no .gatekit/ in this project", text)
-        _, raw = self._output("--lang", "ko", "--json")
+        self.assertNotIn("gatekit doctor", text)
+        self.assertNotIn("no spec/ directory in this project", text)
+        _, raw = self._output("--json")
         axes = [a["axis"] for a in json.loads(raw)["axes"]]
         self.assertEqual(axes[:2], ["gatekit files", "hooks registered"])  # stable keys
 
-    def test_default_output_stays_english(self) -> None:
-        _, text = self._output()
-        self.assertIn("fix:", text)
-        self.assertIn("no spec/ directory in this project", text)  # unchanged wording
-        self.assertNotIn("닥터", text)
+    def test_lang_ko_is_the_default(self) -> None:
+        self.assertEqual(self._output("--lang", "ko")[1], self._output()[1])
 
-    def test_lang_en_is_the_default(self) -> None:
-        self.assertEqual(self._output("--lang", "en")[1], self._output()[1])
+    def test_lang_en_is_still_accepted(self) -> None:
+        """scripts/setup.ps1 still passes ``--lang en`` when it is run with ``-Lang en``:
+        the argument is no error and the table it asks for is the English one."""
+        code, text = self._output("--lang", "en")
+        self.assertEqual(code, self._output()[0])
+        self.assertIn("gatekit doctor", text)
+        self.assertIn("fix:", text)
+        self.assertIn("no spec/ directory in this project", text)
+        self.assertNotIn("닥터", text)
 
     def test_unknown_lang_is_refused(self) -> None:
         import contextlib
@@ -880,8 +879,8 @@ class TestCli(DoctorTestCase):
             self.assertEqual(self._output("--lang", "fr")[0], 2)
 
     def test_lang_does_not_leak_into_later_calls(self) -> None:
-        self._output("--lang", "ko")
-        self.assertEqual(doctor._LANG, "en")
+        self._output("--lang", "en")
+        self.assertEqual(doctor._LANG, "ko")
 
     def test_table_output_shows_fixes(self) -> None:
         import contextlib
@@ -890,8 +889,8 @@ class TestCli(DoctorTestCase):
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
             doctor.run(["--root", str(self.root)])
-        self.assertIn("gatekit doctor", buf.getvalue())
-        self.assertIn("fix:", buf.getvalue())
+        self.assertIn("gatekit 닥터", buf.getvalue())
+        self.assertIn("해결:", buf.getvalue())
 
 
 if __name__ == "__main__":

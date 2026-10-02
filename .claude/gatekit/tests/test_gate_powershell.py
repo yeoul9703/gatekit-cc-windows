@@ -913,7 +913,7 @@ class TestSpecBeforeCode(PowerShellGateProject):
     def test_opaque_write_denied_before_approval(self) -> None:
         for cmd in ("Set-Content $path y", "git apply p.diff", "python -c \"open('x','w')\"",
                     "iex $c", "[System.IO.File]::WriteAllText('x','y')", "Remove-Item *.ts"):
-            self.assertIn("cannot determine", self.reason(self.denied(cmd)), cmd)
+            self.assertIn("판별할 수 없고", self.reason(self.denied(cmd)), cmd)  # the opaque denial
 
     def test_opaque_write_allowed_after_approval(self) -> None:
         self.approve()
@@ -949,12 +949,14 @@ class TestSpecBeforeCode(PowerShellGateProject):
         self.allowed("Set-Content SPEC/01-prd.md y")
         self.allowed("Set-Content Spec\\new.md y")
 
-    def test_reason_in_korean_when_session_is_ko(self) -> None:
-        led = ledger.Ledger.load(self.root, "sess-ps")
-        led.set_output_lang("ko")
-        led.save()
-        self.assertIn("승인", self.reason(self.denied("Set-Content src/x.ts y")))
-        self.assertIn("파일", self.reason(self.denied("Set-Content $x y")))
+    def test_reason_is_korean_by_default(self) -> None:
+        self.assertFalse(ledger.Ledger.exists(self.root, "sess-ps"))  # nothing stored a language
+        literal = self.reason(self.denied("Set-Content src/x.ts y"))
+        self.assertIn("승인", literal)
+        self.assertNotIn("writing code is blocked", literal)
+        opaque = self.reason(self.denied("Set-Content $x y"))
+        self.assertIn("파일", opaque)
+        self.assertNotIn("cannot determine", opaque)
 
     def test_non_powershell_tool_is_ignored(self) -> None:
         self.allowed("Set-Content src/x.ts y", tool="Bash")
@@ -1003,16 +1005,10 @@ class TestReproducedBypasses(PowerShellGateProject):
         self.denied("cd docs; cd..; cd src; Set-Content n.md y")
 
     def test_a_drive_switch_before_a_relative_write_is_denied(self) -> None:
-        self.assertIn("cannot determine", self.reason(self.denied("D:; Set-Content n.md y")))
+        self.assertIn("판별할 수 없고", self.reason(self.denied("D:; Set-Content n.md y")))
         self.allowed("D:; Get-ChildItem")
 
     def test_the_denial_says_how_to_retry(self) -> None:
-        reason = self.reason(self.denied("$p = 'docs/n.md'; Set-Content $p y"))
-        self.assertIn("Write/Edit", reason)
-        self.assertIn("literal", reason)
-        led = ledger.Ledger.load(self.root, "sess-ps")
-        led.set_output_lang("ko")
-        led.save()
         reason = self.reason(self.denied("$p = 'docs/n.md'; Set-Content $p y"))
         self.assertIn("Write/Edit", reason)
         self.assertIn("리터럴", reason)

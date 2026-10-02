@@ -490,6 +490,13 @@ class TestEvaluate(JobTestCase):
         self.assertIn("unverified", text)
         self.assertIn("Do not fix", text)
 
+    def test_default_brief_asks_for_a_korean_reply(self) -> None:
+        self.assertIn("the aggregate — in ko.", jobs.evaluator_brief(self.root))
+        self.write_eval_config()
+        result = jobs.evaluate(self.root)
+        edir = self.root / ".gatekit" / "jobs" / result["job_id"] / "evaluate"
+        self.assertIn("the aggregate — in ko.", (edir / "prompt.md").read_text(encoding="utf-8"))
+
     def test_nonzero_exit_is_failed(self) -> None:
         self.write_eval_config(exit_code=3)
         self.assertEqual(jobs.evaluate(self.root)["state"], "failed")

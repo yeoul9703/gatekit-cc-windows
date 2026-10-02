@@ -176,7 +176,7 @@ elseif ($r.Code -eq 0) {
     $first = ''
     if ($r.OutLines.Count -gt 0) { $first = $r.OutLines[0] }
     $tag = 'ok'
-    if ($first -match '\s\S\s(ok|warn|unverified) \(root') { $tag = $Matches[1] }
+    if ($first -match '\s\S\s(ok|warn|unverified) \(') { $tag = $Matches[1] }
     Say $tag ('doctor: ' + $first + ' ' + (Format-Secs $r.Seconds))
 }
 else { Fail ('doctor: an axis failed / 실패한 축 있음 ' + (Format-Secs $r.Seconds)) $r.Lines }

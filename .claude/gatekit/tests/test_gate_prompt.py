@@ -60,51 +60,41 @@ class TestLedgerBootstrap(PromptProject):
         self.assertIn("prompt", kinds)
 
     def test_separate_sessions_have_separate_ledgers(self) -> None:
-        prompt_gate.handle(self.event("안녕하세요", session="s-ko"))
-        prompt_gate.handle(self.event("hello there", session="s-en"))
-        self.assertEqual(self.led("s-ko").data["output_lang"], "ko")
-        self.assertEqual(self.led("s-en").data["output_lang"], "en")
+        prompt_gate.handle(self.event("/gatekit-build", session="s-one"))
+        prompt_gate.handle(self.event("hello there", session="s-two"))
+        self.assertEqual(self.led("s-one").data["active_pipeline"], "build")
+        self.assertIsNone(self.led("s-two").data["active_pipeline"])
 
 
-class TestLanguageDetection(PromptProject):
+class TestLanguageIsKorean(PromptProject):
+    """The output language is Korean whatever the prompt is written in."""
+
     def test_korean_prompt_stores_ko(self) -> None:
         prompt_gate.handle(self.event("로그인 화면을 만들어줘"))
         self.assertEqual(self.led().data["output_lang"], "ko")
 
-    def test_english_prompt_stores_en(self) -> None:
+    def test_english_prompt_stores_ko(self) -> None:
         prompt_gate.handle(self.event("build the login screen"))
-        self.assertEqual(self.led().data["output_lang"], "en")
-
-    def test_language_is_refreshed_on_each_prompt(self) -> None:
-        prompt_gate.handle(self.event("로그인 화면을 만들어줘"))
-        self.assertEqual(self.led().data["output_lang"], "ko")
-        prompt_gate.handle(self.event("now switch to english please"))
-        self.assertEqual(self.led().data["output_lang"], "en")
-
-    def test_empty_prompt_keeps_previous_language(self) -> None:
-        prompt_gate.handle(self.event("로그인 화면을 만들어줘"))
-        prompt_gate.handle(self.event(""))
         self.assertEqual(self.led().data["output_lang"], "ko")
 
-    def test_answering_a_numbered_list_keeps_the_language(self) -> None:
-        """A bare "1" is the same keystroke in either language.
-
-        Treating a short numbered reply as English evidence would flip a
-        Korean interview to English and keep it there.
-        """
+    def test_an_english_prompt_after_a_korean_one_stays_ko(self) -> None:
         prompt_gate.handle(self.event("로그인 화면을 만들어줘"))
-        for reply in ("1", "2.", "3 ", "1 2"):
+        for reply in ("now switch to english please", "option 2 please", "", "1", "2."):
             prompt_gate.handle(self.event(reply))
             self.assertEqual(self.led().data["output_lang"], "ko", reply)
 
-    def test_a_real_english_sentence_still_switches(self) -> None:
-        prompt_gate.handle(self.event("로그인 화면을 만들어줘"))
-        prompt_gate.handle(self.event("option 2 please"))
-        self.assertEqual(self.led().data["output_lang"], "en")
+    def test_a_ledger_stored_as_english_is_rewritten(self) -> None:
+        """A session an earlier version stored as English turns Korean on its next prompt."""
+        led = self.led()
+        led.set_output_lang("en")
+        led.save()
+        self.assertEqual(self.led().output_lang, "en")
+        prompt_gate.handle(self.event("keep going in english"))
+        self.assertEqual(self.led().data["output_lang"], "ko")
 
     def test_context_reports_the_language(self) -> None:
         result = prompt_gate.handle(self.event("hello"))
-        self.assertIn("en", self.context_of(result))
+        self.assertIn("output_lang=ko", self.context_of(result))
 
 
 class TestContextPayload(PromptProject):
@@ -164,10 +154,12 @@ class TestSubprocess(PromptProject):
             payload["hookSpecificOutput"]["hookEventName"], "UserPromptSubmit"
         )
 
-    def test_korean_detected_via_subprocess(self) -> None:
-        code, _, err = self._run(self.event("로그인 화면을 만들어줘"))
+    def test_english_prompt_stores_ko_via_subprocess(self) -> None:
+        code, out, err = self._run(self.event("build the login screen"))
         self.assertEqual(code, 0, err)
         self.assertEqual(self.led().data["output_lang"], "ko")
+        context = json.loads(out)["hookSpecificOutput"]["additionalContext"]
+        self.assertIn("output_lang=ko", context)
 
     def test_internal_error_exits_zero_and_logs(self) -> None:
         runs = self.root / ".gatekit" / "runs"
@@ -312,8 +304,8 @@ class TestDiscoverPipeline(PromptProject):
 
 
 class TestLanguageFromSlashCommand(PromptProject):
-    """A slash command's tag body is not the user's words: language comes from
-    <command-args> only, and an empty args keeps the stored language."""
+    """A slash command arrives as a tagged body of Latin letters. Neither the
+    tags nor English arguments turn the session to English."""
 
     def tagged(self, name: str, args: str) -> str:
         return (
@@ -331,10 +323,10 @@ class TestLanguageFromSlashCommand(PromptProject):
         prompt_gate.handle(self.event(self.tagged("interview", "출석 앱")))
         self.assertEqual(self.led().output_lang, "ko")
 
-    def test_english_args_detect_english(self) -> None:
-        prompt_gate.handle(self.event("러닝크루"))
+    def test_english_args_stay_korean(self) -> None:
         prompt_gate.handle(self.event(self.tagged("interview", "an attendance app for my running crew")))
-        self.assertEqual(self.led().output_lang, "en")
+        self.assertEqual(self.led().output_lang, "ko")
+        self.assertEqual(self.led().data["active_pipeline"], "interview")
 
 
 class TestQuestionFlagsInContext(unittest.TestCase):

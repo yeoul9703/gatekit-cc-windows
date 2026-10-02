@@ -293,7 +293,7 @@ def render(report: Dict[str, Any], lang: str) -> str:
 def main(argv: List[str]) -> int:
     parser = argparse.ArgumentParser(prog="tokens", add_help=True)
     parser.add_argument("--root", default=".")
-    parser.add_argument("--lang", default="en", choices=("ko", "en"))
+    parser.add_argument("--lang", default="ko", choices=("ko", "en"))
     parser.add_argument("--json", action="store_true")
     parser.add_argument("globs", nargs="*")
     try:

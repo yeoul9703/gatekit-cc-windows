@@ -34,7 +34,7 @@ class TestLoadAndSave(TempProject):
         led = ledger.Ledger.load(self.root, "sess-1")
         self.assertEqual(led.data["version"], 1)
         self.assertEqual(led.data["session_id"], "sess-1")
-        self.assertEqual(led.data["output_lang"], "en")
+        self.assertEqual(led.data["output_lang"], "ko")
         self.assertIsNone(led.data["active_pipeline"])
         self.assertEqual(led.data["questions"]["asked"], 0)
         self.assertEqual(led.data["questions"]["max_calls"], 2)
@@ -50,12 +50,27 @@ class TestLoadAndSave(TempProject):
 
     def test_save_then_load_roundtrips(self) -> None:
         led = ledger.Ledger.load(self.root, "sess-1")
-        led.data["output_lang"] = "ko"
+        led.data["questions"]["asked"] = 3
         led.data["active_pipeline"] = "build"
         led.save()
         again = ledger.Ledger.load(self.root, "sess-1")
-        self.assertEqual(again.data["output_lang"], "ko")
+        self.assertEqual(again.data["questions"]["asked"], 3)
         self.assertEqual(again.data["active_pipeline"], "build")
+
+    def test_output_lang_defaults_to_korean(self) -> None:
+        led = ledger.Ledger.load(self.root, "sess-1")
+        self.assertEqual(led.output_lang, "ko")
+        for unknown in ("fr", "", None, 7):
+            led.data["output_lang"] = unknown
+            self.assertEqual(led.output_lang, "ko", repr(unknown))
+            led.set_output_lang(unknown)  # type: ignore[arg-type]
+            self.assertEqual(led.data["output_lang"], "ko", repr(unknown))
+
+    def test_a_ledger_without_output_lang_is_backfilled_as_korean(self) -> None:
+        target = self.ledger_path("sess-1")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(json.dumps({"version": 1, "session_id": "sess-1"}), encoding="utf-8")
+        self.assertEqual(ledger.Ledger.load(self.root, "sess-1").data["output_lang"], "ko")
 
     def test_save_updates_timestamp(self) -> None:
         led = ledger.Ledger.load(self.root, "sess-1")
@@ -71,13 +86,13 @@ class TestLoadAndSave(TempProject):
 
     def test_strict_session_resolution_no_recent_file_fallback(self) -> None:
         first = ledger.Ledger.load(self.root, "sess-1")
-        first.data["output_lang"] = "ko"
+        first.data["questions"]["asked"] = 3
         first.data["active_pipeline"] = "verify"
         first.save()
         # A different session must get a fresh ledger, never sess-1's content.
         second = ledger.Ledger.load(self.root, "sess-2")
         self.assertEqual(second.data["session_id"], "sess-2")
-        self.assertEqual(second.data["output_lang"], "en")
+        self.assertEqual(second.data["questions"]["asked"], 0)
         self.assertIsNone(second.data["active_pipeline"])
 
     def test_corrupt_ledger_is_replaced_not_raised(self) -> None:

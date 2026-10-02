@@ -180,30 +180,36 @@ class TestAllowing(StopProject):
 
 
 class TestLanguage(StopProject):
-    def test_korean_reason(self) -> None:
-        self.failing()
-        led = self.led()
-        led.data["active_pipeline"] = "build"
-        led.set_output_lang("ko")
-        led.save()
-        reason = stop_gate.handle(self.event())["reason"]
-        self.assertTrue(any("가" <= ch <= "힣" for ch in reason), reason)
-
-    def test_english_reason_by_default(self) -> None:
+    def test_korean_reason_by_default(self) -> None:
         self.failing()
         self.set_pipeline("build")
         reason = stop_gate.handle(self.event())["reason"]
-        self.assertFalse(any("가" <= ch <= "힣" for ch in reason), reason)
+        self.assertIn("완료 계약을 충족하지 못했으므로", reason)
+        self.assertNotIn("the completion contract is not met", reason)
+
+    def test_korean_stale_reason_by_default(self) -> None:
+        self.passing()
+        self.set_pipeline("build")
+        self.gate_md.write_text(
+            self.gate_md.read_text(encoding="utf-8") + "\nedited\n", encoding="utf-8"
+        )
+        reason = stop_gate.handle(self.event())["reason"]
+        self.assertIn("판정할 수 없습니다", reason)
+        self.assertIn("contract derive", reason)
 
 
 class TestSubprocess(StopProject):
     def _run(self, event: dict) -> "tuple[int, str, str]":
         env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
+        # The reason is Korean. The registered hook goes through bin/gatekit.py, which
+        # makes stdout UTF-8; the script run on its own takes the encoding from here.
+        env["PYTHONIOENCODING"] = "utf-8"
         proc = subprocess.run(
             [sys.executable, str(GATE_SCRIPT)],
             input=json.dumps(event),
             capture_output=True,
             text=True,
+            encoding="utf-8",
             env=env,
             timeout=60,
         )
@@ -223,7 +229,8 @@ class TestSubprocess(StopProject):
         self.assertEqual(code, 0, err)
         payload = json.loads(out)
         self.assertEqual(payload["decision"], "block")
-        self.assertIn("reason", payload)
+        self.assertIn("bad-crit", payload["reason"])
+        self.assertIn("완료 계약", payload["reason"])
 
     def test_internal_error_exits_zero_and_logs(self) -> None:
         self.failing()

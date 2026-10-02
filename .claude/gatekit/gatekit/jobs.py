@@ -855,11 +855,11 @@ writes, and any attempt to write is itself a finding against you.
 """
 
 
-def evaluator_brief(root, lang: str = "en") -> str:
+def evaluator_brief(root, lang: str = "ko") -> str:
     return EVALUATOR_BRIEF.format(launcher=paths.cli_invocation(), lang=lang)
 
 
-def evaluate(root, backend_name=None, prompt_path=None, timeout_s=None, lang: str = "en",
+def evaluate(root, backend_name=None, prompt_path=None, timeout_s=None, lang: str = "ko",
              force_read_only_evaluator: bool = False) -> dict:
     """Run one worker as the independent evaluator.
 
@@ -2213,7 +2213,7 @@ def run(argv: list) -> int:
                 root,
                 backend_name=_opt(rest, "--backend"),
                 prompt_path=_opt(rest, "--prompt"),
-                lang=_opt(rest, "--lang") or "en",
+                lang=_opt(rest, "--lang") or "ko",
                 force_read_only_evaluator="--force-read-only-evaluator" in rest,
             )
             if "--json" in rest:

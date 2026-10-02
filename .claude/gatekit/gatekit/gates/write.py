@@ -310,11 +310,11 @@ def decide_path(root: pathlib.Path, raw_path: str, lang: str) -> Optional[Dict[s
 
 
 def session_lang(root: pathlib.Path, event: Dict[str, Any]) -> str:
-    """Read the session's output language, defaulting to English."""
+    """Read the session's output language, defaulting to Korean."""
     try:
         return ledger.Ledger.load(root, hookio.session_id(event)).output_lang
     except Exception:  # noqa: BLE001 - language must never break the gate
-        return "en"
+        return "ko"
 
 
 def handle(event: Dict[str, Any]) -> Optional[Dict[str, Any]]:

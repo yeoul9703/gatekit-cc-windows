@@ -78,7 +78,7 @@ def _blank(session_id: str) -> Dict[str, Any]:
         "session_id": session_id,
         "created_at": now,
         "updated_at": now,
-        "output_lang": "en",
+        "output_lang": "ko",
         "active_pipeline": None,
         "questions": {"asked": 0, "max_calls": 2, "budget_exceeded": False},
         "scopes": [],
@@ -432,10 +432,10 @@ class Ledger:
     @property
     def output_lang(self) -> str:
         value = self.data.get("output_lang")
-        return value if value in ("ko", "en") else "en"
+        return value if value in ("ko", "en") else "ko"
 
     def set_output_lang(self, value: str) -> None:
-        self.data["output_lang"] = value if value in ("ko", "en") else "en"
+        self.data["output_lang"] = value if value in ("ko", "en") else "ko"
 
     def set_pipeline(self, name: Optional[str]) -> bool:
         """Set ``active_pipeline`` to *name* (``None`` clears it).
