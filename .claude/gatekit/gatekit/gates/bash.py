@@ -20,6 +20,17 @@ no execution — and it is deliberately conservative:
 * Programs invoked by name (``npm run build``, ``python3 script.py``) are
   outside its reach: it reads shell syntax, not what every binary does.
 
+What it reads of the shell grammar: the command after a reserved word
+(``if``/``then``/``else``/``elif``/``do``/``while``/``until``/``!``/``{``),
+the body of a function definition, the body of a command substitution
+(``$(...)`` and backticks, inside double quotes as well) and ``#`` comments.
+
+What it does not read (known limits, ADR-0004): brace expansion
+(``touch docs/{a.md,../src/x.ts}`` is judged as one path), a ``<<word`` inside
+quotes or arithmetic (taken for a here-document, the lines after it are
+dropped) and a quoted argument made only of operator characters
+(``rm ';' x`` is split at the ``;``).
+
 Denial reasons are written in the session's ``output_lang``.
 """
 from __future__ import annotations
@@ -47,6 +58,29 @@ _SEPARATORS = {";", "&&", "||", "|", "&", "|&", "(", ")", ";;"}
 
 #: Shell wrappers whose real command follows after their own options.
 _WRAPPERS = {"sudo", "doas", "env", "nohup", "time", "nice", "command", "exec", "builtin"}
+
+#: Reserved words that open or close a command list. The command after one
+#: (``then rm x``, ``do cp a b``, ``! rm x``, ``{ rm x``) is read like any other.
+_KEYWORDS = {"if", "then", "else", "elif", "fi", "do", "done", "while", "until", "!", "{", "}", "esac"}
+
+#: Reserved words followed by a name and a list of data: ``for f in a b``,
+#: ``select f in a b``, ``case x in``.
+_HEADERS = {"for", "select", "case"}
+
+#: Command substitutions and ``sh -c`` scripts nested deeper than this are not read.
+_MAX_DEPTH = 12
+
+#: After this many unquoted substitutions that are never closed, the closing
+#: bracket is no longer searched for: each search reads to the end of the text,
+#: and bash runs nothing after the first one anyway.
+_MAX_UNCLOSED = 16
+
+#: Stands in the prepared text for a command substitution whose body was
+#: lifted out. The ``$`` keeps the word it sits in unresolvable as a path.
+_SUB_RE = re.compile("\\$\x00(\\d+)\x00")
+
+#: Inside backticks a backslash escapes only these three characters.
+_BACKTICK_ESCAPE_RE = re.compile(r"\\([\\`$])")
 
 #: Commands that rewrite the working tree at paths we cannot read off argv.
 _GIT_OPAQUE = {
@@ -144,42 +178,146 @@ def _strip_heredocs(text: str) -> str:
     return "\n".join(out)
 
 
-def _newlines_to_separators(text: str) -> str:
-    """Turn unquoted newlines into ``;`` so lines are separate commands."""
+def _close_backtick(text: str, i: int) -> int:
+    """Index of the backtick closing a substitution whose body starts at *i*; -1 if none."""
+    n = len(text)
+    while i < n:
+        if text[i] == "\\":
+            i += 2
+            continue
+        if text[i] == "`":
+            return i
+        i += 1
+    return -1
+
+
+def _close_paren(text: str, i: int) -> int:
+    """Index of the ``)`` closing a ``$(`` whose body starts at *i*; -1 if none.
+
+    Quotes inside the body are skipped, and a ``$(`` inside double quotes
+    nests. A ``)`` that closes a ``case`` pattern is not told apart: the body
+    then ends early and the rest is read as part of the outer command.
+    """
+    stack = [")"]
+    n = len(text)
+    while i < n:
+        ch = text[i]
+        if ch == "\\":
+            i += 2
+            continue
+        if ch == "`":
+            i = _close_backtick(text, i + 1)
+            if i < 0:
+                return -1
+        elif stack[-1] == '"':
+            if ch == '"':
+                stack.pop()
+            elif ch == "$" and text.startswith("(", i + 1):
+                stack.append(")")
+                i += 1
+        elif ch == "'":
+            i = text.find("'", i + 1)
+            if i < 0:
+                return -1
+        elif ch == '"':
+            stack.append('"')
+        elif ch == "(":
+            stack.append(")")
+        elif ch == ")":
+            stack.pop()
+            if not stack:
+                return i
+        i += 1
+    return -1
+
+
+def _prepare(text: str) -> Tuple[str, List[str]]:
+    """Make *text* ready for the tokenizer: (prepared text, substitution bodies).
+
+    Outside quotes a newline becomes ``;`` so lines are separate commands, and
+    a ``#`` comment is dropped up to its newline. A backslash-newline joins
+    two lines. A command substitution — ``$(...)`` or backticks, inside double
+    quotes as well — is lifted out: its body goes into the returned list, to
+    be read as commands of its own, and a placeholder (:data:`_SUB_RE`) takes
+    its place. ``$((`` is arithmetic and stays as it is; so does an unquoted
+    substitution that is never closed (the tokenizer splits it at the ``(``).
+    """
     out: List[str] = []
-    quote: Optional[str] = None
-    escaped = False
-    for ch in text:
-        if escaped:
+    subs: List[str] = []
+    quote = ""
+    start = True  # at the start of a word, where a # opens a comment
+    misses = 0    # unquoted substitutions found to be never closed
+    i, n = 0, len(text)
+    while i < n:
+        ch = text[i]
+        if quote == "'":
             out.append(ch)
-            escaped = False
+            if ch == "'":
+                quote = ""
+            i += 1
             continue
-        if ch == "\\" and quote != "'":
-            out.append(ch)
-            escaped = True
+        if ch == "\\":
+            if text.startswith("\n", i + 1):
+                i += 2  # a line continuation: the shell removes both characters
+                continue
+            out.append(text[i:i + 2])
+            i += 2
+            start = False
             continue
-        if quote:
-            if ch == quote:
-                quote = None
+        end = -1
+        opener = ch == "`" or (
+            ch == "$" and text.startswith("(", i + 1) and not text.startswith("(", i + 2))
+        if opener and (quote or misses < _MAX_UNCLOSED):
+            end = _close_backtick(text, i + 1) if ch == "`" else _close_paren(text, i + 2)
+            if end < 0 and quote:
+                # Never closed, inside double quotes: bash refuses to run this,
+                # or the scan above lost its way. The rest is read as the body,
+                # so nothing in it passes unread.
+                end = n
+            elif end < 0:
+                misses += 1  # unquoted: the tokenizer splits it at the parenthesis
+        if end >= 0:
+            body = text[i + 2:end] if ch == "$" else _BACKTICK_ESCAPE_RE.sub(r"\1", text[i + 1:end])
+            out.append("$\x00%d\x00" % len(subs))
+            subs.append(body)
+            i = end + 1
+            start = False
+            continue
+        if quote:  # inside double quotes
+            if ch == '"':
+                quote = ""
             out.append(ch)
+            i += 1
             continue
         if ch in ("'", '"'):
             quote = ch
-            out.append(ch)
+        elif ch == "#" and start:
+            end = text.find("\n", i)
+            i = n if end < 0 else end
             continue
-        out.append(";" if ch == "\n" else ch)
-    return "".join(out)
+        elif ch == "\n":
+            ch = ";"
+        out.append(ch)
+        start = ch in " \t;&|()<>"
+        i += 1
+    return "".join(out), subs
 
 
-def _tokens(command: str) -> Optional[List[str]]:
-    """Tokenize with shell operators kept as their own tokens; ``None`` if unlexable."""
-    prepared = _newlines_to_separators(_strip_heredocs(command))
+def _tokens(command: str, heredocs: bool = True) -> Tuple[Optional[List[str]], List[str]]:
+    """Tokenize with shell operators kept as their own tokens.
+
+    Returns the tokens (``None`` if unlexable) and the bodies of the command
+    substitutions the tokens refer to by placeholder. *heredocs* is off for
+    text whose here-document bodies were already removed.
+    """
+    prepared, subs = _prepare(_strip_heredocs(command) if heredocs else command)
     lexer = shlex.shlex(prepared, posix=True, punctuation_chars=True)
     lexer.whitespace_split = True
+    lexer.commenters = ""  # _prepare dropped the comments; a # inside a word is text
     try:
-        return list(lexer)
+        return list(lexer), subs
     except ValueError:
-        return None
+        return None, subs
 
 
 def _is_operator(token: str) -> bool:
@@ -273,12 +411,29 @@ def _pull_redirects(words: List[str], result: WriteTargets, cwd: Optional[str]) 
 
 
 def _strip_wrappers(words: List[str]) -> List[str]:
-    """Drop ``sudo``/``env``/``VAR=x`` prefixes to reach the real command."""
+    """Drop reserved words and ``sudo``/``env``/``VAR=x`` prefixes to reach the real command.
+
+    ``then rm x``, ``do cp a b``, ``! rm x`` and ``{ rm x`` are the command
+    after the reserved word; ``function f { rm x`` is the command after the
+    name and the brace. A ``for``/``select``/``case`` header names a variable
+    and lists data: nothing in it is a command.
+    """
     index = 0
     while index < len(words):
         word = words[index]
         if re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", word):
             index += 1
+            continue
+        if word in _KEYWORDS:
+            index += 1
+            continue
+        if word == "function":
+            index += 2  # the word and the function's name
+            continue
+        if word in _HEADERS:
+            if words[index + 2:index + 3] == ["in"]:
+                return []
+            index += 2  # ``for f do rm x``: the list may follow without ``in``
             continue
         if word in _WRAPPERS:
             index += 1
@@ -401,7 +556,14 @@ def git_subcommand_index(args: List[str]) -> Optional[int]:
     return None
 
 
-def _analyze(words: List[str], result: WriteTargets, cwd: Optional[str]) -> Optional[str]:
+def _merge(result: WriteTargets, nested: WriteTargets) -> None:
+    """Add what a nested script or substitution writes to *result*."""
+    result.targets.extend(t for t in nested.targets if t not in result.targets)
+    if nested.opaque:
+        result.mark_opaque(nested.why)
+
+
+def _analyze(words: List[str], result: WriteTargets, cwd: Optional[str], depth: int = 0) -> Optional[str]:
     """Inspect one simple command. Returns the new cwd (or ``None`` = unknown)."""
     args = _pull_redirects(words, result, cwd)
     args = _strip_wrappers(args)
@@ -418,10 +580,9 @@ def _analyze(words: List[str], result: WriteTargets, cwd: Optional[str]) -> Opti
     if name in _SHELLS:
         if "-c" in rest:
             script = rest[rest.index("-c") + 1] if rest.index("-c") + 1 < len(rest) else ""
-            nested = extract_write_targets(script, cwd)
-            result.targets.extend(t for t in nested.targets if t not in result.targets)
-            if nested.opaque:
-                result.mark_opaque(nested.why)
+            # A substitution in the script was already read by the caller
+            # (the outer shell runs it); inside the script it is a variable.
+            _merge(result, _extract(_SUB_RE.sub("$_", script), cwd, depth + 1))
         return cwd
 
     if name in _OPAQUE_PROGRAMS:
@@ -527,14 +688,33 @@ def extract_write_targets(command: str, cwd: Optional[str]) -> WriteTargets:
     ``cwd`` may be ``None`` when the working directory is itself unknown, in
     which case every relative target makes the result opaque.
     """
+    return _extract(command.replace("\x00", ""), cwd, 0)
+
+
+def _extract(command: str, cwd: Optional[str], depth: int, heredocs: bool = True) -> WriteTargets:
+    """:func:`extract_write_targets` at nesting level *depth*.
+
+    The body of a command substitution is read with the cwd of the simple
+    command it sits in, as commands of its own: what it writes is added to the
+    result, and a ``cd`` inside it stays inside it.
+    """
     result = WriteTargets()
-    tokens = _tokens(command)
+    if depth > _MAX_DEPTH:
+        result.mark_opaque("nesting too deep")
+        return result
+    tokens, subs = _tokens(command, heredocs)
     if tokens is None:
         result.mark_opaque("unbalanced quotes")
         return result
     current = cwd
     for simple in _split_simple(tokens):
-        current = _analyze(simple, result, current)
+        for word in simple:
+            for match in _SUB_RE.finditer(word):
+                index = int(match.group(1))
+                if index < len(subs):
+                    # here-document bodies were removed from the whole text already
+                    _merge(result, _extract(subs[index], current, depth + 1, heredocs=False))
+        current = _analyze(simple, result, current, depth)
     return result
 
 

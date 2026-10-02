@@ -11,7 +11,7 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from gatekit import approval, ledger  # noqa: E402
+from gatekit import approval, ledger, paths  # noqa: E402
 from gatekit.gates import bash as bash_gate  # noqa: E402
 
 GATE_SCRIPT = pathlib.Path(__file__).resolve().parents[1] / "gatekit" / "gates" / "bash.py"
@@ -150,7 +150,7 @@ class TestExtractCommands(unittest.TestCase):
         self.assertEqual(targets_of("node scripts/build.js"), ([], False))
 
     def test_eval_xargs_find_exec_are_opaque(self) -> None:
-        for cmd in ('eval "$cmd"', "ls | xargs rm", "find . -name '*.o' -exec rm {} \;", "find . -delete"):
+        for cmd in ('eval "$cmd"', "ls | xargs rm", r"find . -name '*.o' -exec rm {} \;", "find . -delete"):
             self.assertTrue(targets_of(cmd)[1], cmd)
 
     def test_git_init_and_clone_are_opaque(self) -> None:
@@ -211,6 +211,167 @@ class TestExtractCommands(unittest.TestCase):
         self.assertEqual(targets_of("env FOO=1 cat > x"), (["x"], False))
         self.assertEqual(targets_of("FOO=1 BAR=2 cat > x"), (["x"], False))
         self.assertEqual(targets_of("nohup cat > x"), (["x"], False))
+
+
+class TestExtractCompound(unittest.TestCase):
+    """The command after a reserved word is read like any other."""
+
+    def test_command_after_a_reserved_word(self) -> None:
+        for cmd in (
+            "if true; then rm src/x.ts; fi",
+            "if false; then :; else rm src/x.ts; fi",
+            "if false; then :; elif true; then rm src/x.ts; fi",
+            "if rm src/x.ts; then :; fi",
+            "if ! rm src/x.ts; then :; fi",
+            "while true; do rm src/x.ts; break; done",
+            "until rm src/x.ts; do :; done",
+            "for f in a; do rm src/x.ts; done",
+            "for f do rm src/x.ts; done",
+            "case x in x) rm src/x.ts;; esac",
+            "{ rm src/x.ts; }",
+            "! rm src/x.ts",
+            "time rm src/x.ts",
+            "f() { rm src/x.ts; }; f",
+            "function f { rm src/x.ts; }; f",
+            "if true\nthen\n  rm src/x.ts\nfi",
+            "for f in a\ndo\n  rm src/x.ts\ndone",
+            "if true; then sudo rm src/x.ts; fi",
+            "for f in a; do A=1 rm src/x.ts; done",
+        ):
+            self.assertEqual(targets_of(cmd), (["src/x.ts"], False), cmd)
+
+    def test_every_writer_is_read_after_a_reserved_word(self) -> None:
+        self.assertEqual(targets_of("for f in a; do cp a src/x.ts; done"), (["src/x.ts"], False))
+        self.assertEqual(targets_of("if true; then touch a b; fi"), (["a", "b"], False))
+        self.assertEqual(targets_of("if true; then make | tee build.log; fi"), (["build.log"], False))
+        self.assertEqual(targets_of("while read l; do sed -i s/a/b/ src/x.ts; done"), (["src/x.ts"], False))
+        self.assertTrue(targets_of("if true; then git apply p.diff; fi")[1])
+        self.assertTrue(targets_of("for f in a; do rm $f; done")[1])
+
+    def test_redirect_on_a_compound_command(self) -> None:
+        self.assertEqual(targets_of("for f in a; do echo $f; done > src/x.ts"), (["src/x.ts"], False))
+        self.assertEqual(targets_of("{ echo a; echo b; } >> src/x.ts"), (["src/x.ts"], False))
+
+    def test_loop_header_and_case_subject_are_data(self) -> None:
+        for cmd in ("for rm in a b; do echo $rm; done", "for f in rm src/x.ts; do echo $f; done",
+                    "case rm in rm) echo hi;; esac", "select cp in a b; do echo $cp; done"):
+            self.assertEqual(targets_of(cmd), ([], False), cmd)
+
+    def test_cd_inside_a_block_is_followed(self) -> None:
+        self.assertEqual(targets_of("{ cd src; cat > x.ts; }"), (["src/x.ts"], False))
+        self.assertEqual(targets_of("if true; then cd src && cat > x.ts; fi"), (["src/x.ts"], False))
+
+    def test_read_only_compound_commands_write_nothing(self) -> None:
+        for cmd in (
+            "if [ -f src/x.ts ]; then cat src/x.ts; fi",
+            "for f in src/*.ts; do wc -l \"$f\"; done",
+            "while read -r line; do echo \"$line\"; done < in.txt",
+            "if git diff --quiet; then echo clean; else git status; fi",
+            "case \"$1\" in a) ls;; *) git log;; esac",
+            "{ ls; git status; } | head",
+            "! grep -q x a.txt",
+            "f() { ls -la; }; f",
+        ):
+            self.assertEqual(targets_of(cmd), ([], False), cmd)
+
+
+class TestExtractSubstitution(unittest.TestCase):
+    """The body of a command substitution is read as commands of its own."""
+
+    def test_body_inside_double_quotes(self) -> None:
+        for cmd in ('echo "$(touch src/x.ts)"', 'x="$(echo hi >> src/x.ts)"',
+                    'echo "a $(rm src/x.ts) b"', 'git commit -m "$(cat > src/x.ts)"'):
+            self.assertEqual(targets_of(cmd), (["src/x.ts"], False), cmd)
+
+    def test_body_inside_backticks(self) -> None:
+        for cmd in ("echo `touch src/x.ts`", 'echo "`touch src/x.ts`"', "x=`rm src/x.ts`",
+                    "echo `echo hi; rm src/x.ts`"):
+            self.assertEqual(targets_of(cmd), (["src/x.ts"], False), cmd)
+
+    def test_unquoted_body(self) -> None:
+        self.assertEqual(targets_of("echo $(touch src/x.ts)"), (["src/x.ts"], False))
+        self.assertEqual(targets_of("x=$(rm src/x.ts)"), (["src/x.ts"], False))
+
+    def test_nested_bodies(self) -> None:
+        self.assertEqual(targets_of('echo "$(echo "$(touch src/x.ts)")"'), (["src/x.ts"], False))
+        self.assertEqual(targets_of("echo $(echo `touch src/x.ts`)"), (["src/x.ts"], False))
+        self.assertEqual(targets_of('if true; then echo "$(rm src/x.ts)"; fi'), (["src/x.ts"], False))
+
+    def test_single_quoted_or_escaped_text_is_not_a_substitution(self) -> None:
+        for cmd in ("echo '$(touch src/x.ts)'", "echo '`touch src/x.ts`'", 'echo "\\$(touch src/x.ts)"',
+                    "echo \\`touch src/x.ts\\`"):
+            self.assertEqual(targets_of(cmd)[0], [], cmd)
+
+    def test_arithmetic_is_not_a_substitution(self) -> None:
+        self.assertEqual(targets_of('echo "$((1 > 2))"'), ([], False))
+        self.assertEqual(targets_of('echo "$(( $(cat > src/x.ts) + 1 ))"'), (["src/x.ts"], False))
+
+    def test_body_is_read_with_the_cwd_of_its_command(self) -> None:
+        self.assertEqual(targets_of('cd src && echo "$(cat > x.ts)"'), (["src/x.ts"], False))
+        # a cd inside the body stays inside it
+        self.assertEqual(targets_of('echo "$(cd src && cat > y.ts)"; cat > x.ts'), (["src/y.ts", "x.ts"], False))
+
+    def test_substitution_as_a_write_target_is_opaque(self) -> None:
+        self.assertTrue(targets_of('cat > "$(mktemp)"')[1])
+        self.assertTrue(targets_of("rm $(ls)")[1])
+        self.assertTrue(targets_of('cp a "$(dirname b)/c"')[1])
+
+    def test_read_only_substitutions_write_nothing(self) -> None:
+        for cmd in ('echo "$(git rev-parse HEAD)"', "x=$(ls | wc -l)", "echo `date`",
+                    'echo "today is $(date +%F), files: `ls | wc -l`"', 'n="$(cat a.txt | wc -l)"; echo "$n"'):
+            self.assertEqual(targets_of(cmd), ([], False), cmd)
+
+    def test_nested_shell_script(self) -> None:
+        self.assertEqual(targets_of("bash -c 'echo \"$(touch src/x.ts)\"'"), (["src/x.ts"], False))
+        self.assertEqual(targets_of('bash -c "echo $(touch src/x.ts)"'), (["src/x.ts"], False))
+
+    def test_here_document_body_stays_data(self) -> None:
+        cmd = "cat > docs/a.md <<'EOF'\nrun `rm src/x.ts` or $(rm src/y.ts)\nEOF"
+        self.assertEqual(targets_of(cmd), (["docs/a.md"], False))
+        cmd = 'x="$(cat <<EOF\nrm a\nEOF\n)"\ntouch src/x.ts'
+        self.assertEqual(targets_of(cmd), (["src/x.ts"], False))
+
+    def test_commit_message_from_a_here_document(self) -> None:
+        cmd = ("git commit -m \"$(cat <<'EOF'\nfix: drop the `rm -rf build` call > x\n\n"
+               "Co-Authored-By: someone\nEOF\n)\"")
+        self.assertEqual(targets_of(cmd), ([], False))
+
+    def test_nesting_too_deep_is_opaque(self) -> None:
+        self.assertTrue(targets_of("echo " + "$(" * 20 + "ls" + ")" * 20)[1])
+        self.assertEqual(targets_of("echo " + "$(" * 5 + "ls" + ")" * 5), ([], False))
+
+    def test_substitution_never_closed(self) -> None:
+        # unquoted: the tokenizer splits at the parenthesis and the write is read
+        self.assertEqual(targets_of("echo $(touch src/x.ts")[0], ["src/x.ts"])
+        # inside double quotes the rest of the text is the body, and it does not lex
+        self.assertTrue(targets_of('echo "$(touch src/x.ts"')[1])
+        self.assertTrue(targets_of("echo \"$(touch src/x.ts # don't\n)\"")[1])
+        self.assertTrue(targets_of('echo "`touch src/x.ts"')[1])
+
+
+class TestExtractComments(unittest.TestCase):
+    """A comment ends at its newline: the lines after it are still commands."""
+
+    def test_command_after_a_comment_line(self) -> None:
+        for cmd in ("# note\ntouch src/x.ts", "echo a # note\ntouch src/x.ts",
+                    "# it's a note with a quote\ntouch src/x.ts", "ls\n  # indented\ntouch src/x.ts"):
+            self.assertEqual(targets_of(cmd), (["src/x.ts"], False), cmd)
+
+    def test_commented_text_is_not_a_command(self) -> None:
+        self.assertEqual(targets_of("touch src/x.ts # > src/y.ts"), (["src/x.ts"], False))
+        self.assertEqual(targets_of("ls # rm src/x.ts"), ([], False))
+
+    def test_hash_inside_a_word_or_quotes_is_text(self) -> None:
+        self.assertEqual(targets_of("echo a#b; touch src/x.ts"), (["src/x.ts"], False))
+        self.assertEqual(targets_of("echo '# not a comment' > src/x.ts"), (["src/x.ts"], False))
+        self.assertEqual(targets_of("curl https://x/#frag -o src/x.ts"), (["src/x.ts"], False))
+        self.assertEqual(targets_of('echo "$#" ${#x} $((16#ff)) > src/x.ts'), (["src/x.ts"], False))
+
+    def test_line_continuation_joins_two_lines(self) -> None:
+        self.assertEqual(targets_of("rm -f \\\n  docs/a.md"), (["docs/a.md"], False))
+        self.assertEqual(targets_of("curl -s https://x \\\n  -o src/x.ts"), (["src/x.ts"], False))
+        self.assertEqual(targets_of("touch docs/\\\n../src/x.ts"), (["src/x.ts"], False))
+        self.assertEqual(targets_of("echo 'a \\\n b' > src/x.ts"), (["src/x.ts"], False))
 
 
 class TestExtractCwd(unittest.TestCase):
@@ -319,6 +480,45 @@ class TestSpecBeforeCode(BashGateProject):
         self.assertIsNone(bash_gate.handle(self.event("ls -la src | grep ts > /dev/null")))
         self.assertIsNone(bash_gate.handle(self.event("git status && cat src/x.ts")))
 
+    def test_write_inside_a_compound_command_denied(self) -> None:
+        for cmd in ("if true; then rm src/x.ts; fi", "for f in a; do cp a src/x.ts; done",
+                    "{ rm src/x.ts; }", "! rm src/x.ts", "while true; do touch src/x.ts; break; done"):
+            result = bash_gate.handle(self.event(cmd))
+            self.assertIsNotNone(result, cmd)
+            self.assertIn("src/x.ts", self.reason(result))
+
+    def test_write_inside_a_command_substitution_denied(self) -> None:
+        for cmd in ('echo "$(touch src/x.ts)"', "echo `touch src/x.ts`", 'x="$(echo hi >> src/x.ts)"'):
+            result = bash_gate.handle(self.event(cmd))
+            self.assertIsNotNone(result, cmd)
+            self.assertIn("src/x.ts", self.reason(result))
+
+    def test_write_after_a_comment_line_denied(self) -> None:
+        self.assertIsNotNone(bash_gate.handle(self.event("# note\ntouch src/x.ts")))
+
+    def test_compound_command_writing_to_docs_allowed(self) -> None:
+        self.assertIsNone(bash_gate.handle(self.event("if [ -d docs ]; then cat > docs/notes.md; fi")))
+        self.assertIsNone(bash_gate.handle(self.event('echo "$(date)" > docs/notes.md')))
+
+    def test_common_read_only_commands_allowed(self) -> None:
+        for cmd in (
+            "if [ -f src/x.ts ]; then cat src/x.ts; fi",
+            "for f in src/*.ts; do wc -l \"$f\"; done",
+            'echo "$(git rev-parse HEAD)"',
+            'echo "$((1 > 2))"',
+            "# list the sources\nls -la src | head",
+            "npm run build && npm test",
+            "git status && git diff --stat",
+        ):
+            self.assertIsNone(bash_gate.handle(self.event(cmd)), cmd)
+
+    def test_gatekit_cli_commands_of_the_skills_allowed(self) -> None:
+        for tail in ("spec validate --json", "contract derive", "contract run --json", "doctor",
+                     "approve check spec/05-gate.md", "jobs start", "jobs status",
+                     "lang --file spec/01-prd.md --lines 40", "design merge-preset warm"):
+            cmd = paths.CLI_INVOCATION + " " + tail
+            self.assertIsNone(bash_gate.handle(self.event(cmd)), cmd)
+
     def test_opaque_write_denied_before_approval(self) -> None:
         for cmd in ("git apply p.diff", "python3 -c \"open('x','w')\"", 'eval "$c"'):
             result = bash_gate.handle(self.event(cmd))
@@ -380,6 +580,12 @@ class TestTaskScope(BashGateProject):
 
     def test_second_command_in_chain_is_checked(self) -> None:
         self.assertIsNotNone(bash_gate.handle(self.event("cat > src/auth/a.ts && cat > spec/01-prd.md")))
+
+    def test_compound_command_and_substitution_obey_the_scope(self) -> None:
+        self.assertIsNotNone(bash_gate.handle(self.event("if true; then rm spec/01-prd.md; fi")))
+        self.assertIsNotNone(bash_gate.handle(self.event('echo "$(touch src/other.ts)"')))
+        self.assertIsNone(bash_gate.handle(self.event("if true; then touch src/auth/a.ts; fi")))
+        self.assertIsNone(bash_gate.handle(self.event('echo "$(touch src/auth/a.ts)"')))
 
     def test_git_dash_c_apply_denied_for_scoped_worker(self) -> None:
         self.assertIsNotNone(bash_gate.handle(self.event("git -C src/auth apply p.diff")))
