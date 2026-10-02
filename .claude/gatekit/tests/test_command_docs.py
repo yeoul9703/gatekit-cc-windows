@@ -5,6 +5,7 @@ PowerShell allowed. Each pipeline is one skill folder under .claude/skills
 only when it needs it, assets/ holds templates and data."""
 from __future__ import annotations
 
+import json
 import pathlib
 import re
 import sys
@@ -395,6 +396,29 @@ class TestSetupSkill(unittest.TestCase):
         self.assertRegex(text, r"(?m)^\| `winget` \|[^|]*\| recommended \|")
         self.assertRegex(text, r"(?m)^\| `pwsh` \|[^|]*\| required \|")
         self.assertRegex(text, r"(?m)^\| `uv` \|[^|]*\| required \|")
+        self.assertRegex(text, r"(?m)^\| `git` \| `-Install git` only \| recommended \|")
+
+    def test_git_is_a_recommended_candidate_installed_in_the_user_scope_first(self) -> None:
+        text = read(self.refs / "install-programs.md")
+        flat = one_line(text)
+        packages = json.loads(read(KIT / "scripts" / "packages.json"))["packages"]
+        git = next(p for p in packages if p["key"] == "git")
+        self.assertEqual(git["level"], "권장")
+        # the same command as the script and the people's reference
+        self.assertIn("`winget install --id %s -e --source winget --scope user`" % git["winget_id"], flat)
+        self.assertIn("-Install winget,git", flat)
+        for word in ("`S7`", "`S10-git`", "`S16-git`"):
+            self.assertIn(word, flat, word)
+        # the model warns about the administrator prompt itself, before the install runs
+        self.assertIn("**Say this in the chat before you run `-Install git`**", flat)
+        self.assertIn("it can open behind other windows", flat)
+        self.assertIn("관리자 확인 창이 뜰 수 있습니다", flat)
+        self.assertIn("no elevation tool (gsudo,", flat)
+        for stale in ("the script never installs it", "prints a command only"):
+            self.assertNotIn(stale, flat)
+        body = one_line(self.body)
+        self.assertIn("**Git (`S7`) is a candidate**", body)
+        self.assertIn("tell the user **before** you run the command that a Windows administrator prompt may appear", body)
 
     def test_the_claude_cli_is_recommended_and_stays_out_of_install_all(self) -> None:
         # ADR-0018 (2026-10-02): nothing starts the CLI with the default settings.
@@ -436,6 +460,11 @@ class TestSetupSkill(unittest.TestCase):
                   "or the terminal it runs in) and open it again")
         self.assertIn(phrase, one_line(self.body))
         self.assertIn(phrase, one_line(read(self.refs / "settings.md")))
+        # closing the window of the desktop app is not enough: the exit code 3 step says where to quit it
+        step = one_line(self.body[self.body.index("- `3` —"):self.body.index("- `4` —")])
+        self.assertIn(phrase, step)
+        self.assertIn("quit from the Claude icon in the notification area (bottom right of the taskbar)", step)
+        self.assertIn("작업 표시줄 오른쪽 아래(트레이)의 Claude 아이콘에서 종료하세요", step)
 
 
 if __name__ == "__main__":

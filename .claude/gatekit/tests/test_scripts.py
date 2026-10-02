@@ -566,13 +566,6 @@ class TestSetupInstallPaths(SetupCase):
                 code, out = self.run_setup("-Install", "pwsh", "-Lang", "en")
                 self.assertEqual(code, exit_code, out)
 
-    def test_git_is_never_installed_automatically(self) -> None:
-        self.fake_winget(0)
-        code, out = self.run_setup("-Install", "git", "-Lang", "en")
-        self.assertEqual(self.install_calls(), [])
-        self.assertIn("winget install --id Git.Git", out)  # printed as guidance only
-        self.assertIn("administrator", out)
-
     def test_already_installed_program_is_skipped(self) -> None:
         self.fake_uv()
         self.fake_winget(0)
@@ -583,7 +576,7 @@ class TestSetupInstallPaths(SetupCase):
         self.fake_winget(0)
         fakebin.make_fake(self.bin, "git", "print('git version 2.54.0')\n")
         _, _, by_id = self.run_json("-Update", "git", "-Lang", "en")
-        self.assertNotIn("S10-git", by_id)  # no "needs administrator" warning
+        self.assertNotIn("S10-git", by_id)  # no administrator notice: an existing Git is not touched
         self.assertEqual(by_id["A-git"]["verdict"], "ok")
         for call in self.calls():
             self.assertNotIn(" upgrade ", " " + call + " ")
@@ -659,6 +652,241 @@ class TestSetupInstallPaths(SetupCase):
         self.fake_winget(0x8A150107)
         _, out = self.run_setup("-Install", "uv", "-Lang", "ko")
         self.assertEqual(english_sentence_lines(out), [], out)
+
+
+#: A fake winget whose `install` answers USER when `--scope user` is passed and PLAIN without a
+#: scope (after sleeping SLEEP seconds). With CREATE a successful install really puts a fake git
+#: on PATH. Every call is logged.
+FAKE_WINGET_SCOPED = r'''
+import sys, time
+a = sys.argv[1:]
+open(LOG, 'a').write('winget ' + ' '.join(a) + chr(10))
+if a[0] == '--version':
+    print('v1.29.380')
+    sys.exit(0)
+if a[0] == 'search':
+    print('astral-sh.uv')
+    sys.exit(0)
+if a[0] != 'install':
+    sys.exit(0)
+scoped = '--scope' in a
+if not scoped:
+    time.sleep(SLEEP)
+code = USER if scoped else PLAIN
+if code == 0 and CREATE:
+    open(BIN + '/git.cmd', 'w').write('@echo off' + chr(13) + chr(10)
+                                      + 'echo git version 2.55.0.windows.5' + chr(13) + chr(10))
+sys.exit(code)
+'''
+
+#: winget's "no applicable installer" (what --scope user answers when a package has no
+#: user-scope installer). setup.ps1 has no row for it, so it is class "unknown".
+NO_APPLICABLE_INSTALLER = 0x8A150010
+
+REOPEN_EN = ("close Claude Code completely (the desktop app, the VS Code window, "
+             "or the terminal it runs in) and open it again")
+TRAY_EN = "quit it from the Claude icon in the notification area (bottom right of the taskbar)"
+TRAY_KO = "작업 표시줄 오른쪽 아래(트레이)의 Claude 아이콘에서 종료하세요"
+
+
+@unittest.skipUnless(POWERSHELL.is_file(), "Windows PowerShell 5.1 not available")
+class TestSetupGit(SetupCase):
+    """Git is recommended: a missing one is reported with -Install git and never installed by a
+    check. -Install git asks winget for the user-scope installer first; only when that does not
+    work is it tried again without a scope, after a line about the administrator prompt."""
+
+    MANUAL = "winget install --id Git.Git -e --source winget --scope user"
+
+    def winget(self, user: int, plain: int = 0, create: bool = False, sleep: float = 0.0) -> None:
+        src = ("LOG = %r\nBIN = %r\nUSER = %d\nPLAIN = %d\nCREATE = %r\nSLEEP = %r\n"
+               % (str(self.log), str(self.bin), user, plain, create, sleep)) + FAKE_WINGET_SCOPED
+        fakebin.make_fake(self.bin, "winget", src)
+
+    def install_calls(self) -> list:
+        return [c for c in self.calls() if c.startswith("winget install")]
+
+    def records(self) -> list:
+        path = self.root / ".gatekit" / "runs" / "setup-last.json"
+        return json.loads(path.read_text(encoding="utf-8"))["failures"]
+
+    def test_missing_git_is_a_recommended_warn_and_a_check_installs_nothing(self) -> None:
+        self.winget(0, create=True)
+        _, _, by_id = self.run_json("-Lang", "en")
+        item = by_id["S7"]
+        self.assertEqual((item["level"], item["verdict"]), ("recommended", "warn"), item)
+        self.assertIn("installed if you allow it (-Install git)", item["action"])
+        self.assertNotIn("winget,git", item["action"])
+        self.assertEqual(item["hints"][0], self.MANUAL)
+        self.assertIn("https://git-scm.com/download/win", item["hints"][1])
+        self.assertIn("administrator prompt (UAC) may then appear", item["hints"][2])
+        self.assertIn("hide behind other windows", item["hints"][2])
+        self.assertEqual(by_id["P-git"]["level"], "recommended")
+        self.assertEqual(self.install_calls(), [])  # no permission, no install
+        self.assertFalse((self.bin / "git.cmd").exists())
+        self.assertNotIn("S10-git", by_id)
+
+    def test_missing_git_leaves_the_exit_code_alone(self) -> None:
+        # Everything -Status looks at is ready except Git (and the claude CLI): still exit 0.
+        self.fake_uv()
+        self.fake_pwsh("7.6.1")
+        self.winget(0)
+        code, _, by_id = self.run_json("-Status", "-Lang", "en")
+        self.assertEqual(by_id["S7"]["verdict"], "warn", by_id["S7"])
+        self.assertEqual(code, 0, by_id)
+
+    def test_git_visible_only_after_a_restart_is_a_warn_that_leaves_the_exit_code_alone(self) -> None:
+        self.fake_uv()
+        self.fake_pwsh("7.6.1")
+        self.winget(0)
+        elsewhere = self.root / "elsewhere"
+        elsewhere.mkdir()
+        fakebin.make_fake(elsewhere, "git", "print('git version 2.55.0')\n")
+        code, _, by_id = self.run_json("-Status", "-Lang", "en", env={
+            "GATEKIT_SETUP_KEEP_PATH": "", "GATEKIT_SETUP_REGISTRY_PATH": str(elsewhere)})
+        item = by_id["S7"]
+        self.assertEqual((item["level"], item["verdict"]), ("recommended", "warn"), item)
+        self.assertIn("not visible", item["detail"])
+        self.assertIn(REOPEN_EN, item["action"])
+        self.assertIn(TRAY_EN, item["action"])
+        self.assertEqual(code, 0, by_id)
+
+    def test_git_on_path_is_ok(self) -> None:
+        fakebin.make_fake(self.bin, "git", "print('git version 2.54.0.windows.1')\n")
+        _, _, by_id = self.run_json("-Lang", "en")
+        item = by_id["S7"]
+        self.assertEqual((item["level"], item["verdict"], item["action"]), ("recommended", "ok", ""), item)
+        self.assertIn("2.54.0", item["detail"])
+
+    def test_missing_winget_too_names_both_in_one_switch(self) -> None:
+        _, _, by_id = self.run_json("-Lang", "en")
+        self.assertIn("-Install winget,git", by_id["S7"]["action"])
+
+    def test_install_git_asks_winget_for_the_user_scope(self) -> None:
+        self.winget(0, create=True)
+        _, _, by_id = self.run_json("-Install", "git", "-Lang", "en")
+        calls = self.install_calls()
+        self.assertEqual(len(calls), 1, self.calls())
+        for part in ("--id Git.Git -e --source winget", "--scope user", "--disable-interactivity",
+                     "--accept-source-agreements", "--accept-package-agreements"):
+            self.assertIn(part, calls[0])
+        self.assertEqual(by_id["A-git"]["verdict"], "ok", by_id["A-git"])
+        self.assertIn("done", by_id["A-git"]["detail"])
+        self.assertNotIn("S10-git", by_id)  # no second attempt, so no administrator notice
+        self.assertNotIn("S16-git", by_id)
+        self.assertEqual(by_id["S7"]["verdict"], "ok", by_id["S7"])
+        self.assertIn("git install", by_id["S11"]["detail"])
+        for call in self.calls():
+            if call not in calls:
+                self.assertNotIn("--accept", call)  # agreements only for the allowed install
+
+    def test_git_that_is_already_there_is_skipped(self) -> None:
+        self.winget(0)
+        fakebin.make_fake(self.bin, "git", "print('git version 2.54.0')\n")
+        _, _, by_id = self.run_json("-Install", "git", "-Lang", "en")
+        self.assertEqual(self.install_calls(), [])
+        self.assertIn("skipped", by_id["A-git"]["detail"])
+
+    def test_user_scope_that_does_not_work_is_retried_without_a_scope_after_the_uac_notice(self) -> None:
+        self.winget(NO_APPLICABLE_INSTALLER, 0, create=True)
+        _, data, by_id = self.run_json("-Install", "git", "-Lang", "en")
+        calls = self.install_calls()
+        self.assertEqual(len(calls), 2, self.calls())
+        self.assertIn("--scope user", calls[0])
+        self.assertNotIn("--scope", calls[1])
+        self.assertIn("--id Git.Git -e --source winget", calls[1])
+        notice = by_id["S10-git"]
+        self.assertEqual((notice["level"], notice["verdict"]), ("recommended", "info"), notice)
+        self.assertIn("0x8A150010", notice["detail"])
+        self.assertIn("administrator prompt (UAC) may appear", notice["action"])
+        self.assertIn("hide behind other windows", notice["action"])
+        # the notice comes BEFORE the second attempt starts
+        ids = [i["id"] for i in data["items"]]
+        running = [n for n, i in enumerate(data["items"])
+                   if i["id"] == "A-git" and "running winget install" in i["detail"]]
+        self.assertEqual(len(running), 2, ids)
+        self.assertLess(running[0], ids.index("S10-git"))
+        self.assertLess(ids.index("S10-git"), running[1])
+        self.assertEqual(by_id["A-git"]["verdict"], "ok", by_id["A-git"])
+        self.assertNotIn("S16-git", by_id)
+        self.assertFalse((self.root / ".gatekit" / "runs" / "setup-last.json").exists())
+
+    def test_a_block_that_another_scope_cannot_change_is_not_retried(self) -> None:
+        for winget_code, exit_code in ((0x8A15003A, 4), (0x8A150107, 4), (0x8A150046, 2)):
+            with self.subTest(code=hex(winget_code)):
+                self.log.unlink(missing_ok=True)
+                self.winget(winget_code, 0, create=True)
+                code, _, by_id = self.run_json("-Install", "git", "-Lang", "en")
+                self.assertEqual(len(self.install_calls()), 1, self.calls())
+                self.assertNotIn("S10-git", by_id)
+                self.assertEqual(by_id["S16-git"]["verdict"], "fail", by_id["S16-git"])
+                self.assertEqual(code, exit_code)
+                self.assertFalse((self.bin / "git.cmd").exists())
+
+    def test_both_attempts_failing_is_a_recorded_failure_that_says_what_to_do(self) -> None:
+        self.winget(NO_APPLICABLE_INSTALLER, 0x8A150999)
+        code, _, by_id = self.run_json("-Install", "git", "-Lang", "en")
+        self.assertEqual(len(self.install_calls()), 2, self.calls())
+        item = by_id["S16-git"]
+        self.assertEqual(item["verdict"], "fail", item)
+        self.assertIn("0x8A150999", item["detail"])
+        hints = "\n".join(item["hints"])
+        self.assertIn("this account has no administrator rights", hints)
+        self.assertIn("https://git-scm.com/download/win", hints)
+        self.assertEqual(code, 1)
+        self.assertEqual([(r["item"], r["action"], r["class"], r["exit_hex"]) for r in self.records()],
+                         [("git", "install", "unknown", "0x8A150999")])
+        self.assertEqual(by_id["S7"]["verdict"], "warn")  # still missing, still offered
+
+    def test_install_git_without_winget_says_to_allow_winget_first(self) -> None:
+        code, _, by_id = self.run_json("-Install", "git", "-Lang", "en")
+        self.assertIn("winget is missing", by_id["S16-git"]["detail"])
+        self.assertIn("-Install winget", by_id["S16-git"]["action"])
+        self.assertEqual(code, 2)
+
+    def test_an_unanswered_second_attempt_is_stopped_and_names_the_administrator_prompt(self) -> None:
+        import time
+        self.winget(NO_APPLICABLE_INSTALLER, 0, sleep=60)
+        started = time.monotonic()
+        code, _, by_id = self.run_json("-Install", "git", "-Lang", "en",
+                                       env={"GATEKIT_SETUP_INSTALL_TIMEOUT": "3"})
+        self.assertLess(time.monotonic() - started, 50)
+        item = by_id["S16-git"]
+        self.assertIn("did not finish in time", item["detail"])
+        self.assertIn("administrator prompt (UAC)", "\n".join(item["hints"]))
+        self.assertEqual(code, 4)
+        self.assertEqual(self.records()[0]["class"], "timeout")
+
+    def test_an_install_that_is_not_visible_yet_asks_for_a_reopen_and_names_the_tray(self) -> None:
+        self.winget(0)  # "succeeds" but puts nothing on PATH
+        code, data, by_id = self.run_json("-Install", "git", "-Lang", "en")
+        self.assertEqual(code, 3)
+        for text in (by_id["S9-git"]["action"], data["exit_meaning"]):
+            self.assertIn(REOPEN_EN, text)
+            self.assertIn(TRAY_EN, text)
+        _, out = self.run_setup("-Install", "git", "-Lang", "ko")
+        self.assertIn("완전히 닫고 다시 여세요. 데스크톱 앱은 창을 닫아도 남아 있으니 " + TRAY_KO, out)
+        self.assertEqual(english_sentence_lines(out), [], out)
+
+    def test_korean_lines_have_no_english_sentence(self) -> None:
+        self.winget(NO_APPLICABLE_INSTALLER, 0x8A150999)
+        _, out = self.run_setup("-Lang", "ko")  # the check: S7 with its hints
+        self.assertIn("허락하면 설치합니다 (-Install git)", out)
+        self.assertIn(self.MANUAL, out)
+        self.assertEqual(english_sentence_lines(out), [], out)
+        _, out = self.run_setup("-Install", "git", "-Lang", "ko")  # both attempts fail
+        self.assertIn("관리자 확인 창(UAC)이 뜰 수 있습니다", out)
+        self.assertIn("다른 창 뒤에 숨을 수 있으니", out)
+        self.assertLess(out.index("관리자 확인 창(UAC)이 뜰 수 있습니다"), out.rindex("winget install Git.Git 실행 중"))
+        self.assertEqual(english_sentence_lines(out), [], out)
+
+    def test_the_script_never_elevates_by_itself(self) -> None:
+        # The administrator prompt is winget's and the installer's own: no elevation tool, no
+        # "run as administrator" start, and the scope is asked for in exactly one place.
+        text = (SCRIPTS / "setup.ps1").read_bytes().decode("utf-8-sig")
+        code = "\n".join(line for line in text.splitlines() if not line.lstrip().startswith("#"))
+        for banned in ("gsudo", "sudo ", "-Verb RunAs", "runas"):
+            self.assertNotIn(banned, code, banned)
+        self.assertEqual(code.count("@('--scope', 'user')"), 1)
 
 
 #: GATEKIT_SETUP_PWSH_PACKAGES values: what Get-AppxPackage would answer.
@@ -744,8 +972,8 @@ class TestSetupPwshProduct(SetupCase):
         code, item, _ = self.s2(STABLE_PKG % "7.6.6.0")
         self.assertEqual(item["verdict"], "warn", item)
         self.assertIn("not visible", item["detail"])
-        self.assertIn("close Claude Code completely (the desktop app, the VS Code window, "
-                      "or the terminal it runs in) and open it again", item["action"])
+        self.assertIn(REOPEN_EN, item["action"])
+        self.assertIn(TRAY_EN, item["action"])  # closing the desktop app's window is not enough
         self.assertEqual(code, 3)
 
     def test_nothing_installed_offers_winget_and_pwsh_together_when_winget_is_missing(self) -> None:
@@ -911,6 +1139,17 @@ class TestSetupInstallWinget(SetupCase):
         installs = [i for i, c in enumerate(calls) if c.startswith("winget install --id Microsoft.PowerShell")]
         self.assertEqual(len(installs), 1, calls)
         self.assertLess(first_step, installs[0])
+
+    def test_winget_is_installed_before_git_and_git_gets_the_user_scope(self) -> None:
+        # A PC with neither: S7 names -Install winget,git. The winget the runner creates is the
+        # one that then receives the Git install, with --scope user.
+        self.run_setup("-Install", "git,winget", "-Lang", "en", env=self.runner("register"))
+        calls = self.calls()
+        first_step = calls.index("wingetstep register " + self.FAMILY)
+        installs = [i for i, c in enumerate(calls) if c.startswith("winget install --id Git.Git")]
+        self.assertEqual(len(installs), 1, calls)
+        self.assertLess(first_step, installs[0])
+        self.assertIn("--scope user", calls[installs[0]])
 
     def test_check_only_never_runs_a_winget_step(self) -> None:
         self.run_setup("-Lang", "en", env=self.runner("register"))

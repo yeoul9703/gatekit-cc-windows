@@ -71,6 +71,35 @@ class TestPackagesTable(unittest.TestCase):
         self.assertRegex(usage, r"(?m)^\| `claude` 명령\(CLI\) \| 선택 \|")
         self.assertNotIn("데스크톱 앱만으로는", usage)
 
+    def test_git_is_recommended_and_installed_in_the_user_scope_first(self) -> None:
+        git = next(p for p in PACKAGES if p["key"] == "git")
+        self.assertEqual(git["level"], "권장")
+        text = doc_text()
+        self.assertIn("### 2-4. Git for Windows (`git`, 권장)", text)
+        section = text[text.index("### 2-4. "):text.index("## 3. ")]
+        # the documented command is the one the script prints and runs: the user scope first
+        user_scope = "winget install --id %s -e --source winget --scope user" % git["winget_id"]
+        self.assertIn("| 설치 | `%s` |" % user_scope, section)
+        self.assertIn("`winget install --id %s -e --source winget` (또는 %s"
+                      % (git["winget_id"], git["docs_url"]), section)
+        ps1 = ps1_text()
+        self.assertIn("' -e --source winget --scope user'", ps1)
+        self.assertIn("@('--scope', 'user')", ps1)
+        # S7 and the order of -Install git
+        for phrase in ("| 없음 | `warn`(권장), 종료 코드에 영향 없음 | `-Install git` (winget도 없으면 `-Install winget,git`) |",
+                       "| 1 | 사용자 범위로 설치(`--scope user`) | 아니오 |",
+                       "관리자 확인 창(UAC)이 뜰 수 있고 다른 창 뒤에 숨을 수 있다",
+                       "`S10-git`", "`S16-git`"):
+            self.assertIn(phrase, section)
+        # no elevation tool, with the reason in one line
+        self.assertIn("gsudo 같은 권한 상승 도구는 쓰지 않습니다. gsudo도 같은 관리자 확인 창을 띄울 뿐이고",
+                      " ".join(section.split()))
+        self.assertNotIn("gsudo", ps1)
+        self.assertNotIn("자동으로 설치·업데이트·재설치하지 않고", text)  # the older wording
+        usage = (DOC.parent / "USAGE.md").read_text(encoding="utf-8")
+        self.assertRegex(usage, r"(?m)^\| Git for Windows \| 권장 \|")
+        self.assertIn("관리자 확인 창이 뜰 수 있습니다", usage)
+
     def test_every_winget_id_in_a_command_is_a_managed_package(self) -> None:
         ids = {p["winget_id"] for p in PACKAGES}
         used = set(re.findall(r"winget (?:install|upgrade|list) --id[= ]([A-Za-z0-9.-]+)", doc_text()))
@@ -157,6 +186,21 @@ class TestExitCodesAndWinget(unittest.TestCase):
         for code in "01234":
             self.assertRegex(text, r"#\s+%s\s" % code)
         self.assertIn("1 > 4 > 3 > 2 > 0", doc_text())
+
+    def test_exit_code_3_says_how_to_quit_the_desktop_app(self) -> None:
+        # One sentence everywhere: the reopen advice, then where to quit the desktop app.
+        reopen = "Claude Code(데스크톱 앱, VS Code 창, 또는 실행 중인 터미널)를 완전히 닫고 다시 "
+        tray = "데스크톱 앱은 창을 닫아도 남아 있으니 작업 표시줄 오른쪽 아래(트레이)의 Claude 아이콘에서 종료"
+        rows = {r[0]: r for r in table_rows("## 4. 종료 코드", doc_text())}
+        self.assertIn(reopen + "열기. " + tray, rows["3"][2])
+        self.assertEqual(" ".join(doc_text().split()).count(tray), 2)  # the intro and the table
+        self.assertIn(reopen + "여세요. " + tray + "하세요'", ps1_text())
+        self.assertEqual(ps1_text().count("완전히 닫고 다시"), 1)  # Get-ReopenAdvice only
+        session = (KIT / "scripts" / "session-check.ps1").read_bytes().decode("utf-8-sig")
+        self.assertIn(tray + "하세요.'", session)
+        self.assertEqual(session.count(reopen + "여세요'"), 1)
+        usage = " ".join((DOC.parent / "USAGE.md").read_text(encoding="utf-8").split())
+        self.assertEqual(usage.count("데스크톱 앱은 창을 닫아도 남아 있으니 작업 표시줄 오른쪽 아래(트레이)의 Claude 아이콘에서 종료"), 2)
 
     def test_winget_code_table_equals_the_script_table(self) -> None:
         script = {}

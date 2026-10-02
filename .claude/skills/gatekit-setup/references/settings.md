@@ -41,7 +41,8 @@ As JSON:
 6. The setting takes effect in a new session. Tell the user to close Claude
    Code completely (the desktop app, the VS Code window, or the terminal it
    runs in) and open it again. In Korean: "Claude Code(데스크톱 앱, VS Code 창,
-   또는 실행 중인 터미널)를 완전히 닫고 다시 여세요".
+   또는 실행 중인 터미널)를 완전히 닫고 다시 여세요. 데스크톱 앱은 창을 닫아도
+   남아 있으니 작업 표시줄 오른쪽 아래(트레이)의 Claude 아이콘에서 종료하세요".
 
 On no, leave the file as it is and say that the PowerShell tool stays off
 until the key is added.

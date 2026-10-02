@@ -7,7 +7,7 @@
 # Same rule as setup.ps1, taken from the same file (common.ps1): a program counts as present only
 # if it is on the PATH of THIS session. If it is visible only after merging the registry PATH
 # (Machine + User) the message says "installed but not visible: close Claude Code completely and open it again" instead
-# of "not found". (GATEKIT_SETUP_REGISTRY_PATH replaces the registry value; used by tests.)
+# of "not found", followed once by where to quit the desktop app (its icon in the notification area). (GATEKIT_SETUP_REGISTRY_PATH replaces the registry value; used by tests.)
 # PowerShell 7 follows the same product rule as setup.ps1 (Get-PwshProduct in common.ps1): a pwsh on
 # PATH is not enough when only a preview build is installed. Here the rule is the light part only:
 # the Windows package lookup (Get-AppxPackage, about half a second, no network), the MSI folder and
@@ -31,6 +31,12 @@ try {
     $venvDir = Join-Path $kitRoot '.venv'
     $venvPy = Join-Path $venvDir 'Scripts\python.exe'
     $problems = @()
+    # One wording for a program that is installed but not on this session's PATH (the same
+    # sentence setup.ps1 prints). When any problem needs a reopen, $trayNote is added once: the
+    # desktop app keeps running after its window is closed, so closing the window is not enough.
+    $reopen = $false
+    $notVisible = 'installed but not visible in this session - close Claude Code completely (the desktop app, the VS Code window, or the terminal it runs in) and open it again / 설치돼 있지만 이 창에서는 보이지 않습니다 - Claude Code(데스크톱 앱, VS Code 창, 또는 실행 중인 터미널)를 완전히 닫고 다시 여세요'
+    $trayNote = 'The desktop app keeps running after its window is closed: quit it from the Claude icon in the notification area (bottom right of the taskbar). / 데스크톱 앱은 창을 닫아도 남아 있으니 작업 표시줄 오른쪽 아래(트레이)의 Claude 아이콘에서 종료하세요.'
     # Minimum .venv Python: scripts/packages.json python_min (the single source), 3.14 if unreadable.
     $pyMinMajor = 3
     $pyMinMinor = 14
@@ -51,7 +57,8 @@ try {
     if (Test-Budget) {
         $where = (Get-App 'uv').where
         if ($where -eq 'registry') {
-            $problems += 'uv: installed but not visible in this session - close Claude Code completely (the desktop app, the VS Code window, or the terminal it runs in) and open it again / 설치돼 있지만 이 창에서는 보이지 않습니다 - Claude Code(데스크톱 앱, VS Code 창, 또는 실행 중인 터미널)를 완전히 닫고 다시 여세요'
+            $problems += 'uv: ' + $notVisible
+            $reopen = $true
         } elseif ($where -eq 'none') {
             $problems += 'uv: not found / uv 를 찾을 수 없습니다'
         }
@@ -85,7 +92,8 @@ try {
         $pwshFound = Get-App 'pwsh'
         $where = $pwshFound.where
         if ($where -eq 'registry') {
-            $problems += 'PowerShell 7: installed but not visible in this session - close Claude Code completely (the desktop app, the VS Code window, or the terminal it runs in) and open it again / 설치돼 있지만 이 창에서는 보이지 않습니다 - Claude Code(데스크톱 앱, VS Code 창, 또는 실행 중인 터미널)를 완전히 닫고 다시 여세요'
+            $problems += 'PowerShell 7: ' + $notVisible
+            $reopen = $true
         } elseif ($where -eq 'none') {
             $problems += 'PowerShell 7 (pwsh): not found / PowerShell 7 을 찾을 수 없습니다'
         } else {
@@ -111,7 +119,8 @@ try {
     if ((Test-Budget) -and (Test-CliRequired (Split-Path -Parent (Split-Path -Parent $kitRoot)))) {
         $where = (Get-App 'claude').where
         if ($where -eq 'registry') {
-            $problems += 'claude CLI: installed but not visible in this session - close Claude Code completely (the desktop app, the VS Code window, or the terminal it runs in) and open it again / 설치돼 있지만 이 창에서는 보이지 않습니다 - Claude Code(데스크톱 앱, VS Code 창, 또는 실행 중인 터미널)를 완전히 닫고 다시 여세요'
+            $problems += 'claude CLI: ' + $notVisible
+            $reopen = $true
         } elseif ($where -eq 'none') {
             $problems += 'claude CLI: not found on PATH, and this project is set to run it (build.execution or verify.evaluator in .gatekit/config.json) / PATH 에 없음 - 이 프로젝트 설정(.gatekit/config.json 의 build.execution 또는 verify.evaluator)은 이 명령을 실행합니다'
         }
@@ -119,6 +128,7 @@ try {
 
     if ($problems.Count -gt 0) {
         $list = ($problems | ForEach-Object { '- ' + $_ }) -join "`n"
+        if ($reopen) { $list = $list + "`n" + $trayNote }
         $user = "gatekit: environment problem / 환경 문제`n" + $list + "`nType /gatekit-setup in the chat. / 채팅에 /gatekit-setup 을 입력하세요."
         $ctx = "gatekit environment check failed:`n" + $list + "`nTell the user to type /gatekit-setup in the chat (gatekit 게이트 훅이 지금 동작하지 않을 수 있음). Do not install anything before the user agrees in the chat."
         $out = [ordered]@{ systemMessage = $user

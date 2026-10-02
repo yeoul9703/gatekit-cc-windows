@@ -133,7 +133,7 @@ class TestPackageTable(PackagesCase):
         self.assertIn("installed 2.1.300", by_id["P-claude"]["detail"])
         self.assertIn("installed 2.54.0", by_id["P-git"]["detail"])
         self.assertEqual(by_id["P-pwsh"]["level"], "required")
-        self.assertEqual(by_id["P-git"]["level"], "info")
+        self.assertEqual(by_id["P-git"]["level"], "recommended")
 
     def test_not_installed_row(self) -> None:
         self.winget({})

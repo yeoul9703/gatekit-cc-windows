@@ -9,6 +9,7 @@ gatekit이 쓰는 프로그램(winget, PowerShell 7, uv, Claude Code, Git, `.ven
   **허락한 항목만** 합니다. 이 문서는 그게 안 될 때, 또는 직접 하고 싶을 때 보세요.
 - 아래 명령은 PowerShell(또는 터미널)에 붙여 넣어 실행합니다. 설치 뒤에는 Claude Code
   (데스크톱 앱, VS Code 창, 또는 실행 중인 터미널)를 **완전히 닫았다가 다시** 열어야 새 프로그램이 보입니다.
+  데스크톱 앱은 창을 닫아도 남아 있으니 작업 표시줄 오른쪽 아래(트레이)의 Claude 아이콘에서 종료하세요.
 - 관리자 권한이 필요할 수 있는 것은 표에 적어 두었습니다. 회사 PC에서 막히면 아래
   "IT 담당자에게 보낼 문의문"을 쓰세요. 정책을 우회하지 마세요.
 
@@ -23,7 +24,7 @@ gatekit이 쓰는 프로그램(winget, PowerShell 7, uv, Claude Code, Git, `.ven
 | `pwsh` | PowerShell 7 | `Microsoft.PowerShell` | 필수 | 7.6.0 | msix | 예전 MSI 설치본이면 필요할 수 있음 | 없음 | https://learn.microsoft.com/powershell/scripting/install/installing-powershell-on-windows |
 | `uv` | uv (Python 관리 도구) | `astral-sh.uv` | 필수 | 0.4.27 | - | 아니오 | https://astral.sh/uv/install.ps1 | https://docs.astral.sh/uv/getting-started/installation/ |
 | `claude` | Claude Code (claude 명령) | `Anthropic.ClaudeCode` | 권장 | 2.1.277 | - | 아니오 | https://claude.ai/install.ps1 | https://code.claude.com/docs/en/setup |
-| `git` | Git for Windows | `Git.Git` | 선택 | - | - | 필요할 수 있음 | 없음 | https://git-scm.com/download/win |
+| `git` | Git for Windows | `Git.Git` | 권장 | - | - | 사용자 범위 설치가 안 될 때만 필요할 수 있음 | 없음 | https://git-scm.com/download/win |
 
 `.venv`(프로젝트 안의 Python 환경)는 프로그램이 아니라 폴더입니다. 5번을 보세요.
 gatekit이 쓰는 Python은 **3.14 이상**이고, uv가 알아서 받습니다.
@@ -177,16 +178,45 @@ setup(`S6`)은 이 설정을 읽어 이렇게 판정합니다. 설정 파일이 
 uv 는 설치 방법에 맞춰 winget `--force` 또는 공식 스크립트를 쓰고, pwsh 는 winget MSIX `--force`,
 claude 는 공식 스크립트를 씁니다. 끝나면 버전을 다시 읽어 보여 줍니다.
 
-### 2-4. Git for Windows (`git`, 선택)
+### 2-4. Git for Windows (`git`, 권장)
+
+없어도 gatekit은 동작합니다. 권장하는 이유는 되돌릴 방법이 생기기 때문입니다. Git이 없으면
+저장소를 압축 파일로 받게 되는데, 그러면 빠지거나 망가진 파일을 `git checkout`으로 되돌릴 수 없고
+(9번) 작업 이력도 남지 않습니다.
 
 | 하고 싶은 것 | 명령 |
 |---|---|
-| 설치 | `winget install --id Git.Git -e --source winget` (또는 https://git-scm.com/download/win) |
+| 설치 | `winget install --id Git.Git -e --source winget --scope user` |
+| 사용자 범위 설치가 안 될 때 | `winget install --id Git.Git -e --source winget` (또는 https://git-scm.com/download/win 에서 설치 파일 받기) |
 | 업데이트 | `winget upgrade --id Git.Git -e` |
 | 버전 확인 | `git --version` |
 
-- 관리자 권한이 필요할 수 있어 **gatekit은 자동으로 설치·업데이트·재설치하지 않고 명령만 알려 줍니다.**
-- 없어도 gatekit은 동작합니다.
+setup(`S7`)은 이렇게 판정합니다. 권장 항목이라 어느 경우에도 종료 코드를 바꾸지 않습니다.
+
+| 상태 | 판정(`S7`) | 알려 주는 것 |
+|---|---|---|
+| 이 창의 PATH에 있음 | `ok` | 없음 |
+| 없음 | `warn`(권장), 종료 코드에 영향 없음 | `-Install git` (winget도 없으면 `-Install winget,git`) |
+| 설치돼 있지만 이 창의 PATH에 안 보임 | `warn`, 종료 코드에 영향 없음 | Claude Code를 완전히 닫고 다시 열기 |
+
+`-Install git`은 채팅에서 허락한 뒤에만 실행하고, 아래 순서로 합니다.
+
+| 순서 | 하는 일 | 관리자 |
+|---|---|---|
+| 1 | 사용자 범위로 설치(`--scope user`) | 아니오 |
+| 2 | 1이 안 되면 "관리자 확인 창(UAC)이 뜰 수 있고 다른 창 뒤에 숨을 수 있다"고 먼저 알린 뒤(`S10-git`) 범위 없이 한 번 더 설치 | 필요할 수 있음 |
+| 3 | 그래도 안 되면 실패로 알리고(`S16-git`, 표(6번)에 없는 오류면 종료 코드 1) 직접 설치할 주소를 보여 줌 | - |
+
+- 2번으로 넘어가는 것은 1번이 표(6번)에 없는 오류로 끝났을 때뿐입니다. 정책 차단, 네트워크 문제, 약관 미동의,
+  제한 시간 초과는 범위를 바꿔도 달라지지 않으므로 다시 시도하지 않고 그 오류의 종료 코드(4 또는 2)로 끝냅니다.
+- 관리자 확인 창은 winget과 Git 설치 프로그램이 직접 띄웁니다. setup은 스스로 관리자 권한을 얻으려 하지 않습니다.
+  창이 보이지 않으면 작업 표시줄에서 깜박이는 아이콘을 눌러 보세요. 답하지 않으면 15분 뒤에 중단합니다(종료 코드 4).
+- gsudo 같은 권한 상승 도구는 쓰지 않습니다. gsudo도 같은 관리자 확인 창을 띄울 뿐이고, 관리자 권한이 없는
+  계정에서는 어느 쪽도 넘지 못합니다. 설치할 프로그램만 하나 늘어납니다.
+- 사용자 범위 설치가 관리자 확인 창 없이 끝나는지는 Git이 없는 PC에서 아직 확인하지 못했습니다.
+  winget이 `--scope user`에 맞는 설치 프로그램을 고르는 것까지만 확인했습니다(2026-10-02).
+- 이미 있는 Git은 setup이 업데이트하거나 다시 설치하지 않습니다(`-Update git`은 알림만, `-Reinstall git`은 거부).
+  위 명령으로 직접 하세요.
 
 ## 3. setup 스위치와 CLI 대응표
 
@@ -227,8 +257,8 @@ CLI는 위 스크립트를 그대로 부르고, 출력과 종료 코드도 그�
 |---|---|---|
 | 0 | 준비됨 | 없음 |
 | 1 | 실패(허락으로 해결 안 되는 것: 잘못된 스위치, `.venv`를 못 만듦, 알 수 없는 설치 실패) | 출력의 마지막 줄을 읽고 원인을 고친 뒤 다시 실행 |
-| 2 | 사용자의 허락·조치가 필요(필수 프로그램 없음, Python 받아야 함, 관리자 권한 필요 등) | 출력이 알려 주는 스위치를 허락하거나 직접 실행 |
-| 3 | 설치는 됐지만 이 창에서는 안 보임(PATH), 또는 PC 재시작 필요 | Claude Code(데스크톱 앱, VS Code 창, 또는 실행 중인 터미널)를 완전히 닫고 다시 열기 |
+| 2 | 사용자의 허락·조치가 필요(필수 프로그램 없음, Python 받아야 함 등) | 출력이 알려 주는 스위치를 허락하거나 직접 실행 |
+| 3 | 설치는 됐지만 이 창에서는 안 보임(PATH), 또는 PC 재시작 필요 | Claude Code(데스크톱 앱, VS Code 창, 또는 실행 중인 터미널)를 완전히 닫고 다시 열기. 데스크톱 앱은 창을 닫아도 남아 있으니 작업 표시줄 오른쪽 아래(트레이)의 Claude 아이콘에서 종료 |
 | 4 | 회사·학교 정책이나 네트워크가 막음(winget 정책, 네트워크, 그룹 정책이 고정한 실행 정책, 프로그램 실행 차단) | 아래 문의문을 IT 담당자에게 전달. 우회 금지 |
 
 여러 문제가 섞이면 1 > 4 > 3 > 2 > 0 순서로 먼저 해당하는 코드가 나옵니다.
@@ -236,6 +266,14 @@ CLI는 위 스크립트를 그대로 부르고, 출력과 종료 코드도 그�
 `claude` 명령은 권장 항목이라 기본 설정에서는 없거나, 이 창에서 안 보이거나, 버전이 낮아도
 종료 코드가 바뀌지 않습니다. 다른 필수 항목이 모두 준비돼 있으면 0입니다. `claude` 명령이
 필요한 프로젝트(2-3 참고)에서만 없을 때 2, 이 창에서 안 보일 때 3이 됩니다.
+
+Git도 권장 항목이라 없거나 이 창에서 안 보여도 종료 코드가 바뀌지 않습니다. 허락받은
+`-Install git`이 실패했을 때만 그 실패의 종료 코드가 나옵니다(2-4 참고).
+
+종료 코드 3에서 "완전히 닫는다"는 것은 프로그램을 끝내는 것입니다. Claude 데스크톱 앱은 창의 X를 눌러도
+끝나지 않고 작업 표시줄 오른쪽 아래(트레이)에 남습니다. 남아 있는 앱은 시작할 때의 PATH를 그대로 쓰기 때문에
+창만 닫았다 열면 새 프로그램이 여전히 보이지 않습니다. 트레이의 Claude 아이콘에서 종료한 뒤 다시 여세요.
+아이콘이 안 보이면 트레이의 `^`를 눌러 숨은 아이콘을 펼치세요.
 
 ## 5. `.venv` (프로젝트 안 Python 환경)
 
@@ -390,3 +428,4 @@ Get-ChildItem .claude\gatekit\scripts\*.ps1 | Unblock-File
 테스트용 환경 변수: `GATEKIT_SETUP_EXECUTION_POLICY`(예: `MachinePolicy=AllSigned;UserPolicy=Undefined`),
 `GATEKIT_SETUP_LONG_PATHS`(`0` 또는 `1`), `GATEKIT_SETUP_EXEC_DENIED`(예: `uv;python`),
 `GATEKIT_SETUP_PWSH_PACKAGES`. 실제 PC의 값을 바꾸지 않고 점검 결과만 바꿉니다.
+`GATEKIT_SETUP_INSTALL_TIMEOUT`(초)은 winget 설치 한 번의 제한 시간 900초를 바꿉니다.

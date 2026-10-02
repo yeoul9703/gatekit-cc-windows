@@ -63,7 +63,7 @@
       "key": "git",
       "name_ko": "Git for Windows",
       "winget_id": "Git.Git",
-      "level": "선택",
+      "level": "권장",
       "min_version": null,
       "installer_type": null,
       "admin_may_be_required": true,

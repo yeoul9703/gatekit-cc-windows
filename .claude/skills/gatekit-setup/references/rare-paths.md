@@ -19,7 +19,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .claude/gatekit/scripts/setu
 | check only | (none) | — | none |
 | program table and failure record only | `-Status` | — | none; nothing changes |
 | install | `-Install` | `winget`, `pwsh`, `uv`, `claude`, `git`, `venv` | yes in the chat |
-| update | `-Update` | `pwsh`, `uv`, `claude`, `git` | yes in the chat |
+| update | `-Update` | `pwsh`, `uv`, `claude`, `git` (`git` is only reported, never updated) | yes in the chat |
 | reinstall | `-Reinstall` | `uv`, `pwsh`, `claude` | a separate yes |
 | retry recorded failures | `-RetryFailed` | — | a separate yes |
 
@@ -96,8 +96,10 @@ session's PATH **and** the project folder holds `.git` (a folder or a file)
 it prints `git checkout <file>`; when Git is missing, or Git is installed
 but there is no `.git` (a zip download, where that command would fail), it
 says to download the repository again and overwrite that file. Pass that on
-as it is. Do not suggest installing Git or running `git init` just for this,
-and do not recreate the file by hand. Only when `common.ps1` itself cannot
+as it is. Installing Git does not bring the file back (a zip download has no
+`.git` to restore from), so do not offer `-Install git` or `git init` as the
+fix for this, and do not recreate the file by hand. Git is offered on its
+own, as the recommended `S7` item. Only when `common.ps1` itself cannot
 be read does the script print both ways, because it cannot look for Git at
 that point.
 

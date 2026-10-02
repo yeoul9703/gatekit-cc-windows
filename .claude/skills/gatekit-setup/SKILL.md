@@ -13,7 +13,9 @@ Code in any form will do: the desktop app, the VS Code extension or the
 terminal. uv downloads the Python it needs by itself; nothing else has to be
 installed. The `claude` command (the CLI) is **recommended, not required**:
 with the default settings nothing starts it, and it is needed only when build
-runs its tasks as workers.
+runs its tasks as workers. **Git** is recommended too: gatekit runs without
+it, and setup offers to install it because without Git a changed file cannot
+be restored from the repository.
 The work is done by one script, `.claude/gatekit/scripts/setup.ps1`; this
 skill runs it, shows the result, and installs something **only after the user
 says yes in the chat**. The user may not know the terminal: use plain words,
@@ -98,6 +100,10 @@ runs its tasks as workers; I can install it if you want"). It is a candidate
 like the others only when its `level` is `required`, which the script reports
 for a project whose `.gatekit/config.json` runs workers.
 
+**Git (`S7`) is a candidate** when it is missing: `recommended`, verdict
+`warn`, action `-Install git`. Its line in the question says that gatekit
+works without it and that a Windows administrator prompt may appear.
+
 **Read `.claude/skills/gatekit-setup/references/install-programs.md` now.**
 It has, per program, what to tell the user: purpose, whether agreeing to
 terms is included, download size, administrator rights, and the cases that
@@ -112,8 +118,10 @@ candidate in the question text, built from the reference file. Options:
 choose", ask which names in a plain chat message. Wait for the answer; never
 assume it.
 
-- If the user picks "later", stop and say that gatekit hooks stay inactive
-  until `uv` and the `.venv` exist. Nothing is installed.
+- If the user picks "later", nothing is installed. When `uv` or the `.venv`
+  was among the candidates, stop and say that gatekit hooks stay inactive
+  until `uv` and the `.venv` exist. When only recommended items (`winget`,
+  `git`) were offered, gatekit is ready without them: go to Step 5.
 - **`S12-settings` is `fail`**: nothing is installed for this. Read
   `.claude/skills/gatekit-setup/references/settings.md` and follow it; it is
   its own question in the chat, not part of "install all".
@@ -128,6 +136,11 @@ may be given in one call:
 powershell -NoProfile -ExecutionPolicy Bypass -File .claude/gatekit/scripts/setup.ps1 -Install uv,venv -Update pwsh -Json -Lang <output_lang>
 ```
 
+When `git` is among the allowed names, tell the user **before** you run the
+command that a Windows administrator prompt may appear and can hide behind
+other windows (the wording is in `install-programs.md`). The script's own
+notice arrives only with the result.
+
 Then run the plain check from Step 1 again, show the new table, and react to
 the exit code:
 
@@ -135,15 +148,18 @@ the exit code:
 - `3` — installed but not visible in this session: tell the user to close
   Claude Code completely (the desktop app, the VS Code window, or the
   terminal it runs in) and open it again, then type `/gatekit-setup` again.
-  Stop.
+  Add that the desktop app keeps running after its window is closed, so it
+  has to be quit from the Claude icon in the notification area (bottom right
+  of the taskbar). (Korean: "데스크톱 앱은 창을 닫아도 남아 있으니 작업 표시줄
+  오른쪽 아래(트레이)의 Claude 아이콘에서 종료하세요.") Stop.
 - `4` — blocked by policy or network. Show the "what you can do now" lines
   and the message for the IT contact from the `hints`, so the user can
   forward it. Do not retry in a loop. This also covers `S20` (a group
   policy pins the execution policy) and an `S4` or `S5` whose detail says a
   policy blocks the program from running: never offer a reinstall or
   `-Install venv` for those; the reference file `rare-paths.md` says why.
-- `2` — something still needs the user (a declined item, or administrator
-  rights): say exactly which and what to do.
+- `2` — something still needs the user (a declined item, or terms that
+  were not accepted): say exactly which and what to do.
 - `1` — a step failed for another reason: show the lines the script printed
   and ask the user to retry when the cause is fixed. `uv sync` failing with
   `-Install venv` usually means no network; behind a proxy the hints list

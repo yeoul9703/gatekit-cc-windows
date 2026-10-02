@@ -58,9 +58,10 @@ class TestPackagesFile(unittest.TestCase):
         self.assertEqual(packages["uv"]["level"], "필수")
         self.assertEqual(packages["claude"]["level"], "권장")  # nothing runs it by default
         self.assertEqual(packages["pwsh"]["level"], "필수")
-        self.assertEqual(packages["git"]["level"], "선택")
+        self.assertEqual(packages["git"]["level"], "권장")  # gatekit runs without it; setup offers it
         self.assertEqual(packages["pwsh"]["installer_type"], "msix")
-        self.assertIsNone(packages["git"]["official_script_url"])
+        self.assertIsNone(packages["git"]["official_script_url"])  # winget only
+        self.assertTrue(packages["git"]["admin_may_be_required"])  # only when the user scope fails
         self.assertEqual(packages["winget"]["level"], "권장")
         self.assertFalse(packages["winget"]["admin_may_be_required"])
 

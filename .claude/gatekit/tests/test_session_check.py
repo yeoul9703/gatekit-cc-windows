@@ -286,11 +286,38 @@ class TestSessionCheck(unittest.TestCase):
         self.assertNotIn("not found", message)
         self.assertIn("다시 여세요", message)
 
+    #: Closing the window of the desktop app leaves it running: the reopen advice says where to quit it.
+    TRAY_EN = "quit it from the Claude icon in the notification area (bottom right of the taskbar)"
+    TRAY_KO = "작업 표시줄 오른쪽 아래(트레이)의 Claude 아이콘에서 종료하세요"
+
+    def test_reopen_advice_names_the_tray_icon_once(self) -> None:
+        # Two programs need a reopen: the environment-neutral sentence stays on each line and the
+        # tray note follows the list once, for the user and for Claude.
+        elsewhere = self.root / "elsewhere"
+        elsewhere.mkdir()
+        (elsewhere / "uv.exe").write_bytes(b"")
+        (elsewhere / "pwsh.exe").write_bytes(b"")
+        (self.bin / "pwsh.exe").unlink()
+        self.venv()
+        data = json.loads(self.run_check(GATEKIT_SETUP_REGISTRY_PATH=str(elsewhere)).stdout.decode("ascii"))
+        message = data["systemMessage"]
+        reopen = ("close Claude Code completely (the desktop app, the VS Code window, "
+                  "or the terminal it runs in) and open it again")
+        self.assertEqual(message.count(reopen), 2, message)
+        self.assertEqual(message.count("완전히 닫고 다시 여세요"), 2, message)
+        for text in (message, data["hookSpecificOutput"]["additionalContext"]):
+            self.assertEqual(text.count(self.TRAY_EN), 1, text)
+            self.assertEqual(text.count(self.TRAY_KO), 1, text)
+        self.assertLess(message.rindex(reopen), message.index(self.TRAY_EN))
+
     def test_program_missing_everywhere_is_still_not_found(self) -> None:
         self.fake("claude")
         self.venv()
         proc = self.run_check(GATEKIT_SETUP_REGISTRY_PATH=str(self.root / "empty"))
-        self.assertIn("uv: not found", json.loads(proc.stdout.decode("ascii"))["systemMessage"])
+        message = json.loads(proc.stdout.decode("ascii"))["systemMessage"]
+        self.assertIn("uv: not found", message)
+        self.assertNotIn(self.TRAY_EN, message)  # nothing to reopen: no tray note
+        self.assertNotIn("트레이", message)
 
     def test_check_finishes_well_under_ten_seconds_and_never_calls_winget(self) -> None:
         import time

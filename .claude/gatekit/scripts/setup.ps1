@@ -12,9 +12,14 @@
 #                     Microsoft.WinGet.Client module into the user's folders and runs
 #                     Repair-WinGetPackageManager (no administrator rights). Still missing: the
 #                     Microsoft Store link and exit 2 (exit 4 when policy or the network blocks it).
+#                     "git" asks winget for the user-scope installer first (--scope user). Only if
+#                     that attempt does not work is it tried once more without a scope, after a
+#                     line that says a Windows administrator prompt (UAC) may appear and may hide
+#                     behind other windows.
 #                     "venv" builds .claude/gatekit/.venv WITH downloads (Python and packages,
 #                     tens of MB) and deletes and rebuilds a broken .venv. Only this switch may.
 #   -Update <list>    update the listed programs (pwsh, uv, claude, git; not venv, not winget).
+#                     git is accepted but only reported: an existing Git is not updated here.
 #   -Reinstall <list> reinstall the listed programs. Allowed names: uv, pwsh, claude only (git is
 #                     never reinstalled here; venv is rebuilt with -Install venv). uv: winget
 #                     --force when uv came from winget, otherwise the official installer script
@@ -35,8 +40,9 @@
 # Any other name in -Install / -Update / -Reinstall is refused with exit code 1.
 # -Install / -Update / -Reinstall are the user's permission: the chat asked first. Only calls
 # made for a listed name pass --accept-source-agreements / --accept-package-agreements.
-# Only user-scope installs run automatically. Anything that needs administrator
-# rights (git) is never run here; the script prints what to do instead.
+# Installs are user-scope. This script never elevates itself and brings no elevation tool: when
+# the user-scope Git install does not work and the install is tried again without a scope, the
+# administrator prompt (UAC) is the one winget and the installer show themselves.
 #
 # Every line: [ok|warn|fail|unverified|info] name: result - next action
 # Nothing here asks a question (no Read-Host); winget always gets --disable-interactivity.
@@ -45,7 +51,9 @@
 # The check looks at the PATH of THIS session only (the same rule as session-check.ps1: both use
 # Get-App from common.ps1). A program that is visible only after merging the registry PATH
 # (Machine + User) is reported as warn and exit 3: close Claude Code completely (the desktop app,
-# the VS Code window, or the terminal it runs in) and open it again.
+# the VS Code window, or the terminal it runs in) and open it again. The desktop app keeps running
+# after its window is closed, with the PATH it started with, so the advice also says to quit it
+# from the Claude icon in the notification area (Get-ReopenAdvice: one wording for every place).
 #
 # PowerShell 7 is judged by the installed stable PRODUCT, not by the PATH order: the Windows package
 # (Get-AppxPackage, names from packages.json), then the MSI folder <Program Files>\PowerShell\7, then
@@ -58,9 +66,10 @@
 #      pins the execution policy to AllSigned / Restricted, or Windows refusing to start uv.exe
 #      or the .venv python.exe because of an application control policy)
 #   3  a program is installed but not visible in this session (PATH), or a reboot is
-#      needed: close Claude Code completely and open it again
+#      needed: close Claude Code completely and open it again (the desktop app: quit it from
+#      its icon in the notification area)
 #   2  the user must allow or do something (a required program is missing or too
-#      old, Python must be downloaded, .venv is broken, or a program needs administrator rights)
+#      old, Python must be downloaded, .venv is broken)
 #   0  ready
 # The claude CLI (S6) is recommended, not required: with the default settings nothing starts it
 # (build.execution = "host", the reviewer is a subagent). Missing, not visible in this session or
@@ -68,12 +77,16 @@
 # required (missing: fail, exit 2; not visible: exit 3) only in a project whose
 # .gatekit/config.json says build.execution = "worker" or names a backend in verify.evaluator
 # (Test-CliRequired in common.ps1).
+# Git (S7) is recommended too: gatekit runs without it, so a missing Git, or one that is visible
+# only after a restart, is a warn that leaves the exit code alone. A Git install the user allowed
+# and that failed is reported like any other failed install (S16-git).
 # Test hooks (environment): GATEKIT_SETUP_KEEP_PATH=1 never reads the registry PATH;
 #   GATEKIT_SETUP_REGISTRY_PATH replaces the registry PATH value (these two are read by
 #   common.ps1, so session-check.ps1 honors them too); GATEKIT_SETUP_SYNC_TIMEOUT
 #   (seconds) replaces the 300 second uv sync limit; GATEKIT_SETUP_MIN_PYTHON (major.minor)
 #   replaces the required 3.14 for the .venv Python; GATEKIT_SETUP_LIST_TIMEOUT (seconds) replaces
-#   the 30 second `winget list` limit of the package table; GATEKIT_SETUP_OFFICIAL_RUNNER is an
+#   the 30 second `winget list` limit of the package table; GATEKIT_SETUP_INSTALL_TIMEOUT (seconds)
+#   replaces the 900 second limit of one winget install / upgrade; GATEKIT_SETUP_OFFICIAL_RUNNER is an
 #   executable run instead of the official installer script (it receives the script URL);
 #   GATEKIT_SETUP_PWSH_PACKAGES replaces the Get-AppxPackage lookup of PowerShell 7: "none", or
 #   "<package name>=<version>" pairs separated by ";" (an empty value counts as not set; read by
@@ -158,7 +171,9 @@ try { if ("$($pkgData.python_min)" -match '^\d+\.\d+$') { $pythonMinimum = [vers
 if ($env:GATEKIT_SETUP_MIN_PYTHON -match '^\d+\.\d+$') { $pythonMinimum = [version]$env:GATEKIT_SETUP_MIN_PYTHON }
 $syncTimeout = 300
 $listTimeout = 30
+$installTimeout = 900
 if ($env:GATEKIT_SETUP_LIST_TIMEOUT -match '^\d+$') { $listTimeout = [int]$env:GATEKIT_SETUP_LIST_TIMEOUT }
+if ($env:GATEKIT_SETUP_INSTALL_TIMEOUT -match '^\d+$') { $installTimeout = [int]$env:GATEKIT_SETUP_INSTALL_TIMEOUT }
 if ($env:GATEKIT_SETUP_SYNC_TIMEOUT -match '^\d+$') { $syncTimeout = [int]$env:GATEKIT_SETUP_SYNC_TIMEOUT }
 
 $script:sessionPath = $env:Path                     # the PATH this session was started with
@@ -182,6 +197,15 @@ try { if ((Get-UICulture).TwoLetterISOLanguageName -eq 'ko') { $script:langMode 
 function T([string]$ko, [string]$en) {
     if ($script:langMode -eq 'ko') { return $ko }
     return $en
+}
+
+# One wording for "reopen Claude Code": the exit code 3 line, a program that is visible only in
+# the registry PATH, and an install that is not visible yet. Closing the window of the desktop app
+# leaves it running in the notification area with the PATH it started with, so the sentence also
+# says where to quit it.
+function Get-ReopenAdvice {
+    return (T 'Claude Code(데스크톱 앱, VS Code 창, 또는 실행 중인 터미널)를 완전히 닫고 다시 여세요. 데스크톱 앱은 창을 닫아도 남아 있으니 작업 표시줄 오른쪽 아래(트레이)의 Claude 아이콘에서 종료하세요' `
+              'close Claude Code completely (the desktop app, the VS Code window, or the terminal it runs in) and open it again. The desktop app keeps running after its window is closed: quit it from the Claude icon in the notification area (bottom right of the taskbar)')
 }
 
 function Out-Human([string]$text) { if (-not $Json) { Write-Host $text } }
@@ -250,7 +274,7 @@ function Complete-Run {
         0 = (T '준비됨' 'ready')
         1 = (T '실패' 'failed')
         2 = (T '사용자 허락·조치 필요' 'needs the user to allow or do something')
-        3 = (T '재시작 필요: Claude Code(데스크톱 앱, VS Code 창, 또는 실행 중인 터미널)를 완전히 닫고 다시 여세요' 'restart needed: close Claude Code completely (the desktop app, the VS Code window, or the terminal it runs in) and open it again')
+        3 = ((T '재시작 필요: ' 'restart needed: ') + (Get-ReopenAdvice))
         4 = (T '정책·네트워크로 불가' 'blocked by policy or network')
     }
     if ($Json) {
@@ -368,7 +392,7 @@ foreach ($n in $reinstallList) {
         $argsBad = $true
         $why = T ('거부됨: "' + $n + '" 은(는) -Reinstall 허용 목록에 없습니다') ('refused: "' + $n + '" is not in the -Reinstall allowed list')
         $hint = T ('허용: ' + ($allowedReinstall -join ', ')) ('allowed: ' + ($allowedReinstall -join ', '))
-        if ($n -eq 'git') { $hint = (T 'git 은 관리자 권한이 필요할 수 있어 자동으로 다시 설치하지 않습니다. 직접 설치하세요: winget install --id ' 'git may need administrator rights, so it is never reinstalled automatically. Install it yourself: winget install --id ') + $script:pkgs['git'].winget_id + ' -e' }
+        if ($n -eq 'git') { $hint = (T 'git 은 없을 때 -Install git 으로 설치하고, 이미 있는 것은 다시 설치하지 않습니다. 직접 다시 설치하려면(사용자 범위가 안 되면 관리자 권한이 필요할 수 있음): winget install --id ' 'git is installed with -Install git when it is missing; an existing one is never reinstalled here. To reinstall it yourself (it may need administrator rights when the user scope does not work): winget install --id ') + $script:pkgs['git'].winget_id + ' -e --source winget --scope user' }
         if ($n -eq 'venv') { $hint = T '.venv 는 -Install venv 로 다시 만듭니다' 'the .venv is rebuilt with -Install venv' }
         Add-Item 'args' 'required' (T '스위치' 'switch') 'fail' $why $hint
     }
@@ -473,7 +497,7 @@ function Get-VersionFrom([string]$text) {
 function Add-RestartItem([string]$id, [string]$level, [string]$name, [string]$found, [bool]$setFlag = $true) {
     if ($setFlag) { Set-Flag 'restart' }
     Add-Item $id $level $name 'warn' (T ('설치되어 있지만(' + $found + ') 지금 창의 PATH 에는 보이지 않습니다.') ('installed (' + $found + ') but not visible on the PATH of this session.')) `
-        (T 'Claude Code(데스크톱 앱, VS Code 창, 또는 실행 중인 터미널)를 완전히 닫고 다시 여세요. 그런 다음 /gatekit-setup 을 다시 실행하세요' 'close Claude Code completely (the desktop app, the VS Code window, or the terminal it runs in) and open it again, then run /gatekit-setup again')
+        ((Get-ReopenAdvice) + (T '. 그런 다음 /gatekit-setup 을 다시 실행하세요' '. Then run /gatekit-setup again'))
 }
 
 $winPs = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
@@ -546,8 +570,9 @@ function Test-NetworkText([string]$text) {
 
 # ---- actions (only for names the user allowed) -------------------------------
 # With $defer the failure is NOT reported: the caller decides (fallback) and reports it via
-# Report-WingetDeferred. Returns $true on success.
-function Invoke-WingetAction([string]$verb, [string]$id, [string]$name, [string]$what, [string[]]$extra = @(), [bool]$defer = $false) {
+# Report-InstallFailure. Returns $true on success. $timeoutHints: extra lines for the timeout
+# item (the caller knows what the install may have been waiting for).
+function Invoke-WingetAction([string]$verb, [string]$id, [string]$name, [string]$what, [string[]]$extra = @(), [bool]$defer = $false, [string[]]$timeoutHints = @()) {
     $script:lastWingetFail = $null
     $winget = Find-App 'winget' $script:sessionPath
     if ($winget.Count -eq 0) {
@@ -566,7 +591,7 @@ function Invoke-WingetAction([string]$verb, [string]$id, [string]$name, [string]
         } elseif ($script:wingetInstall -eq 'restart') {
             $cls = 'winget-restart'
             $msg = T ('winget 은 설치됐지만 이 창에서 아직 보이지 않아 ' + $label + ' 을(를) 설치하지 못했습니다.') ('winget was installed but is not visible in this session yet, so ' + $label + ' could not be installed.')
-            $act = T 'Claude Code(데스크톱 앱, VS Code 창, 또는 실행 중인 터미널)를 완전히 닫고 다시 연 뒤 다시 실행하세요.' 'close Claude Code completely (the desktop app, the VS Code window, or the terminal it runs in), open it again, then run again.'
+            $act = (Get-ReopenAdvice) + (T '. 그런 다음 다시 실행하세요.' '. Then run again.')
         }
         Add-FailureRecord $name $script:currentAction $cls '' $msg
         Set-Flag 'needs'
@@ -576,13 +601,13 @@ function Invoke-WingetAction([string]$verb, [string]$id, [string]$name, [string]
     Say 'info' ('A-' + $name) $name (T ('winget ' + $verb + ' ' + $id + ' 실행 중...') ('running winget ' + $verb + ' ' + $id + ' ...'))
     $wargs = @($verb, '--id', $id, '-e', '--source', 'winget', '--disable-interactivity',
                '--accept-source-agreements', '--accept-package-agreements') + @($extra)
-    $r = Invoke-Proc $winget[0].Source $wargs 900
+    $r = Invoke-Proc $winget[0].Source $wargs $installTimeout
     if ($r.TimedOut) {
         [void]$script:failedActions.Add($name)
         Add-FailureRecord $name $script:currentAction 'timeout' '' (T 'winget 이 제한 시간 안에 끝나지 않아 중단했습니다.' 'winget did not finish in time and was stopped.')
         Set-Flag 'blocked'
         Add-Item ('S16-' + $name) 'required' ($name + ' ' + (T '설치' 'install')) 'fail' (T 'winget 이 제한 시간 안에 끝나지 않아 중단했습니다.' 'winget did not finish in time and was stopped.') `
-            (T '네트워크를 확인하고 다시 시도하세요. 계속되면 IT 담당자에게 문의하세요.' 'check the network and try again. If it keeps happening, ask your IT contact.')
+            (T '네트워크를 확인하고 다시 시도하세요. 계속되면 IT 담당자에게 문의하세요.' 'check the network and try again. If it keeps happening, ask your IT contact.') $timeoutHints
         return $false
     }
     if ($r.Code -eq 0) { return $true }
@@ -924,13 +949,35 @@ function Invoke-Action([string]$name, [string]$mode) {
             }
         }
         'git' {
-            # S10: Git for Windows normally asks for administrator rights and this
-            # script cannot tell beforehand, so it never runs it.
-            Set-Flag 'needs'
-            Add-Item 'S10-git' 'info' 'git' 'warn' (T '관리자 권한이 필요할 수 있어 자동으로 실행하지 않습니다.' 'it may need administrator rights, so it is not run automatically.') `
-                (T '직접 설치하세요(선택 사항).' 'install it yourself (optional).') `
-                @(('winget install --id ' + $script:pkgs['git'].winget_id + ' -e --source winget'), $script:pkgs['git'].docs_url)
-            return
+            # S10: Git for Windows comes through winget only (no official installer script).
+            # First the user-scope installer (--scope user), which needs no administrator rights.
+            # Only when that attempt fails for a reason of its own (class "unknown": no
+            # user-scope installer applies, or the installer itself failed) is the install tried
+            # once more without a scope. winget and the installer may then show the Windows
+            # administrator prompt (UAC) themselves; the S10-git line says so BEFORE that attempt.
+            # A policy block, a network problem, agreements that are not accepted and a timeout
+            # are not retried: another scope does not change them.
+            $gitId = $script:pkgs['git'].winget_id
+            $gitWhat = 'Git for Windows (winget ' + $gitId + ')'
+            $ok = Invoke-WingetAction 'install' $gitId 'git' $gitWhat @('--scope', 'user') $true
+            if (-not $ok -and $script:lastWingetFail) {
+                $wf = $script:lastWingetFail
+                if ($wf.fail.cls -eq 'unknown') {
+                    Add-Item 'S10-git' 'recommended' 'git' 'info' (T ('사용자 범위 설치가 되지 않았습니다(0x' + $wf.fail.hex + '). 범위를 정하지 않고 다시 시도합니다.') ('the user-scope install did not work (0x' + $wf.fail.hex + '). Trying again without a scope.')) `
+                        (T '관리자 확인 창(UAC)이 뜰 수 있습니다. 그 창은 다른 창 뒤에 숨을 수 있으니, 보이지 않으면 작업 표시줄에서 깜박이는 아이콘을 눌러 허용하세요' 'a Windows administrator prompt (UAC) may appear. It can hide behind other windows: if you do not see it, click the flashing icon on the taskbar and allow it')
+                    $uacHint = T '관리자 확인 창(UAC)에 답하지 않아 멈췄을 수 있습니다. 작업 표시줄에서 그 창을 찾아 허용한 뒤 다시 시도하세요.' 'it may have been waiting for the Windows administrator prompt (UAC). Find that window on the taskbar, allow it, then try again.'
+                    $ok = Invoke-WingetAction 'install' $gitId 'git' $gitWhat @() $true @($uacHint)
+                    if (-not $ok -and $script:lastWingetFail) {
+                        $wf = $script:lastWingetFail
+                        if ($wf.fail.cls -eq 'unknown') {
+                            $wf.fail.can = (T '관리자 확인 창에서 허용하지 않았거나 이 계정에 관리자 권한이 없으면 설치되지 않습니다. 다시 시도하거나, 이 주소에서 설치 파일을 받아 직접 설치하세요: ' 'it is not installed when the administrator prompt was not allowed or this account has no administrator rights. Try again, or download the installer from this address and install it yourself: ') + $script:pkgs['git'].docs_url
+                        }
+                        Report-InstallFailure 'git' $wf.what $wf.fail $wf.out
+                    }
+                } else {
+                    Report-InstallFailure 'git' $wf.what $wf.fail $wf.out
+                }
+            }
         }
     }
     if ($ok) {
@@ -950,7 +997,7 @@ function Invoke-Action([string]$name, [string]$mode) {
             [void]$script:failedActions.Add($name)
             Add-FailureRecord $name $mode 'restart' '' (T '설치했지만 PATH 를 다시 읽어도 보이지 않습니다.' 'installed, but still not visible after re-reading PATH.')
             Add-Item ('S9-' + $name) 'required' $name 'warn' (T '설치했지만 PATH 를 다시 읽어도 보이지 않습니다.' 'installed, but still not visible after re-reading PATH.') `
-                (T 'Claude Code(데스크톱 앱, VS Code 창, 또는 실행 중인 터미널)를 완전히 닫고 다시 여세요. 그런 다음 /gatekit-setup 을 다시 실행하세요.' 'close Claude Code completely (the desktop app, the VS Code window, or the terminal it runs in) and open it again, then run /gatekit-setup again.')
+                ((Get-ReopenAdvice) + (T '. 그런 다음 /gatekit-setup 을 다시 실행하세요.' '. Then run /gatekit-setup again.'))
         } else {
             Remove-FailureRecord $name
             $modeKo = '업데이트'
@@ -1465,18 +1512,32 @@ if ($claudeFound.where -eq 'none' -and -not $cliRequired) {
 }
 
 # S7 git ------------------------------------------------------------------------
+# Recommended, like the claude CLI with the default settings: gatekit runs without Git, so a
+# missing one, or one that is visible only after a restart, is a warn that sets no exit flag.
+# It is recommended because a project that came as a zip file has nothing to restore a file from.
 $gitFound = Get-App 'git' $script:sessionPath
 $gitApps = $gitFound.apps
 $script:pkgInfo['git'] = @{ where = $gitFound.where; path = ''; version = '' }
 if ($gitFound.where -eq 'none') {
-    Add-Item 'S7' 'info' 'git' 'info' (T 'Git for Windows 가 없습니다. Claude Code 는 PowerShell 도구로 동작합니다.' 'Git for Windows not found. Claude Code works through its PowerShell tool.') (T '필요하면 직접 설치하세요(관리자 권한이 필요할 수 있음)' 'install it yourself if you want it (it may need administrator rights)')
+    $gitAct = T '허락하면 설치합니다 (-Install git). 직접 하려면 아래를 실행하세요' 'installed if you allow it (-Install git). To do it yourself run this'
+    if ($wingetFound.where -eq 'none') {
+        $gitAct = T 'winget 도 없습니다. 허락하면 둘 다 설치합니다 (-Install winget,git). 직접 하려면 아래를 실행하세요' 'winget is missing too. Both are installed if you allow it (-Install winget,git). To do it yourself run this'
+    }
+    Add-Item 'S7' 'recommended' 'git' 'warn' (T 'Git for Windows 가 없습니다. 없어도 gatekit 은 동작하지만, 바뀐 파일을 저장소의 상태로 되돌리거나 작업 이력을 남기려면 필요합니다.' 'Git for Windows not found. gatekit works without it, but restoring a changed file from the repository and keeping a history of your work need it.') $gitAct `
+        @(('winget install --id ' + $script:pkgs['git'].winget_id + ' -e --source winget --scope user'),
+          ((T 'winget 없이 하려면 이 주소에서 설치 파일을 받으세요: ' 'without winget, download the installer from this address: ') + $script:pkgs['git'].docs_url),
+          (T '사용자 범위로 먼저 설치합니다. 그것이 안 될 때만 범위 없이 다시 시도하며, 그때는 관리자 확인 창(UAC)이 뜰 수 있고 다른 창 뒤에 숨을 수 있습니다.' 'the user-scope install is tried first. Only if it does not work is the install tried again without a scope; a Windows administrator prompt (UAC) may then appear, and it can hide behind other windows.'))
 } elseif ($gitFound.where -eq 'registry') {
-    Add-RestartItem 'S7' 'info' 'git' $gitApps[0].Source
+    Add-RestartItem 'S7' 'recommended' 'git' $gitApps[0].Source $false
 } else {
     $gp = Invoke-Proc $gitApps[0].Source @('--version') 15
     $gv = Get-VersionFrom $gp.Out
     $script:pkgInfo['git'] = @{ where = 'session'; path = $gitApps[0].Source; version = $(if ($gv) { $gv.ToString() } else { '' }) }
-    Add-Item 'S7' 'info' 'git' 'info' $gp.Out.Trim()
+    if ($gv) {
+        Add-Item 'S7' 'recommended' 'git' 'ok' $gp.Out.Trim()
+    } else {
+        Add-Item 'S7' 'recommended' 'git' 'unverified' ((T '실행해서 버전을 읽지 못했습니다: ' 'could not run it to read the version: ') + $gitApps[0].Source)
+    }
 }
 
 # S19 package table (winget-managed programs) --------------------------------------
