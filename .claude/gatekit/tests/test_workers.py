@@ -298,10 +298,9 @@ class TestProbe(WorkerTestCase):
 
 
 class TestEvaluatorDefault(unittest.TestCase):
-    """On gk-trial2 `verify.evaluator` was left at `agent`, so Claude graded
-    Claude — the failure ADR-0007 exists to prevent, reached by leaving a
-    default alone. An unset evaluator now resolves to an enabled backend whose
-    name differs from the host."""
+    """ADR-0023: the reviewer is the host's read-only subagent unless the
+    project names a backend. One model is the normal case, so the default
+    carries no warning; a named backend that cannot review is reported."""
 
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
@@ -315,56 +314,38 @@ class TestEvaluatorDefault(unittest.TestCase):
         (self.root / ".gatekit" / "config.json").write_text(
             json.dumps(cfg), encoding="utf-8")
 
-    def test_unset_resolves_to_an_enabled_other_backend(self) -> None:
-        self.write_cfg({"worker": {"default": "claude", "backends": {
-            "claude": {"argv": ["claude"], "read_only_argv": ["claude"], "enabled": True},
-            "other": {"argv": ["other"], "read_only_argv": ["other"], "enabled": True}}}})
-        self.assertEqual(workers.evaluator_name(self.root, host="claude"), "other")
+    TWO = {"claude": {"argv": ["claude"], "read_only_argv": ["claude"], "enabled": True},
+           "other": {"argv": ["other"], "read_only_argv": ["other"], "enabled": True}}
 
-    def test_an_explicit_setting_always_wins(self) -> None:
+    def test_unset_is_the_hosts_subagent_without_a_warning(self) -> None:
+        # No second backend is looked for, and nothing is reported as a problem.
+        self.write_cfg({"worker": {"default": "claude", "backends": self.TWO}})
+        self.assertEqual(workers.evaluator_choice(self.root, host="claude"), ("agent", ""))
+        self.assertEqual(workers.evaluator_name(self.root), "agent")
+
+    def test_an_explicit_agent_is_agent(self) -> None:
         self.write_cfg({"verify": {"evaluator": "agent"},
-                        "worker": {"default": "claude", "backends": {
-                            "other": {"argv": ["other"], "read_only_argv": ["other"],
-                                      "enabled": True}}}})
-        self.assertEqual(workers.evaluator_name(self.root, host="claude"), "agent")
+                        "worker": {"default": "claude", "backends": self.TWO}})
+        self.assertEqual(workers.evaluator_choice(self.root), ("agent", ""))
 
-    def test_a_disabled_other_backend_is_not_chosen(self) -> None:
-        self.write_cfg({"worker": {"default": "claude", "backends": {
-            "claude": {"argv": ["claude"], "read_only_argv": ["claude"], "enabled": True},
-            "other": {"argv": ["other"], "read_only_argv": ["other"], "enabled": False}}}})
-        self.assertEqual(workers.evaluator_name(self.root, host="claude"), "agent")
+    def test_a_named_enabled_backend_is_used(self) -> None:
+        self.write_cfg({"verify": {"evaluator": "other"},
+                        "worker": {"default": "claude", "backends": self.TWO}})
+        self.assertEqual(workers.evaluator_choice(self.root, host="claude"), ("other", ""))
 
-    def test_a_backend_without_read_only_argv_cannot_grade(self) -> None:
-        self.write_cfg({"worker": {"default": "claude", "backends": {
-            "claude": {"argv": ["claude"], "read_only_argv": ["claude"], "enabled": True},
-            "other": {"argv": ["other"], "enabled": True}}}})
-        self.assertEqual(workers.evaluator_name(self.root, host="claude"), "agent")
-
-    def test_the_host_never_grades_itself(self) -> None:
-        """An `other`-hosted project grades with Claude, not `other` — the
-        rule is symmetric. `config.DEFAULTS` always carries an enabled
-        `claude` backend, so this is a realistic shape."""
-        self.write_cfg({"worker": {"default": "other", "backends": {
-            "other": {"argv": ["other"], "read_only_argv": ["other"], "enabled": True}}}})
-        self.assertEqual(workers.evaluator_name(self.root, host="other"), "claude")
-
-    def test_agent_only_when_every_backend_is_the_host(self) -> None:
-        self.write_cfg({"worker": {"default": "claude", "backends": {
-            "claude": {"argv": ["claude"], "read_only_argv": ["claude"], "enabled": True},
-            "other": {"enabled": False}}}})
-        self.assertEqual(workers.evaluator_name(self.root, host="claude"), "agent")
-
-    def test_falling_back_to_agent_is_reported(self) -> None:
-        self.write_cfg({"worker": {"default": "claude", "backends": {
-            "claude": {"argv": ["claude"], "read_only_argv": ["claude"], "enabled": True}}}})
-        name, why = workers.evaluator_choice(self.root, host="claude")
-        self.assertEqual(name, "agent")
-        self.assertIn("same model", why.lower())
-
-    def test_choosing_another_backend_says_so(self) -> None:
-        self.write_cfg({"worker": {"default": "claude", "backends": {
-            "claude": {"argv": ["claude"], "read_only_argv": ["claude"], "enabled": True},
-            "other": {"argv": ["other"], "read_only_argv": ["other"], "enabled": True}}}})
-        name, why = workers.evaluator_choice(self.root, host="claude")
-        self.assertEqual(name, "other")
-        self.assertEqual(why, "")
+    def test_a_named_backend_that_cannot_review_falls_back_and_says_so(self) -> None:
+        cannot = (
+            {"argv": ["other"], "read_only_argv": ["other"], "enabled": False},  # disabled
+            {"argv": ["other"], "enabled": True},  # no read-only arguments
+            None,  # not configured at all
+        )
+        for entry in cannot:
+            with self.subTest(entry=entry):
+                backends = {"claude": self.TWO["claude"]}
+                if entry is not None:
+                    backends["other"] = entry
+                self.write_cfg({"verify": {"evaluator": "other"},
+                                "worker": {"default": "claude", "backends": backends}})
+                name, why = workers.evaluator_choice(self.root)
+                self.assertEqual(name, "agent")
+                self.assertIn("other", why)

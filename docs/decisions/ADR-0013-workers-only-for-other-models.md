@@ -3,6 +3,7 @@
 Status: accepted 2026-09-17 (owner approval in the session that measured the
 run); all six decisions implemented the same day and released in 0.8.0.
 The parts that name Codex or a second model backend are not adopted in this fork (Claude Code only, ADR-0018).
+Decision 2 (an unset evaluator resolves to a backend that differs from the host, with a warning otherwise) is superseded by ADR-0023.
 **Decision 1's default finally applied 2026-09-27**: the original
 implementation left `config.DEFAULTS["build"]["execution"] = "worker"` as a
 compatibility hedge, so `jobs.execution_mode`'s "unset means host" fallback

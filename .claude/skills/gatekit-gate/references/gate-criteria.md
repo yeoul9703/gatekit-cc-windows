@@ -73,7 +73,7 @@ plausible-looking pass invalid, at minimum:
 - a command exiting 0 with its declared artifact absent
 - a UI task's screenshot criterion coming back `unverified` (no browser, no
   E2E runner) being reported as if the screen were confirmed working — it
-  means nobody, human or evaluator, has actually looked at it yet
+  means nobody, human or reviewer, has actually looked at it yet
 - **a feature whose own tests pass while nothing on a real screen reaches
   it.** A real trial shipped three features this way: each had passing
   tests and none was wired into the page. So for a UI-bearing project,

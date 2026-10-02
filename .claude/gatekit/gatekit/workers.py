@@ -60,37 +60,33 @@ def default_name(root) -> str:
 
 
 def evaluator_choice(root, host: Optional[str] = None) -> tuple:
-    """``(evaluator_name, why_not_another_model)`` (ADR-0013 decision 2).
+    """``(reviewer_name, warning)`` for ``/gatekit-verify`` (ADR-0023).
 
-    An explicit ``verify.evaluator`` always wins — including ``"agent"``, which
-    a user may choose deliberately. When it is unset the evaluator resolves to
-    an **enabled backend whose name differs from the host** and which has a
-    ``read_only_argv``, so grading is done by a model that did not write the
-    code. With no such backend it falls back to ``"agent"`` and returns the
-    reason, which callers print: on the gk-trial2 run the field was left unset,
-    so Claude graded Claude, which is the failure ADR-0007 exists to prevent
-    reached by leaving a default alone.
+    The reviewer is ``"agent"`` — a read-only subagent of the host — unless the
+    project set ``verify.evaluator`` to a backend. What keeps the judgement
+    apart from the work is that the criteria were approved and hash-pinned
+    before the code was written and that the reviewer never saw the building
+    session, not that a second model exists; so a project with one model is the
+    normal case and carries no warning.
+
+    A backend named in ``verify.evaluator`` is used when it is enabled and has
+    a ``read_only_argv``. When it is not, the reviewer falls back to
+    ``"agent"`` and the reason is returned, so a setting that silently does
+    nothing is said out loud. *host* is accepted for callers that pass it and
+    no longer changes the answer.
     """
+    del host
     cfg = config.load(root)
     value = (cfg.get("verify") or {}).get("evaluator")
-    if isinstance(value, str) and value.strip():
-        return value.strip(), ""
-
-    host_name = (host or default_name(root) or "").strip().lower()
-    backends = ((cfg.get("worker") or {}).get("backends") or {})
-    for name in sorted(backends):
-        entry = backends.get(name) or {}
-        if not isinstance(entry, dict) or not entry.get("enabled"):
-            continue
-        if name.strip().lower() == host_name:
-            continue
-        if not entry.get("read_only_argv"):
-            continue  # cannot be sandboxed read-only, so cannot grade
+    name = value.strip() if isinstance(value, str) else ""
+    if not name or name == "agent":
+        return "agent", ""
+    entry = ((cfg.get("worker") or {}).get("backends") or {}).get(name)
+    if isinstance(entry, dict) and entry.get("enabled") and entry.get("read_only_argv"):
         return name, ""
     return "agent", (
-        "no enabled backend differs from the host (%s), so the grader is the "
-        "same model that wrote the code"
-        % (host_name or "unknown")
+        "verify.evaluator names %r, which is not an enabled backend with a "
+        "read_only_argv; the host's read-only subagent reviews instead" % name
     )
 
 
@@ -333,7 +329,7 @@ def run(argv: list) -> int:
             ev, why = evaluator_choice(root)
             print("evaluator: %s" % ev)
             if why:
-                # ADR-0013: never let a same-model grader pass unremarked.
+                # ADR-0023: a named backend that cannot review is said out loud.
                 print("  warn: %s" % why)
         return 0
 

@@ -493,9 +493,12 @@ Sandboxing is never disabled by default; a backend with a bypass flag must set
 `"unsafe": true` and the job receipt records it. `read_only_argv` is the
 backend as an evaluator and must not be able to write; a backend without one
 cannot grade, and its writable `argv` is never substituted. `verify.evaluator`
-is `agent` (the host's own read-only subagent) or a backend name (ADR-0007). A
-project may add its own backend entries to `worker.backends` in
-`.gatekit/config.json` for another CLI.
+is `agent` (the host's own read-only subagent, the default, with no warning:
+ADR-0023) or a backend name, used only when that backend is enabled and has a
+`read_only_argv`. `/gatekit-verify` runs the contract once in the main session
+and gives the reviewer only the items a command cannot decide. A project may
+add its own backend entries to `worker.backends` in `.gatekit/config.json`
+for another CLI.
 
 ## 10. Jobs and workers (`jobs.py`, `workers.py`)
 
@@ -647,8 +650,9 @@ when the rest are not all `passed` (running, queued, or `blocked`), and
 `done` when every task is terminal.
 
 `jobs evaluate [--backend name] [--prompt FILE] [--lang ko|en]
-[--force-read-only-evaluator]` runs one worker as the independent evaluator
-(ADR-0007): job dir
+[--force-read-only-evaluator]` runs one worker as the reviewer, for a project that named a backend in
+`verify.evaluator` (ADR-0023; the default reviewer is a subagent and does not
+use this command): job dir
 `.gatekit/jobs/<job_id>/evaluate/{task.json,prompt.md,output.txt,stderr.txt,status.json}`,
 `job.json.kind = "evaluate"`, env `GATEKIT_TASK_ID=evaluate` with
 `task.json.write_scope = "read-only"` so the write gate refuses writes inside

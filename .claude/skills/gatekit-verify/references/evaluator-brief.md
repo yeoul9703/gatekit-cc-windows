@@ -1,74 +1,36 @@
-# Running the independent evaluator
+# The reviewer's brief
 
-Read by `/gatekit-verify` Step 2. It covers who grades, how each
-evaluator backend is launched, and the exact brief the evaluator is
-given — including the screenshot judgement and the `-visual` verdict.
+Read by `/gatekit-verify` Step 3, only when the contract run left items a
+command cannot decide. It covers how the reviewer is spawned and the exact
+brief it is given, including the screenshot judgement and the `-visual`
+verdict.
 
-## Step 2 — run the evaluator
+## Spawn one read-only reviewer
 
-Read who grades — the `evaluator` field of:
-
-```
-uv run --project .claude/gatekit --frozen python .claude/gatekit/bin/gatekit.py workers list --json
-```
-
-Unless the user set one explicitly, this resolves to an enabled backend whose
-name differs from the host, so the grader is not the model that wrote the code
-(ADR-0013). When no such backend exists it falls back to `agent` and the JSON
-carries `evaluator_warning` — **report that warning to the user**: it means the
-producer is grading itself, which is what this command exists to prevent. There
-is no second backend configured by default; a project that wants one adds it
-to `.gatekit/config.json`'s `worker.backends` by hand; if the user asks how,
-tell them the usage guide under the project's docs folder describes it.
-
-**If the evaluator is a backend name**, the grader is a separate CLI, a
-different model, running read-only against source (`write.py` refuses inside
-its session either way). Write the bullet list below (from "You
-are the evaluator" onward, in `output_lang`, leaving out the one bullet that
-starts "Record the result under" — a CLI evaluator cannot write) to
-`.gatekit/evaluator-prompt.md`, then run:
-
-```
-uv run --project .claude/gatekit --frozen python .claude/gatekit/bin/gatekit.py jobs evaluate --prompt .gatekit/evaluator-prompt.md
-```
-
-`evaluate` always runs the backend's read-only sandbox — the write gate is the
-real protection, so the evaluator never gets a writable session.
-
-It prints the evaluator's reply tail (the verdict table) and its state.
-`failed` or `timeout` means the evaluator did not finish; that is
-`unverified` for every criterion, never a pass. Then continue at Step 3 and
-write `spec/PROGRESS.md` yourself in Step 5.
-
-**Screenshot judging (decision 9) depends on the evaluator backend actually
-being able to read an image file**, which not every CLI backend supports
-the same way an `agent` evaluator (a multimodal model reading via `Read`)
-does. If the configured backend's documentation does not confirm image
-input, treat every `-visual` verdict from it as `unverified` rather than
-trusting a text-only guess about an image it could not actually see.
-
-**If the evaluator is `agent`**, spawn one Agent. Its prompt **must** contain
-this fence verbatim — the spawn gate parses it as JSON and denies the spawn
-without it:
+Spawn one Agent. Its prompt **must** contain this fence verbatim — the spawn
+gate parses it as JSON and denies the spawn without it:
 
 ````
 ```gatekit-scope
-{"write_scope": "read-only", "stop_when": "every criterion in .gatekit/contract.json and every E2E step in spec/05-gate.md has a verdict", "tools": ["Read", "Grep", "Glob", "Bash"]}
+{"write_scope": "read-only", "stop_when": "every listed item has a verdict", "tools": ["Read", "Grep", "Glob", "Bash"]}
 ```
 ````
 
-The rest of the evaluator's prompt says, in `output_lang`:
+Put the list from Step 3 in the prompt: each screenshot's criterion id and
+image path, and each check from `spec/05-gate.md` quoted as written. The
+reviewer gets these items and nothing else to decide.
 
-- You are the evaluator. You did not write this code and you must not change it.
-- Run `uv run --project .claude/gatekit --frozen python .claude/gatekit/bin/gatekit.py contract run --json` from the project root.
-- Read `spec/05-gate.md` and carry out every E2E step it describes by hand,
-  in order. Record what you actually observed, not what should happen.
-- For each criterion and each E2E step, give one verdict from
-  `ok / warn / fail / unverified`. A step you could not run is `unverified`;
-  never round it to either side.
-- **For each screenshot criterion that came back `ok`** (ADR-0017 decision
-  9 — its `artifacts` entry is a `spec/design/build-<task-id>.png`), read
-  that image file and judge it, in addition to the criterion's own pass:
+The rest of the prompt says, in `output_lang`:
+
+- You are the reviewer. You did not write this code and you must not change it.
+- Do not run the completion contract. The command criteria are already
+  decided; you are asked only about the items listed here.
+- For each check quoted from `spec/05-gate.md`, carry it out by hand. Record
+  what you actually observed, not what should happen.
+- Give each item one verdict from `ok / warn / fail / unverified`. An item you
+  could not carry out is `unverified`; never round it to either side.
+- **For each screenshot in the list** (ADR-0017 decision 9), read that image
+  file and judge it:
   does it match the design direction on record (a chosen preset, or a
   pattern in `spec/02-design.md`)? Does it show any pattern listed in
   `.claude/skills/gatekit-verify/assets/design-antipatterns.json`? **Read that
@@ -90,16 +52,27 @@ The rest of the evaluator's prompt says, in `output_lang`:
   are two different facts. If you cannot open or read the image, that
   verdict is `unverified`, not a silent skip.
 - Do not fix anything you find. Report it.
-- Record the result under the **last-verification heading that already exists**
-  in `spec/PROGRESS.md` (`## 마지막 검증` in Korean, `## Last verification` in
-  English). Do not add a heading in another language — `spec validate` treats
-  that as cross-language residue and fails. If the file or the heading is
-  missing, copy
-  `.claude/skills/gatekit-build/assets/<output_lang>/PROGRESS.md` first,
-  filling its YAML frontmatter block (`title`/`date`/`status`) along with the
-  rest of the placeholders.
-  Write the timestamp, the aggregate verdict, and one line per criterion and per
-  E2E step. This file is the one exception to read-only; nothing else may be
-  written.
 - Reply with the verdict table only. Do not paste command transcripts.
 
+The reviewer writes nothing. `spec/PROGRESS.md` is yours to write in Step 5.
+
+## A different program as the reviewer (opt-in)
+
+A project that has set `verify.evaluator` to an enabled backend name in
+`.gatekit/config.json` runs the same brief through that program instead of a
+subagent: write the bullet list above to `.gatekit/evaluator-prompt.md`, then
+
+```
+uv run --project .claude/gatekit --frozen python .claude/gatekit/bin/gatekit.py jobs evaluate --prompt .gatekit/evaluator-prompt.md
+```
+
+`evaluate` always uses the backend's read-only arguments. `failed` or
+`timeout` means every listed item is `unverified`, never a pass. A backend
+that cannot read image files cannot judge a screenshot: treat its `-visual`
+verdicts as `unverified`. Nothing is configured this way by default; the
+`evaluator` field of this command's output names the reviewer (`agent` unless
+the project chose otherwise):
+
+```
+uv run --project .claude/gatekit --frozen python .claude/gatekit/bin/gatekit.py workers list --json
+```

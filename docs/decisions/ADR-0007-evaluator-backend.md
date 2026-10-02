@@ -1,5 +1,7 @@
 # ADR-0007: The evaluator may be a different CLI than the builder
 
+Status: superseded as the default by ADR-0023 (the reviewer is the host's read-only subagent; a backend named in `verify.evaluator` remains an opt-in).
+
 ## Context
 
 `/gatekit:verify` separates producer from evaluator: the session that built

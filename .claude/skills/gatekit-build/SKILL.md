@@ -133,5 +133,5 @@ ran is `unverified`, not done.
 Read `.claude/skills/gatekit-shared/references/handoff.md` and follow it.
 Form: plain chat. Next: `/gatekit-verify`, only when every task is `passed` —
 a passing build is not a passing completion contract; only verify reports that,
-with an evaluator that did not write the code. If any task is blocked or did
+against the criteria the user approved. If any task is blocked or did
 not pass, say so plainly and do not hand off.
