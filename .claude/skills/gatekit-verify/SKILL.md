@@ -99,3 +99,10 @@ last-verification heading for `output_lang`. If the evaluator could not write
 it, write it yourself from its reply and say that you did. Then run
 `uv run --project .claude/gatekit --frozen python .claude/gatekit/bin/gatekit.py spec validate` and fix any
 PROGRESS.md finding before reporting.
+
+## Step 6 — hand off
+
+Read `.claude/skills/gatekit-shared/references/handoff.md` and follow it.
+Form: plain chat. The contract passes: there is no next skill — say the
+pipeline is finished. Anything else: offer `/gatekit-build` (or stop); there
+is no "more work here", because this skill never fixes what it finds.

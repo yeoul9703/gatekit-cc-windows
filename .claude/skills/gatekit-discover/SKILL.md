@@ -136,19 +136,18 @@ exist yet are expected.
 
 ## Step 6 — report
 
-In `output_lang`: the file path; the `spec validate` verdict quoted from the
-run; and the next command, `/gatekit-interview`. **Do not predict how much
-interview will ask** — this file records the problem, not how the solution
-behaves, and interview has its own ground to cover regardless of how
-thorough this conversation was. Do not claim the problem is real: report
-only what the record says and which parts the user has not confirmed.
+In `output_lang`: the file path and the `spec validate` verdict quoted from
+the run. **Do not predict how much interview will ask** — this file records
+the problem, not how the solution behaves, and interview has its own ground
+to cover regardless of how thorough this conversation was. Do not claim the
+problem is real: report only what the record says and which parts the user
+has not confirmed.
 
-## Step 7 — ask what happens next
+## Step 7 — hand off
 
-Plain chat (this pipeline never calls `AskUserQuestion`), in `output_lang`,
-right after the report: run `/gatekit-interview` now, keep talking about
-this or another opportunity first, or stop here.
+Read `.claude/skills/gatekit-shared/references/handoff.md` and follow it.
 
-- Proceeding: actually invoke `/gatekit-interview`, do not merely name it.
-- Continuing: return to Step 2, then re-run Step 3 onward once it settles.
-- Stopping: say the file is saved and name `/gatekit-interview` for later.
+- Form: plain chat (this pipeline never calls `AskUserQuestion`).
+- Next: `/gatekit-interview`.
+- More work here: keep talking about this or another opportunity — return
+  to Step 2, then re-run Step 3 onward once it settles.

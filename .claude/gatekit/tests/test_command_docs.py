@@ -225,6 +225,109 @@ class TestSkillBodies(unittest.TestCase):
                 self.assertEqual(found, files, "gatekit-%s/assets/%s" % (name, lang))
 
 
+class TestHandoff(unittest.TestCase):
+    """Every skill ends the same way: it points at the shared handoff rule and
+    adds only its own next skill. Setup is edited apart and names its next
+    command itself, so it is in the table but not in the pointer check."""
+
+    HANDOFF = ".claude/skills/gatekit-shared/references/handoff.md"
+
+    def setUp(self) -> None:
+        self.rule = read(PROJECT / self.HANDOFF)
+
+    def table_rows(self) -> dict:
+        rows = {}
+        for line in self.rule.splitlines():
+            match = re.match(r"\| `/gatekit-([a-z]+)` \|(.*)\|\s*$", line)
+            if match:
+                rows[match.group(1)] = match.group(2)
+        return rows
+
+    def test_the_last_step_of_every_skill_points_at_the_handoff_rule(self) -> None:
+        for name in NAMES:
+            if name == "setup":
+                continue
+            text = read(skill(name) / "SKILL.md")
+            title, _, body = text.rpartition("\n## ")[2].partition("\n")
+            self.assertRegex(title, r"^Step [\d.]+ — hand off$", "gatekit-" + name)
+            self.assertIn(self.HANDOFF, one_line(body), "gatekit-" + name)
+            # the rule is named once, at the end, and not copied into the skill
+            self.assertEqual(text.count(self.HANDOFF), 1, "gatekit-" + name)
+            self.assertNotIn("ask what happens next", text, "gatekit-" + name)
+
+    def test_the_last_step_says_how_the_question_is_asked(self) -> None:
+        # discover never opens the question window; the picker is never
+        # auto-approved through allowed-tools (questioning.md).
+        for name in NAMES:
+            if name == "setup":
+                continue
+            text = read(skill(name) / "SKILL.md")
+            last = one_line(text.rpartition("\n## ")[2])
+            self.assertRegex(last, r"plain chat|`AskUserQuestion`", "gatekit-" + name)
+            allowed = re.search(r"^allowed-tools: (.*)$", text, re.M).group(1)
+            self.assertNotIn("AskUserQuestion", allowed, "gatekit-" + name)
+        self.assertIn("plain chat", read(skill("discover") / "SKILL.md").rpartition("\n## ")[2])
+
+    def test_the_handoff_table_has_a_row_for_every_skill(self) -> None:
+        rows = self.table_rows()
+        self.assertEqual(sorted(rows), sorted(NAMES))
+        for name, rest in rows.items():
+            for other in re.findall(r"/gatekit-([a-z]+)", rest):
+                self.assertIn(other, NAMES, "row %s names /gatekit-%s" % (name, other))
+
+    def test_the_handoff_table_follows_the_required_path(self) -> None:
+        rows = self.table_rows()
+        usual = {name: rest.split("|")[0] for name, rest in rows.items()}
+        for name, following in (("discover", "interview"), ("interview", "mockup"),
+                                ("mockup", "tasks"), ("tasks", "gate"),
+                                ("gate", "build"), ("build", "verify")):
+            self.assertIn("`/gatekit-%s`" % following, usual[name], name)
+        self.assertNotIn("/gatekit-", usual["verify"])
+        # a project with screens cannot skip mockup; only [non-ui] goes around it
+        self.assertIn("[non-ui]", rows["interview"])
+        self.assertIn("Prototype confirmed", rows["mockup"])
+
+    def test_the_handoff_rule_keeps_the_safety_rules(self) -> None:
+        flat = one_line(self.rule)
+        self.assertIn("invoking the next skill", flat)
+        self.assertIn("never approves for the user", flat)
+        self.assertIn("never fixes what it finds", flat)
+        self.assertRegex(flat, r"never hands off while a task is `failed`, `timeout`, "
+                               r"`stopped` or `blocked`")
+        self.assertIn("do not offer to go on", flat)
+        # and each of the three skills still says it in its own body
+        self.assertIn("Do not approve on their behalf", one_line(read(skill("gate") / "SKILL.md")))
+        self.assertIn("do not hand off", one_line(read(skill("gate") / "SKILL.md")))
+        self.assertIn("do not hand off", one_line(read(skill("build") / "SKILL.md")))
+        self.assertIn("Do not fix the code here", one_line(read(skill("verify") / "SKILL.md")))
+
+    def test_build_tells_the_user_before_the_job_starts(self) -> None:
+        body = read(skill("build") / "SKILL.md")
+        notice = ".claude/skills/gatekit-build/references/build-notice.md"
+        self.assertIn(notice, one_line(body))
+        self.assertLess(body.index("build-notice.md"), body.index(CLI + " jobs start"))
+        text = read(PROJECT / notice)
+        self.assertIn(CLI + " jobs shape", text)
+        self.assertIn(CLI + " jobs status", text)
+        self.assertIn(CLI + " jobs start --tasks", text)
+        for word in ("`execution`", "`max_retries`", "`parallel`", "jobs complete", "jobs stop"):
+            self.assertIn(word, one_line(text), word)
+        # nothing here measures time or cost, so the notice gives no figure for them
+        self.assertNotRegex(text, r"\d+\s*(minutes?|hours?|tokens|dollars|%)")
+
+    def test_usage_names_every_skill_and_the_order(self) -> None:
+        usage = read(PROJECT / "docs" / "USAGE.md")
+        for name in NAMES:
+            self.assertIn("`/gatekit-%s`" % name, usage, name)
+        top = usage[:usage.index("\n## 1.")]
+        for name in NAMES:
+            self.assertIn("/gatekit-%s" % name, top, "the first screen misses " + name)
+        order = [top.index("/gatekit-" + n) for n in ("setup", "interview", "tasks",
+                                                       "gate", "build", "verify")]
+        self.assertEqual(order, sorted(order))
+        self.assertIn("`/doctor`", top)
+
+
 class TestSetupSkill(unittest.TestCase):
     def setUp(self) -> None:
         self.body = read(skill("setup") / "SKILL.md")

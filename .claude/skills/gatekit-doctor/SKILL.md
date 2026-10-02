@@ -89,3 +89,10 @@ taken through their own commands.
 
 If `$ARGUMENTS` contains `--json`, run `uv run --project .claude/gatekit --frozen python .claude/gatekit/bin/gatekit.py doctor --json` and
 show the JSON as-is. Do not reformat it or drop axes from it.
+
+## Step 5 — hand off
+
+Skip this after `--json`. Otherwise read
+`.claude/skills/gatekit-shared/references/handoff.md` and follow it, in plain
+chat. Next: the skill Step 3 routed the first axis that is not `ok` to; with
+every axis `ok` there is nothing to hand off. There is no "more work here".

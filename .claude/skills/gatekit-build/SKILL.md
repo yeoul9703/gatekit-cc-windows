@@ -51,8 +51,14 @@ uv run --project .claude/gatekit --frozen python .claude/gatekit/bin/gatekit.py 
 only check that catches a CLI that exists but cannot answer here (not logged
 in, or sandboxed away from its credentials). `fail`: stop and show the detail;
 the fix is to log in, or under a sandboxed host to run with escalated
-permissions. `unverified` (timed out) is not a blocker; say so once and
-continue.
+permissions. `unverified` (timed out) is no blocker; say so once and continue.
+
+## Step 1.5 — tell the user what is about to run
+
+**Read `.claude/skills/gatekit-build/references/build-notice.md` and follow
+it**: before any job starts, say once how many tasks and rounds, who writes
+the code, that it takes time and usage, and how a stopped build continues.
+If an earlier job still has tasks not `passed`, continue it as that file says.
 
 ## Step 2 — start the job
 
@@ -61,18 +67,13 @@ uv run --project .claude/gatekit --frozen python .claude/gatekit/bin/gatekit.py 
 ```
 
 Add `--tasks <ids>` when `$ARGUMENTS` named specific tasks, `--backend <name>`
-when the user asked for one. Read `max_retries` and `parallel` from
-`.gatekit/config.json`; do not pass `--parallel` unless the user asked.
+when the user asked for one; do not pass `--parallel` unless the user asked.
 
-The command prints one row per task. Record the job id. It first runs every
-task's gates once, before any worker (ADR-0009): gates that already pass
-record the task `passed` with no worker (a `warn: gate passed before any
-work existed` detail means that gate can pass on an empty tree — tell the
-user); a gate whose *command* errors ends the start with exit 4 and names the
-task and gate — fix it in `spec/04-tasks.md` (usually a glob instead of a
-directory) and start again, never `--no-preflight` to get past it.
+The command prints one row per task; record the job id. It first runs every
+task's gates once, before any worker (ADR-0009); `build-notice.md` explains the
+rows, a `warn:` line and exit 4 — never pass `--no-preflight` to get past one.
 
-**Under `execution: host`** the job's `plan` comes back and nothing spawns.
+**Under `execution: host`** nothing spawns and the `plan` is in `job.json`.
 Work it in round order (within a round, any order; `parallel_candidate` marks
 one wide enough to hand to workers). Read each task's `prompt.md` — write
 scope, gates, design, screens — implement it, then record the verdict with
@@ -106,23 +107,21 @@ pass: fix the dependency, then `jobs start --tasks <id>`. To end a job early,
 If every task passed, skip this step. For a `failed` or `timeout` task,
 **read `.claude/skills/gatekit-build/references/build-failures.md` and follow it**: it
 covers how to tell a wrong gate from wrong code, `jobs recheck` for a gate
-edit (never a new job), `jobs redelegate` for code, and what to do when a
-task is out of retries (exit 3: diagnose in `spec/RECOVERY.md` and stop the
-pipeline).
+edit (never a new job), `jobs redelegate` for code, and what to do when a task
+is out of retries (exit 3: diagnose in `spec/RECOVERY.md`, stop the pipeline).
 
 ## Step 5 — update progress
 
 When every task is terminal, update `spec/PROGRESS.md` in `output_lang`.
-
 If the file does not exist, copy
 `.claude/skills/gatekit-build/assets/<output_lang>/PROGRESS.md` first,
 filling its YAML frontmatter block (`title`/`date`/`status`) along with the
 rest of the placeholders. **Keep the template's headings exactly** — `spec
 validate` rejects a heading from the other language. Under them record: the
-job id, its execution mode and
-backend, and whether the build is done; one line per task (id, final state,
-gates passed of total); every redelegated task with the gate that failed and
-what changed; tasks left blocked with the failing gate named; the timestamp.
+job id, its execution mode and backend, and whether the build is done; one
+line per task (id, final state, gates passed of total); every redelegated task
+with the gate that failed and what changed; tasks left blocked with the failing
+gate named; the timestamp.
 
 Then run `uv run --project .claude/gatekit --frozen python .claude/gatekit/bin/gatekit.py spec validate` and fix
 any PROGRESS.md finding before reporting. Report the same table in chat, with
@@ -131,7 +130,8 @@ ran is `unverified`, not done.
 
 ## Step 6 — hand off
 
-If every task is `passed`, tell the user to run `/gatekit-verify` and stop.
-Build passing is not the same as the completion contract passing; only
-`/gatekit-verify` reports that, using an evaluator that did not write the
-code. If any task is blocked, say so plainly and do not hand off.
+Read `.claude/skills/gatekit-shared/references/handoff.md` and follow it.
+Form: plain chat. Next: `/gatekit-verify`, only when every task is `passed` —
+a passing build is not a passing completion contract; only verify reports that,
+with an evaluator that did not write the code. If any task is blocked or did
+not pass, say so plainly and do not hand off.

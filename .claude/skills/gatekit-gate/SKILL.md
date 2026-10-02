@@ -81,9 +81,15 @@ The check must print `ok`. Never edit the file to make a hash match.
 
 In `output_lang`: (1) the file path and the number of criteria; (2) the
 `spec validate` and `approve check` results, quoted from the runs; (3) that
-the write gate now allows source edits outside `spec/`; (4) that any later
+the write gate now allows source edits outside `spec/`; and (4) that any later
 edit to `05-gate.md` expires the approval and requires re-approval plus
-`contract derive`; (5) the next command, `/gatekit-build`.
+`contract derive`.
 
+## Step 8 — hand off
+
+Read `.claude/skills/gatekit-shared/references/handoff.md` and follow it.
+Form: plain chat — Step 6 may already have spent the question budget. Next:
+`/gatekit-build`, only when `approve check` printed `ok`. More work here:
+change a criterion (back to Step 6; the edit expires the approval).
 If the user did not approve, say so explicitly and state that the write gate
-remains closed. Do not approve on their behalf.
+remains closed. Do not approve on their behalf, and do not hand off.

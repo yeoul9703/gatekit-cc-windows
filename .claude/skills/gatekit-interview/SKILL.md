@@ -136,18 +136,16 @@ numbered list matching the ledger, each with its impact if wrong, blocking
 rows named plainly; (4) the pages settled on and what each does — the
 concrete output the next command needs; (5) what Step 2.5 proposed, by
 group (기본기 후보 / 참고 아이디어), and for each whether the user kept it
-(as which `F<n>`), made it a non-goal, or left it in `notes`; (6) the next
-command, `/gatekit-mockup`.
+(as which `F<n>`), made it a non-goal, or left it in `notes`.
 
 Do not claim the spec is correct. Claim only that it validates and that
 these assumptions are open.
 
-## Step 7 — ask what happens next
+## Step 7 — hand off
 
-One closing `AskUserQuestion`, in `output_lang`, right after the report —
-a routing choice, not information-gathering. Options: proceed to
-`/gatekit-mockup` now, revise a named section, or stop here.
+Read `.claude/skills/gatekit-shared/references/handoff.md` and follow it.
 
-- Proceeding: actually invoke `/gatekit-mockup`.
-- Revising: apply the change, re-run Step 4, ask again.
-- Stopping: confirm the files are saved and name `/gatekit-mockup`.
+- Form: one closing `AskUserQuestion`.
+- Next: `/gatekit-mockup`; `/gatekit-tasks` instead when the PRD's
+  non-goals carry the `[non-ui]` marker (a project with no screens).
+- More work here: revise a named section, then re-run Step 4.

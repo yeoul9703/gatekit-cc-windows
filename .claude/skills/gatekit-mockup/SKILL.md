@@ -134,19 +134,17 @@ In `output_lang`: (1) files written with paths, preview and prototype
 included; (2) screens and states extracted, as counts on their own line;
 (3) the `spec validate` verdict quoted from the run; (4) the negative-space
 list, then new assumption rows by number; (5) whether the prototype is
-confirmed and if not what is open; (6) the next command —
-`/gatekit-interview` if 01 is still a draft, else `/gatekit-tasks`, but
-only once the prototype is confirmed. Say plainly when it is not.
+confirmed and if not what is open. Say plainly when it is not.
 
 State what the mockup showed and what you filled in. **Never present a designed state as observed.**
 
-## Step 9 — ask what happens next
+## Step 9 — hand off
 
-One closing `AskUserQuestion` after the report. While the prototype is
-unconfirmed, "more work here" means continuing that revision loop, not a
-fresh run of Step 1. Options: keep revising (while unconfirmed), proceed to
-the command Step 8 named (once confirmed), or stop.
+Read `.claude/skills/gatekit-shared/references/handoff.md` and follow it.
 
-- Proceeding: actually invoke the named command.
-- Revising: return to the prototype loop.
-- Stopping: confirm what is saved and what remains open.
+- Form: one closing `AskUserQuestion`.
+- Next: `/gatekit-interview` if 01 is still a draft, else `/gatekit-tasks`
+  — offered only once the prototype is confirmed.
+- More work here: while the prototype is unconfirmed, continue that
+  revision loop (not a fresh run of Step 1). When stopping, say what
+  remains open as well as what is saved.

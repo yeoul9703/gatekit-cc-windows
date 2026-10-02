@@ -113,20 +113,22 @@ patching — never deliver a failing file. Missing 03, 04, 05 are expected
 ## Step 8 — ask only about gaps
 
 At most **one** `AskUserQuestion` call, four options, in `output_lang`, for
-the single gap where guessing wrong would cost the most. Skip it after a
-stop signal, and skip it if Step 2 already reported blast radius (don't
-stack a question on a mid-build report).
+the single gap where guessing wrong would cost the most. Skip it after a stop
+signal, and if Step 2 already reported blast radius (don't stack a question on
+a mid-build report).
 
 ## Step 9 — report
 
 In `output_lang`: files written (including anything under `spec/design/`);
 patterns and tokens extracted as counts; the `spec validate` verdict quoted
 from the run; the not-covered list; new or superseded assumption rows by
-number; if Step 2 found the pipeline mid-build, the tasks needing
-redelegation; and the next command — `/gatekit-tasks` if `04-tasks.md`
-doesn't exist yet or Step 2 found affected tasks (contract now stale),
-otherwise `/gatekit-mockup` if no screen spec exists, otherwise
-`/gatekit-tasks`.
+number; and, if Step 2 found the pipeline mid-build, the tasks needing
+redelegation. State what the source showed and what you filled in. Never
+present a designed value as an observed one.
 
-State what the source showed and what you filled in. Never present a
-designed value as an observed one.
+## Step 10 — hand off
+
+Read `.claude/skills/gatekit-shared/references/handoff.md` and follow it.
+Form: plain chat. Next: `/gatekit-tasks` if Step 2 found affected tasks
+(contract now stale), else `/gatekit-mockup` if a project with screens has no
+screen spec, else `/gatekit-tasks`. More work here: read one more source.

@@ -135,19 +135,15 @@ In `output_lang`:
 1. The file path written, with task count and round count on their own line.
 2. The `spec validate` verdict, quoted from the run.
 3. Any feature from 01 with no covering task.
-4. Next command: `/gatekit-gate`.
 
 Do not run any task. This command only plans them.
 
-## Step 8 — ask what happens next
+## Step 8 — hand off
 
-**ADR-0017 decision 6.** One closing `AskUserQuestion`, in `output_lang`,
-after the report. Options: proceed to `/gatekit-gate` now, revise the task
-list (merge tasks, loosen dependencies, or add a task for an uncovered
-feature), or stop here for now.
+**ADR-0017 decision 6.** Read
+`.claude/skills/gatekit-shared/references/handoff.md` and follow it.
 
-- Proceeding: actually invoke `/gatekit-gate`.
-- Revising: apply the change, re-run Step 6's validation, and ask this
-  question again.
-- Stopping: confirm the file is saved and name `/gatekit-gate` for later,
-  then end the turn.
+- Form: one closing `AskUserQuestion`.
+- Next: `/gatekit-gate`.
+- More work here: revise the task list (merge tasks, loosen dependencies,
+  or add a task for an uncovered feature), then re-run Step 6.
