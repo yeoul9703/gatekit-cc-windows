@@ -10,7 +10,7 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from gatekit import approval, ledger  # noqa: E402
+from gatekit import approval, ledger, paths  # noqa: E402
 from gatekit.gates import powershell as ps_gate  # noqa: E402
 from tests import isolation  # noqa: E402
 
@@ -928,6 +928,11 @@ class TestSpecBeforeCode(PowerShellGateProject):
         result = self.denied("Set-Content src/x.ts y; iex $c")
         self.assertIn("src/x.ts", self.reason(result))
 
+    def test_second_command_in_chain_is_checked(self) -> None:
+        for cmd in ("Set-Content spec/a.md y; Set-Content src/x.ts y",
+                    "Set-Content docs/a.md y | Out-File src/x.ts"):
+            self.assertIn("src/x.ts", self.reason(self.denied(cmd)))
+
     def test_relative_cd_inside_command(self) -> None:
         self.denied("cd src; Set-Content x.ts y")
         self.allowed("cd spec; Set-Content 01-prd.md y")
@@ -1062,60 +1067,65 @@ class TestFastPath(PowerShellGateProject):
             self.assertFalse((root / ".gatekit").exists())
 
 
-class TestTaskScope(PowerShellGateProject):
-    def setUp(self) -> None:
-        super().setUp()
+class TestApprovalRecord(PowerShellGateProject):
+    """While code is locked the gate reads commands, and a write it read that
+    lands on ``.gatekit/approvals.json`` is denied. ``gatekit.py approve`` is a
+    program invoked by name and passes; after approval commands are not read."""
+
+    def record_denied(self, command: str, **kwargs) -> None:
+        reason = self.reason(self.denied(command, **kwargs))
+        self.assertIn("승인 기록", reason, command)
+        self.assertIn("/gatekit-gate", reason, command)
+
+    def test_read_writes_of_the_record_are_denied_before_approval(self) -> None:
+        for cmd in (
+            "Set-Content .gatekit/approvals.json x",
+            "Set-Content -Path .gatekit\\approvals.json -Value x",
+            "Set-Content -LiteralPath '%s' -Value x" % (self.root / ".gatekit" / "approvals.json"),
+            "'x' > .gatekit/approvals.json", "'x' >> .gatekit\\approvals.json",
+            "'x' | Out-File .gatekit/approvals.json", "Add-Content .gatekit/approvals.json x",
+            "New-Item .gatekit/approvals.json -Value x", "ni .gatekit -Name approvals.json",
+            "Copy-Item forged.json .gatekit/approvals.json",
+            "Move-Item docs/forged.md .gatekit/approvals.json",
+            "Remove-Item .gatekit/approvals.json",
+            "cd .gatekit; Set-Content approvals.json x",
+            "Set-Content .GATEKIT/Approvals.JSON x",
+            "Set-Content .gatekit/approvals.json. x",  # Windows drops the trailing dot
+            "if ($true) { 'x' > .gatekit/approvals.json }",
+            "@'\n{}\n'@ | Set-Content .gatekit/approvals.json",
+        ):
+            self.record_denied(cmd)
+        self.record_denied("Set-Content approvals.json x", cwd=str(self.root / ".gatekit"))
+
+    def test_the_record_as_second_target_is_denied(self) -> None:
+        self.record_denied("Set-Content docs/n.md y; Set-Content .gatekit/approvals.json x")
+        self.record_denied("Set-Content docs/n.md y | Out-File .gatekit/approvals.json")
+
+    def test_other_files_under_gatekit_are_allowed_as_before(self) -> None:
+        for cmd in ("'x' | Out-File -FilePath .gatekit/note.txt", "Set-Content .gatekit/config.json x",
+                    "'x' > .gatekit/contract.json", "Set-Content .gatekit/approvals.json.bak x",
+                    "New-Item -ItemType Directory .gatekit/runs",
+                    "Get-Content .gatekit/approvals.json",
+                    "Copy-Item .gatekit/approvals.json docs/copy.md",
+                    "(Get-FileHash spec/05-gate.md -Algorithm SHA256).Hash"):
+            self.allowed(cmd)
+
+    def test_the_approve_command_is_allowed(self) -> None:
+        for tail in ("approve spec/05-gate.md", "approve spec/05-gate.md --note 'user said yes'",
+                     "approve check spec/05-gate.md", "approve list"):
+            self.allowed(paths.CLI_INVOCATION + " " + tail)
+
+    def test_commands_are_not_read_after_approval(self) -> None:
         self.approve()
-        task_dir = self.root / ".gatekit" / "jobs" / "job-1" / "tasks" / "auth"
-        task_dir.mkdir(parents=True)
-        self.task_json = task_dir / "task.json"
-        self.task_json.write_text(json.dumps({"id": "auth", "write_scope": ["src/auth/**"]}))
-        os.environ["GATEKIT_TASK_ID"] = "auth"
-        os.environ["GATEKIT_JOB_ID"] = "job-1"
+        for cmd in ("Set-Content .gatekit/approvals.json x", "'x' > .gatekit/approvals.json",
+                    "Set-Content $path y", "iex $c"):
+            self.allowed(cmd)
 
-    def test_write_inside_scope_allowed(self) -> None:
-        self.allowed("Set-Content src/auth/token.ts y")
-        self.allowed("Set-Content src\\auth\\token.ts y")
-        self.allowed("'x' > src/auth/deep/a.ts")
-
-    def test_write_outside_scope_denied(self) -> None:
-        self.assertIn("src/auth/**", self.reason(self.denied("Set-Content src/other.ts y")))
-        self.denied("'x' > spec/01-prd.md")
-
-    def test_escape_via_cd_denied(self) -> None:
-        self.denied("cd src/auth; Set-Content ..\\other.ts y")
-
-    def test_reproduced_bypasses_are_denied(self) -> None:
-        self.denied("Set-Content src/other.ts y")  # the control
-        self.assertIn("src/other.ts", self.reason(self.denied("`Set-Content src/other.ts y")))
-        self.assertIn("src/other.ts",
-                      self.reason(self.denied("cd src/auth; cd..; Set-Content other.ts y")))
-        self.denied("7z x a.zip -osrc/auth")
-        self.denied("cd src/auth; D:; Set-Content token.ts y")
-        self.allowed("cd src; cd..; Set-Content src/auth/token.ts y")
-        self.allowed("`Set-Content src/auth/token.ts y")
-
-    def test_second_command_in_chain_is_checked(self) -> None:
-        self.denied("Set-Content src/auth/a.ts y; Set-Content spec/01-prd.md y")
-        self.denied("Set-Content src/auth/a.ts y | Out-File spec/01-prd.md")
-
-    def test_move_source_outside_scope_denied(self) -> None:
-        self.denied("Move-Item src/other.ts src/auth/other.ts")
-        self.allowed("Move-Item src/auth/a.ts src/auth/b.ts")
-
-    def test_opaque_denied_for_scoped_worker(self) -> None:
-        self.denied("git checkout -- src/auth/a.ts")
-        self.denied("Set-Content $target y")
-
-    def test_read_only_task_denies_any_write_but_allows_reads(self) -> None:
-        self.task_json.write_text(json.dumps({"id": "auth", "write_scope": "read-only"}))
-        self.denied("Set-Content src/auth/token.ts y")
-        self.allowed("Get-Content src/auth/token.ts | Measure-Object -Line")
-
-    def test_outside_root_denied(self) -> None:
-        self.denied("Set-Content C:\\Windows\\Temp\\escape.ts y")
-        self.denied("Set-Content ..\\escape.ts y")
-        self.denied("Set-Content \\\\server\\share\\x y")
+    def test_no_spec_dir_means_the_gate_stays_back(self) -> None:
+        self.gate_md.unlink()
+        (self.root / "spec").rmdir()
+        self.allowed("Set-Content .gatekit/approvals.json x")
+        self.allowed("'x' > .gatekit/approvals.json")
 
 
 class TestSubprocessContract(PowerShellGateProject):

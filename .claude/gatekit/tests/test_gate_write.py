@@ -1,4 +1,4 @@
-"""Tests for gates/write.py — spec-before-code and task write_scope enforcement."""
+"""Tests for gates/write.py — spec before code, and the approval record no tool may write."""
 from __future__ import annotations
 
 import json
@@ -202,181 +202,134 @@ class TestSpecBeforeCode(WriteGateProject):
         event["tool_input"] = {}
         self.assertIsNone(write_gate.handle(event))
 
-
-class TestTaskWriteScope(WriteGateProject):
-    """(b) GATEKIT_TASK_ID: a worker may only write inside its task's scope."""
-
-    def setUp(self) -> None:
-        super().setUp()
-        approval.approve(self.root, "spec/05-gate.md")  # isolate rule (b)
-        self.job_id = "job-1"
-        self.task_id = "auth-token"
-        task_dir = (
-            self.root / ".gatekit" / "jobs" / self.job_id / "tasks" / self.task_id
-        )
-        task_dir.mkdir(parents=True)
-        self.task_file = task_dir / "task.json"
-        self.write_task(["src/auth/**"])
-
-    def write_task(self, scope) -> None:
-        self.task_file.write_text(
-            json.dumps({"id": self.task_id, "write_scope": scope}), encoding="utf-8"
-        )
-
-    def task_env(self) -> dict:
-        return {"GATEKIT_TASK_ID": self.task_id, "GATEKIT_JOB_ID": self.job_id}
-
-    def apply_env(self) -> None:
-        os.environ.update(self.task_env())
-
-    def test_allows_write_inside_scope(self) -> None:
-        self.apply_env()
-        self.assertIsNone(
-            write_gate.handle(self.event(str(self.root / "src" / "auth" / "token.ts")))
-        )
-
-    def test_denies_write_outside_scope(self) -> None:
-        self.apply_env()
-        result = write_gate.handle(self.event(str(self.root / "src" / "billing" / "x.ts")))
-        self.assertIsNotNone(result)
-        self.assertEqual(result["hookSpecificOutput"]["permissionDecision"], "deny")
-
-    def test_denies_path_outside_project_root(self) -> None:
-        self.apply_env()
+    def test_path_outside_the_project_is_locked_like_code(self) -> None:
         outside = pathlib.Path(os.path.realpath(tempfile.gettempdir())) / "escape.ts"
         self.assertIsNotNone(write_gate.handle(self.event(str(outside))))
-
-    def test_read_only_scope_denies_every_write(self) -> None:
-        self.write_task("read-only")
-        self.apply_env()
-        self.assertIsNotNone(
-            write_gate.handle(self.event(str(self.root / "src" / "auth" / "token.ts")))
-        )
-
-    def test_exact_file_scope(self) -> None:
-        self.write_task(["src/auth/token.ts"])
-        self.apply_env()
-        self.assertIsNone(
-            write_gate.handle(self.event(str(self.root / "src" / "auth" / "token.ts")))
-        )
-        self.assertIsNotNone(
-            write_gate.handle(self.event(str(self.root / "src" / "auth" / "other.ts")))
-        )
-
-    def test_star_glob_matches_single_segment_only(self) -> None:
-        self.write_task(["src/auth/*.ts"])
-        self.apply_env()
-        self.assertIsNone(
-            write_gate.handle(self.event(str(self.root / "src" / "auth" / "token.ts")))
-        )
-        self.assertIsNotNone(
-            write_gate.handle(
-                self.event(str(self.root / "src" / "auth" / "deep" / "token.ts"))
-            )
-        )
-
-    def test_double_star_matches_nested(self) -> None:
-        self.apply_env()
-        self.assertIsNone(
-            write_gate.handle(
-                self.event(str(self.root / "src" / "auth" / "deep" / "nested.ts"))
-            )
-        )
-
-    def test_missing_task_file_denies(self) -> None:
-        self.task_file.unlink()
-        self.apply_env()
-        self.assertIsNotNone(
-            write_gate.handle(self.event(str(self.root / "src" / "auth" / "token.ts")))
-        )
-
-    def test_corrupt_task_file_denies(self) -> None:
-        self.task_file.write_text("{broken", encoding="utf-8")
-        self.apply_env()
-        self.assertIsNotNone(
-            write_gate.handle(self.event(str(self.root / "src" / "auth" / "token.ts")))
-        )
-
-    def test_scope_applies_even_inside_spec_allowlist(self) -> None:
-        # A task-scoped worker is not granted the spec-before-code allowlist.
-        self.apply_env()
-        self.assertIsNotNone(write_gate.handle(self.event(str(self.root / "spec" / "01-prd.md"))))
-
-    # -- case (ADR-0022) -------------------------------------------------
-    def test_scope_ignores_case_whether_or_not_the_folder_exists(self) -> None:
-        self.apply_env()
-        # nothing on disk: realpath cannot restore the spelling
-        self.assertIsNone(write_gate.handle(self.event(str(self.root / "SRC" / "Auth" / "new.ts"))))
-        (self.root / "src" / "auth").mkdir(parents=True)
-        self.assertIsNone(write_gate.handle(self.event(str(self.root / "SRC" / "AUTH" / "new.ts"))))
-        self.assertIsNone(write_gate.handle(self.event("Src/Auth/Deep/x.ts")))
-
-    def test_scope_pattern_case_is_ignored_too(self) -> None:
-        self.write_task(["SRC/Auth/**"])
-        self.apply_env()
-        self.assertIsNone(write_gate.handle(self.event(str(self.root / "src" / "auth" / "t.ts"))))
-
-    def test_case_does_not_let_a_worker_out_of_its_scope(self) -> None:
-        self.apply_env()
-        for rel in ("SRC/Billing/x.ts", "SRC/AUTHX/x.ts", "SPEC/01-prd.md", ".GATEKIT/config.json",
-                    "DOCS/a.md", "README.MD", "SRC/auth.ts"):
-            with self.subTest(rel=rel):
-                self.assertIsNotNone(write_gate.handle(self.event(str(self.root / rel))))
-
-    def test_read_only_task_denies_any_spelling(self) -> None:
-        self.write_task("read-only")
-        self.apply_env()
-        self.assertIsNotNone(write_gate.handle(self.event(str(self.root / "SRC" / "Auth" / "t.ts"))))
+        approval.approve(self.root, "spec/05-gate.md")
+        self.assertIsNone(write_gate.handle(self.event(str(outside))))
 
     def test_root_spelled_in_another_case_is_still_the_root(self) -> None:
-        self.apply_env()
+        # Read as outside the project, the spec file would be denied like code.
         shouted = str(self.root).upper()
-        self.assertIsNone(write_gate.handle(self.event(shouted + "\\SRC\\AUTH\\t.ts")))
-        self.assertIsNotNone(write_gate.handle(self.event(shouted + "\\SRC\\OTHER\\t.ts")))
+        self.assertIsNone(write_gate.handle(self.event(shouted + "\\SPEC\\01-prd.md")))
 
-    def test_no_task_env_skips_rule_b(self) -> None:
-        self.assertIsNone(write_gate.handle(self.event(str(self.root / "src" / "billing" / "x.ts"))))
 
-    # -- a name after "**": src/**/x.ts ------------------------------------
-    def test_scope_with_a_name_after_double_star_allows_that_file_at_any_depth(self) -> None:
-        self.write_task(["src/**/x.ts"])
-        self.apply_env()
-        for rel in ("src/x.ts", "src/a/x.ts", "src/a/b/c/x.ts"):
-            with self.subTest(rel=rel):
+class TestApprovalRecord(WriteGateProject):
+    """``.gatekit/approvals.json`` is written by the ``gatekit.py approve`` process
+    alone. A write tool aimed at it is denied, before approval and after it."""
+
+    def reason_of_denial(self, path: str, tool: str = "Write") -> str:
+        result = write_gate.handle(self.event(path, tool=tool))
+        self.assertIsNotNone(result, "%s %s was allowed" % (tool, path))
+        self.assertEqual(result["hookSpecificOutput"]["permissionDecision"], "deny")
+        return result["hookSpecificOutput"]["permissionDecisionReason"]
+
+    def assert_record_denied(self, path: str, tool: str = "Write") -> None:
+        self.assertIn("승인 기록", self.reason_of_denial(path, tool), "%s %s" % (tool, path))
+
+    def test_the_record_is_the_file_approve_writes(self) -> None:
+        self.assertEqual(write_gate.APPROVAL_RECORD, ".gatekit/approvals.json")
+        self.assertFalse((self.root / write_gate.APPROVAL_RECORD).exists())
+        approval.approve(self.root, "spec/05-gate.md")
+        self.assertTrue((self.root / write_gate.APPROVAL_RECORD).is_file())
+        self.assertEqual(approval.check(self.root, "spec/05-gate.md"), "ok")
+
+    def test_write_and_edit_are_denied_before_approval(self) -> None:
+        for tool in ("Write", "Edit", "MultiEdit"):
+            with self.subTest(tool=tool):
+                self.assert_record_denied(str(self.root / ".gatekit" / "approvals.json"), tool)
+                self.assert_record_denied(".gatekit/approvals.json", tool)
+
+    def test_write_and_edit_are_denied_after_approval(self) -> None:
+        approval.approve(self.root, "spec/05-gate.md")
+        for tool in ("Write", "Edit", "MultiEdit"):
+            with self.subTest(tool=tool):
+                self.assert_record_denied(str(self.root / ".gatekit" / "approvals.json"), tool)
+                self.assert_record_denied(".gatekit/approvals.json", tool)
+        # the approval itself stands, and code is open as before
+        self.assertEqual(approval.check(self.root, "spec/05-gate.md"), "ok")
+        self.assertIsNone(write_gate.handle(self.event(str(self.root / "src" / "app.ts"))))
+
+    def test_denied_when_the_approval_went_stale(self) -> None:
+        approval.approve(self.root, "spec/05-gate.md")
+        self.gate_md.write_text("# Gate\nchanged\n", encoding="utf-8")
+        self.assertEqual(approval.check(self.root, "spec/05-gate.md"), "fail")
+        self.assert_record_denied(".gatekit/approvals.json")
+        self.assert_record_denied(".gatekit/approvals.json", "Edit")
+
+    def test_every_spelling_of_the_record_is_denied(self) -> None:
+        spellings = (".GATEKIT/Approvals.JSON", ".gatekit\\approvals.json", "./.gatekit/approvals.json",
+                     "spec/../.gatekit/approvals.json", ".gatekit/runs/../approvals.json",
+                     str(self.root).upper() + "\\.GATEKIT\\APPROVALS.JSON",
+                     # Windows opens the same file for each of these (measured)
+                     ".gatekit/approvals.json.", ".gatekit/approvals.json ",
+                     ".gatekit/approvals.json::$DATA", ".gatekit./approvals.json")
+        for rel in spellings:
+            with self.subTest(rel=rel, approved=False):
+                self.assert_record_denied(rel)
+        approval.approve(self.root, "spec/05-gate.md")  # now the file exists as well
+        for rel in spellings:
+            with self.subTest(rel=rel, approved=True):
+                self.assert_record_denied(rel)
+
+    def test_the_reason_says_where_to_go(self) -> None:
+        reason = self.reason_of_denial(str(self.root / ".gatekit" / "approvals.json"))
+        self.assertIn("승인은 사용자가 정하고", reason)
+        self.assertIn("/gatekit-gate", reason)
+        self.assertIn("approve 명령", reason)
+        self.assertIn("직접 고치지 말고", reason)
+        self.assertIn("차단된 경로: .gatekit/approvals.json", reason)
+        self.assertNotRegex(reason, r"ADR-\d")
+        self.assertNotIn("approval record", reason)  # Korean, not the English table
+
+    def test_the_reason_exists_in_both_languages(self) -> None:
+        for lang, phrase in (("ko", "승인 기록"), ("en", "approval record")):
+            result = write_gate.decide_path(self.root, ".gatekit/approvals.json", lang)
+            reason = result["hookSpecificOutput"]["permissionDecisionReason"]
+            self.assertIn(phrase, reason)
+            self.assertIn("/gatekit-gate", reason)
+            self.assertIn("approve", reason)
+            self.assertIn(".gatekit/approvals.json", reason)
+            self.assertNotRegex(reason, r"ADR-\d")
+
+    def test_a_forged_record_cannot_open_the_code_lock(self) -> None:
+        """The way that was open: write the hash of 05-gate.md into the record."""
+        code = str(self.root / "src" / "app.ts")
+        self.assertIsNotNone(write_gate.handle(self.event(code)))
+        self.assert_record_denied(str(self.root / ".gatekit" / "approvals.json"))
+        self.assertEqual(approval.check(self.root, "spec/05-gate.md"), "unverified")
+        self.assertIsNotNone(write_gate.handle(self.event(code)))
+
+    def test_other_files_under_gatekit_are_judged_as_before(self) -> None:
+        neighbours = (".gatekit/config.json", ".gatekit/contract.json", ".gatekit/runs/s.json",
+                      ".gatekit/approvals.json.bak", ".gatekit/approvals.jsonl",
+                      ".gatekit/old/approvals.json", ".gatekit/jobs/j/approvals.json")
+        for rel in neighbours:
+            with self.subTest(rel=rel, approved=False):
                 self.assertIsNone(write_gate.handle(self.event(str(self.root / rel))))
-                self.assertIsNone(write_gate.handle(self.event(rel)))
-
-    def test_scope_with_a_name_after_double_star_denies_everything_else(self) -> None:
-        self.write_task(["src/**/x.ts"])
-        self.apply_env()
-        for rel in ("src/a/y.ts", "src/a/x.tsx", "src/a/ax.ts", "src/a/x.ts/inner.ts", "x.ts",
-                    "lib/a/x.ts", "srcx/a/x.ts", "src/a", "spec/x.ts", "docs/x.ts"):
-            with self.subTest(rel=rel):
-                result = write_gate.handle(self.event(str(self.root / rel)))
-                self.assertIsNotNone(result)
-                self.assertEqual(result["hookSpecificOutput"]["permissionDecision"], "deny")
-
-    def test_scope_with_a_name_after_double_star_ignores_case(self) -> None:
-        self.write_task(["src/**/x.ts"])
-        self.apply_env()
-        for rel in ("SRC/X.TS", "Src/Auth/X.ts", "SRC/A/B/x.TS"):
-            with self.subTest(rel=rel):
+                self.assertIsNone(write_gate.handle(self.event(rel, tool="Edit")))
+        # the same name elsewhere is not the record: it is code, locked until approval
+        elsewhere = ("approvals.json", "src/.gatekit/approvals.json", "src/approvals.json")
+        for rel in elsewhere:
+            with self.subTest(rel=rel, approved=False):
+                self.assertIn("승인 전에는 코드를 쓸 수 없습니다", self.reason_of_denial(rel))
+        approval.approve(self.root, "spec/05-gate.md")
+        for rel in neighbours + elsewhere:
+            with self.subTest(rel=rel, approved=True):
                 self.assertIsNone(write_gate.handle(self.event(str(self.root / rel))))
-        # the other spelling of a path outside the scope is outside it too
-        for rel in ("SRC/A/Y.TS", "LIB/A/X.TS", "SRC/A/X.TSX"):
-            with self.subTest(rel=rel):
-                self.assertIsNotNone(write_gate.handle(self.event(str(self.root / rel))))
-        self.write_task(["SRC/**/X.TS"])
-        self.assertIsNone(write_gate.handle(self.event(str(self.root / "src" / "deep" / "x.ts"))))
-        self.assertIsNotNone(write_gate.handle(self.event(str(self.root / "src" / "deep" / "y.ts"))))
 
-    def test_one_matching_pattern_among_several_is_enough(self) -> None:
-        self.write_task(["docs/**/notes.md", "src/**/x.ts"])
-        self.apply_env()
-        self.assertIsNone(write_gate.handle(self.event(str(self.root / "src" / "a" / "x.ts"))))
-        self.assertIsNone(write_gate.handle(self.event(str(self.root / "docs" / "a" / "b" / "notes.md"))))
-        self.assertIsNotNone(write_gate.handle(self.event(str(self.root / "docs" / "a" / "x.ts"))))
-        self.assertIsNotNone(write_gate.handle(self.event(str(self.root / "src" / "a" / "notes.md"))))
+    def test_no_spec_dir_means_the_gate_stays_back(self) -> None:
+        import shutil
+
+        shutil.rmtree(self.root / "spec")
+        for tool in ("Write", "Edit"):
+            self.assertIsNone(write_gate.handle(
+                self.event(str(self.root / ".gatekit" / "approvals.json"), tool=tool)))
+
+    def test_the_rule_does_not_make_the_shell_gates_read_approved_projects(self) -> None:
+        self.assertTrue(write_gate.restrictions_active(self.root))
+        approval.approve(self.root, "spec/05-gate.md")
+        self.assertFalse(write_gate.restrictions_active(self.root))
 
 
 class TestBracketsAreLetters(unittest.TestCase):
@@ -480,20 +433,27 @@ class TestSubprocessInvocation(WriteGateProject):
         self.assertIn("승인 전에는 코드를 쓸 수 없습니다", reason)
         self.assertIn("src/app.ts", reason)
 
-    def test_task_scope_deny_via_subprocess(self) -> None:
-        approval.approve(self.root, "spec/05-gate.md")
-        task_dir = self.root / ".gatekit" / "jobs" / "j" / "tasks" / "t"
-        task_dir.mkdir(parents=True)
-        (task_dir / "task.json").write_text(
-            json.dumps({"id": "t", "write_scope": ["src/auth/**"]}), encoding="utf-8"
-        )
-        code, out, _ = run_gate_subprocess(
-            self.event(str(self.root / "other" / "x.ts")),
-            env_extra={"GATEKIT_TASK_ID": "t", "GATEKIT_JOB_ID": "j"},
-            cwd=self.root,
-        )
-        self.assertEqual(code, 0)
-        self.assertEqual(decision(out), "deny")
+    def test_forged_approval_record_is_denied_via_subprocess(self) -> None:
+        """The event that opened the code lock without the user: a Write of the
+        approval record carrying the hash of 05-gate.md, before any approval."""
+        forged = json.dumps({"version": 1, "approvals": [{
+            "target": "spec/05-gate.md", "sha256": approval.sha256_file(self.gate_md),
+            "approved_by": "user", "approved_at": "2026-10-02T10:00:00+00:00", "note": ""}]})
+        record = self.root / ".gatekit" / "approvals.json"
+        for tool, tool_input in (
+            ("Write", {"file_path": str(record), "content": forged}),
+            ("Edit", {"file_path": str(record), "old_string": "[]", "new_string": forged}),
+        ):
+            with self.subTest(tool=tool):
+                event = self.event(str(record), tool=tool)
+                event["tool_input"] = tool_input
+                code, out, err = run_gate_subprocess(event, cwd=self.root)
+                self.assertEqual(code, 0, err)
+                self.assertEqual(decision(out), "deny")
+                reason = json.loads(out)["hookSpecificOutput"]["permissionDecisionReason"]
+                self.assertIn("승인 기록", reason)
+                self.assertIn("/gatekit-gate", reason)
+        self.assertFalse(record.exists())
 
     def test_internal_error_exits_zero_and_logs(self) -> None:
         """A corrupt ledger must not break the session: allow, exit 0, log."""

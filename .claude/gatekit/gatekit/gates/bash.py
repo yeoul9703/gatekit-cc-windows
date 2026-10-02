@@ -10,8 +10,11 @@ This module extracts the files a shell command **would write** and hands each
 one to :func:`write.decide_path`. It is a static reading of the command text —
 no execution — and it is deliberately conservative:
 
-* When nothing could be denied anyway (no active task scope, spec gate
-  approved or absent) the command is allowed without parsing.
+* When code is not locked (spec gate approved, or no ``spec/`` at all) the
+  command is allowed without parsing.
+* A target that was read is judged like a Write call, by both rules of the
+  Write gate: the approval record ``.gatekit/approvals.json`` is refused, and
+  so is code before the spec gate is approved.
 * When a write's target **cannot be determined** — a variable in the path,
   ``eval``, ``xargs``, ``git apply``, inline interpreter code such as
   ``python3 -c`` — and a restriction is active, the command is **denied**.

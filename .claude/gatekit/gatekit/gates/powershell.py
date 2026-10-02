@@ -10,10 +10,12 @@ This module extracts the files a PowerShell command **would write** and hands
 each one to :func:`write.decide_path`. It is a static reading of the command
 text — no execution — and it follows these rules:
 
-* When nothing could be denied anyway (no active task scope, spec gate
-  approved or absent) the command is allowed without parsing.
-* A target that was read is judged by the rules, whatever spelling it came
-  in: ``Set-Content x y -e utf8`` writes ``x`` (``-e`` is ``-Exclude``).
+* When code is not locked (spec gate approved, or no ``spec/`` at all) the
+  command is allowed without parsing.
+* A target that was read is judged by the rules of the Write gate (the
+  approval record ``.gatekit/approvals.json`` is refused, and so is code
+  before the spec gate is approved), whatever spelling it came in:
+  ``Set-Content x y -e utf8`` writes ``x`` (``-e`` is ``-Exclude``).
 * When a restriction is active and the target **cannot be determined**, the
   command is **denied** where a write is certain or arbitrary code runs: a
   variable, a subexpression or a wildcard in the path of a write cmdlet or a

@@ -564,56 +564,72 @@ class TestSpecBeforeCode(BashGateProject):
         event["tool_input"] = {}
         self.assertIsNone(bash_gate.handle(event))
 
-
-class TestTaskScope(BashGateProject):
-    def setUp(self) -> None:
-        super().setUp()
-        self.approve()
-        task_dir = self.root / ".gatekit" / "jobs" / "job-1" / "tasks" / "auth"
-        task_dir.mkdir(parents=True)
-        self.task_json = task_dir / "task.json"
-        self.task_json.write_text(json.dumps({"id": "auth", "write_scope": ["src/auth/**"]}))
-        os.environ["GATEKIT_TASK_ID"] = "auth"
-        os.environ["GATEKIT_JOB_ID"] = "job-1"
-
-    def test_write_inside_scope_allowed(self) -> None:
-        self.assertIsNone(bash_gate.handle(self.event("cat > src/auth/token.ts")))
-
-    def test_write_outside_scope_denied(self) -> None:
-        result = bash_gate.handle(self.event("cat > src/other.ts"))
-        self.assertIsNotNone(result)
-        self.assertIn("src/auth/**", self.reason(result))
-
-    def test_escape_via_cd_denied(self) -> None:
-        self.assertIsNotNone(bash_gate.handle(self.event("cd src/auth && cat > ../other.ts")))
-
     def test_second_command_in_chain_is_checked(self) -> None:
-        self.assertIsNotNone(bash_gate.handle(self.event("cat > src/auth/a.ts && cat > spec/01-prd.md")))
+        for cmd in ("cat > spec/a.md && cat > src/x.ts", "cat > docs/a.md; tee src/x.ts",
+                    "echo hi > README.md | tee src/x.ts"):
+            result = bash_gate.handle(self.event(cmd))
+            self.assertIsNotNone(result, cmd)
+            self.assertIn("src/x.ts", self.reason(result))
 
-    def test_compound_command_and_substitution_obey_the_scope(self) -> None:
-        self.assertIsNotNone(bash_gate.handle(self.event("if true; then rm spec/01-prd.md; fi")))
-        self.assertIsNotNone(bash_gate.handle(self.event('echo "$(touch src/other.ts)"')))
-        self.assertIsNone(bash_gate.handle(self.event("if true; then touch src/auth/a.ts; fi")))
-        self.assertIsNone(bash_gate.handle(self.event('echo "$(touch src/auth/a.ts)"')))
 
-    def test_git_dash_c_apply_denied_for_scoped_worker(self) -> None:
-        self.assertIsNotNone(bash_gate.handle(self.event("git -C src/auth apply p.diff")))
-        self.assertIsNone(bash_gate.handle(self.event("git -C src/auth status")))
+class TestApprovalRecord(BashGateProject):
+    """While code is locked the gate reads commands, and a write it read that
+    lands on ``.gatekit/approvals.json`` is denied. ``gatekit.py approve`` is a
+    program invoked by name and passes; after approval commands are not read."""
 
-    def test_scope_ignores_case(self) -> None:
-        self.assertIsNone(bash_gate.handle(self.event("cat > SRC/Auth/token.ts")))
-        self.assertIsNotNone(bash_gate.handle(self.event("cat > SRC/Other.ts")))
+    def assert_record_denied(self, cmd: str, **kwargs) -> None:
+        result = bash_gate.handle(self.event(cmd, **kwargs))
+        self.assertIsNotNone(result, cmd)
+        self.assertEqual(result["hookSpecificOutput"]["permissionDecision"], "deny")
+        self.assertIn("승인 기록", self.reason(result), cmd)
+        self.assertIn("/gatekit-gate", self.reason(result), cmd)
 
-    def test_opaque_denied_for_scoped_worker(self) -> None:
-        self.assertIsNotNone(bash_gate.handle(self.event("git checkout -- src/auth/a.ts")))
+    def test_read_writes_of_the_record_are_denied_before_approval(self) -> None:
+        for cmd in ("echo x > .gatekit/approvals.json", "echo x >> .gatekit/approvals.json",
+                    "echo x | tee .gatekit/approvals.json", "cat > .gatekit/approvals.json <<'EOF'\n{}\nEOF",
+                    "cp forged.json .gatekit/approvals.json", "mv forged.json .gatekit/approvals.json",
+                    "sed -i 's/a/b/' .gatekit/approvals.json", "rm .gatekit/approvals.json",
+                    "cd .gatekit && cat > approvals.json", "cat > .GATEKIT/Approvals.JSON",
+                    "if true; then echo x > .gatekit/approvals.json; fi",
+                    'echo "$(echo x > .gatekit/approvals.json)"'):
+            self.assert_record_denied(cmd)
+        self.assert_record_denied("cat > approvals.json", cwd=str(self.root / ".gatekit"))
 
-    def test_read_only_task_denies_any_write_but_allows_reads(self) -> None:
-        self.task_json.write_text(json.dumps({"id": "auth", "write_scope": "read-only"}))
-        self.assertIsNotNone(bash_gate.handle(self.event("cat > src/auth/token.ts")))
-        self.assertIsNone(bash_gate.handle(self.event("cat src/auth/token.ts | wc -l")))
+    def test_the_record_as_second_target_is_denied(self) -> None:
+        self.assert_record_denied("cat > docs/a.md && cat > .gatekit/approvals.json")
+        self.assert_record_denied("echo x | tee .gatekit/note.txt .gatekit/approvals.json")
 
-    def test_outside_root_denied(self) -> None:
-        self.assertIsNotNone(bash_gate.handle(self.event("cat > /tmp/escape.ts")))
+    def test_an_absolute_spelling_is_not_allowed_either(self) -> None:
+        # The Bash reader does not place these inside the project; they are
+        # refused as code, which is a denial all the same.
+        record = (self.root / ".gatekit" / "approvals.json").as_posix()  # C:/.../approvals.json
+        msys = "/" + record[0].lower() + record[2:]                       # /c/.../approvals.json
+        for path in (record, msys):
+            self.assertIsNotNone(bash_gate.handle(self.event("echo x > " + path)), path)
+
+    def test_other_files_under_gatekit_are_allowed_as_before(self) -> None:
+        for cmd in ("cat > .gatekit/note.txt", "echo x > .gatekit/config.json",
+                    "echo x > .gatekit/contract.json", "tee .gatekit/approvals.json.bak",
+                    "mkdir -p .gatekit/runs", "cat .gatekit/approvals.json",
+                    "cp .gatekit/approvals.json docs/copy.md"):
+            self.assertIsNone(bash_gate.handle(self.event(cmd)), cmd)
+
+    def test_the_approve_command_is_allowed(self) -> None:
+        for tail in ("approve spec/05-gate.md", 'approve spec/05-gate.md --note "user said yes"',
+                     "approve check spec/05-gate.md", "approve list"):
+            cmd = paths.CLI_INVOCATION + " " + tail
+            self.assertIsNone(bash_gate.handle(self.event(cmd)), cmd)
+
+    def test_commands_are_not_read_after_approval(self) -> None:
+        self.approve()
+        for cmd in ("echo x > .gatekit/approvals.json", "tee .gatekit/approvals.json",
+                    'eval "$c"', "git apply p.diff"):
+            self.assertIsNone(bash_gate.handle(self.event(cmd)), cmd)
+
+    def test_no_spec_dir_means_the_gate_stays_back(self) -> None:
+        self.gate_md.unlink()
+        (self.root / "spec").rmdir()
+        self.assertIsNone(bash_gate.handle(self.event("echo x > .gatekit/approvals.json")))
 
 
 class TestSubprocessContract(BashGateProject):

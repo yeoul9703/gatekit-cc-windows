@@ -13,6 +13,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from gatekit import ledger  # noqa: E402
 from gatekit.gates import prompt as prompt_gate  # noqa: E402
 from gatekit.gates import skill as skill_gate  # noqa: E402
+from gatekit.gates import write as write_gate  # noqa: E402
 from tests import isolation  # noqa: E402
 
 GATE_SCRIPT = pathlib.Path(__file__).resolve().parents[1] / "gatekit" / "gates" / "skill.py"
@@ -208,13 +209,11 @@ class TestNeverBlocks(SkillProject):
             self.assertIsNone(skill_gate.handle(self.event(skill)), skill)
 
     def test_does_not_block_while_writes_are_restricted(self) -> None:
+        # A spec set whose gate is not approved: the write gates deny code now.
         (self.root / "spec").mkdir()
         (self.root / "spec" / "05-gate.md").write_text("# Gate\n", encoding="utf-8")
-        os.environ["GATEKIT_TASK_ID"] = "auth"
-        try:
-            self.run_skill("gatekit-build")
-        finally:
-            del os.environ["GATEKIT_TASK_ID"]
+        self.assertTrue(write_gate.restrictions_active(self.root))
+        self.run_skill("gatekit-build")
         self.assertEqual(self.pipeline(), "build")
 
 
