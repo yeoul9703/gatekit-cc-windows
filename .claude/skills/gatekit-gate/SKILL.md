@@ -1,6 +1,6 @@
 ---
 name: gatekit-gate
-description: Derive executable completion criteria into spec/05-gate.md, show them for approval, and on approval pin the hash so the build gate opens. Korean triggers — "완료 기준 정해줘", "게이트 만들어줘", "언제 끝난 건지 정의해줘", "DoD 만들어줘". English triggers — "define done", "set the completion gate", "write the acceptance gate", "definition of done". NOT for running the criteria after the fact — that is /gatekit-verify — and NOT for approving on the user's behalf.
+description: Derive executable completion criteria into spec/05-gate.md, show them for approval, and on approval pin the hash so the build gate opens. Korean triggers — "어디까지 되면 끝인지 정하자", "완료 기준 정해줘", "게이트 만들어줘", "언제 끝난 건지 정의해줘", "DoD 만들어줘". English triggers — "what counts as finished", "agree on when it is done", "define done", "set the completion gate", "write the acceptance gate", "definition of done". NOT for running the criteria after the fact — that is /gatekit-verify — and NOT for approving on the user's behalf.
 argument-hint: "[optional: extra criteria to include]"
 allowed-tools: Read, Write, Edit, Glob, Grep, Bash, PowerShell
 ---

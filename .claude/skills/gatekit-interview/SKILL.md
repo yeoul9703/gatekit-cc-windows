@@ -1,6 +1,6 @@
 ---
 name: gatekit-interview
-description: Turn a chosen problem into spec/01-prd.md and spec/03-architecture.md through a deep, free-ranging interview on implementation shape — pages, what each page does, what data it needs — laying the groundwork for design and tasks. Korean triggers — "기획해줘", "PRD 써줘", "요구사항 정리해줘", "뭘 만들지 정리하자", "스펙 만들어줘". English triggers — "write a PRD", "spec this out", "turn this idea into requirements", "plan what to build". NOT for writing code, and NOT for reading an existing Figma file, HTML or screenshots — that is /gatekit-mockup.
+description: Turn a chosen problem into spec/01-prd.md and spec/03-architecture.md through a deep, free-ranging interview on implementation shape — pages, what each page does, what data it needs — laying the groundwork for design and tasks. Korean triggers — "~ 앱 만들고 싶어", "이런 거 만들어보자", "기획해줘", "PRD 써줘", "요구사항 정리해줘", "뭘 만들지 정리하자", "스펙 만들어줘". English triggers — "I want to build a ... app", "write a PRD", "spec this out", "turn this idea into requirements", "plan what to build". When the user names something to build, call this before any code is written. NOT for writing code, and NOT for reading an existing Figma file, HTML or screenshots — that is /gatekit-mockup.
 argument-hint: "[what you want to build, in your own words]"
 allowed-tools: Read, Write, Edit, Glob, Grep, Bash, PowerShell, WebSearch
 ---

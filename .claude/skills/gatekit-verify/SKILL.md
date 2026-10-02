@@ -1,6 +1,6 @@
 ---
 name: gatekit-verify
-description: Verify the build against the completion contract — run the approved criteria once, hand only what a command cannot decide (how a screen looks, a check written in words) to a read-only reviewer, and report a verdict per criterion. Korean triggers — "검증해줘", "다 됐는지 확인해줘", "완료 기준 통과했는지 봐줘", "E2E 돌려줘". English triggers — "verify it", "check if it is done", "run the completion contract", "did it pass the gate". NOT for fixing what the verification finds — route failures back to /gatekit-build.
+description: Verify the build against the completion contract — run the approved criteria once, hand only what a command cannot decide (how a screen looks, a check written in words) to a read-only reviewer, and report a verdict per criterion. Korean triggers — "제대로 되는지 봐줘", "다 만든 것 같은데 확인해줘", "테스트 돌려서 확인해줘", "검증해줘", "다 됐는지 확인해줘", "완료 기준 통과했는지 봐줘", "E2E 돌려줘". English triggers — "does it actually work", "verify it", "check if it is done", "run the completion contract", "did it pass the gate". For a gatekit project after a build; call it even when unsure the contract exists — the skill says what is missing. NOT for fixing what the verification finds — route failures back to /gatekit-build.
 argument-hint: "[optional: criterion id to focus on]"
 allowed-tools: Read, Write, Edit, Glob, Grep, Bash, PowerShell, Agent
 ---

@@ -1,6 +1,6 @@
 ---
 name: gatekit-mockup
-description: Read a Figma file, HTML, or screenshots and derive spec/02-screens.md plus spec/tokens.json, recording every screen state the mockup does not evidence as an assumption. Korean triggers — "피그마 보고 화면 명세 만들어줘", "목업에서 스펙 뽑아줘", "이 디자인 정리해줘", "화면 명세 써줘". English triggers — "spec these screens from Figma", "extract screens from this mockup", "turn this design into a screen spec". NOT for implementing the design as code, and NOT for writing the PRD — that is /gatekit-interview.
+description: Read a Figma file, HTML, or screenshots and derive spec/02-screens.md plus spec/tokens.json, recording every screen state the mockup does not evidence as an assumption. Korean triggers — "피그마 보고 화면 명세 만들어줘", "목업에서 스펙 뽑아줘", "이 디자인 정리해줘", "화면 명세 써줘". English triggers — "spec these screens from Figma", "extract screens from this mockup", "turn this design into a screen spec". Call it even when no file or link was given yet — the skill asks for it. NOT for implementing the design as code, and NOT for writing the PRD — that is /gatekit-interview.
 argument-hint: "[Figma URL | path to HTML | path to screenshots]"
 allowed-tools: Read, Write, Edit, Glob, Grep, Bash, PowerShell, mcp__figma__get_design_context, mcp__figma__get_variable_defs, mcp__figma__get_screenshot, mcp__figma__get_metadata
 ---

@@ -1,6 +1,6 @@
 ---
 name: gatekit-setup
-description: Prepare gatekit on Windows — check uv, build the .venv from uv.lock, initialize .gatekit/config.json, report whether the optional claude CLI is present and run doctor. Installs a program only after the user says yes. Korean triggers — "셋업 해줘", "초기 설정", "설치해줘", "워커 확인해줘", "백엔드 설정". English triggers — "set up gatekit", "install gatekit", "check my workers", "configure the backend". NOT for diagnosing a project that is already set up — that is /gatekit-doctor — and NOT for enabling a bypass or unsandboxed backend, which gatekit refuses.
+description: Prepare gatekit on Windows — check uv, build the .venv from uv.lock, initialize .gatekit/config.json, report whether the optional claude CLI is present and run doctor. Installs a program only after the user says yes. Korean triggers — "처음인데 뭐부터 해?", "방금 받았는데 준비해줘", "셋업 해줘", "초기 설정", "설치해줘", "워커 확인해줘", "백엔드 설정". English triggers — "I just cloned this, get it ready", "first time here, what do I install", "set up gatekit", "install gatekit", "check my workers", "configure the backend". NOT for diagnosing a project that is already set up — that is /gatekit-doctor — and NOT for enabling a bypass or unsandboxed backend, which gatekit refuses.
 allowed-tools: Read, Write, Edit, Glob, Grep, Bash, PowerShell
 ---
 
