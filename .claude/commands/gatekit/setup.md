@@ -155,6 +155,14 @@ Read the named section when one of these comes up:
   so in plain words.
 - **Looking at the package table without the `.venv` and doctor steps** — the
   `-Status` switch in section 3 (no permission needed, nothing changes).
-- **Worker backends in more detail** — `docs/USAGE.md`; `workers check claude`
-  and `workers list` print them, and an additional backend is enabled only by
-  the user.
+- **Worker backends in more detail** — run the two commands below.
+  `workers check` verdicts: `ok` — the CLI answered its version probe;
+  `unverified` — the binary is there but the probe did not answer (not a
+  failure, not a pass; builds will still run); `fail` — the binary is
+  missing. An additional backend is added by hand (see `docs/USAGE.md`) and
+  enabled only by the user.
+
+```
+uv run --project .claude/gatekit --frozen python .claude/gatekit/bin/gatekit.py workers check claude
+uv run --project .claude/gatekit --frozen python .claude/gatekit/bin/gatekit.py workers list
+```
