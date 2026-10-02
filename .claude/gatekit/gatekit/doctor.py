@@ -20,8 +20,11 @@ from gatekit import paths, verdict
 GATE_SCRIPTS = ("prompt.py", "write.py", "bash.py", "powershell.py", "spawn.py", "release.py",
                 "skill.py", "question.py", "stop.py", "compact.py")
 
-#: PowerShell scripts under ``<gatekit root>/scripts`` that axis 1 requires.
-POWERSHELL_SCRIPTS = ("common.ps1", "session-check.ps1", "setup.ps1", "verify.ps1")
+#: PowerShell scripts under ``<gatekit root>/scripts`` that axis 1 requires: the
+#: ones that run on the user's machine. ``verify.ps1`` is not among them. It runs
+#: the tests, pyright and ruff for whoever changes the kit, and a copy handed out
+#: without the tests has no use for it.
+POWERSHELL_SCRIPTS = ("common.ps1", "session-check.ps1", "setup.ps1")
 
 #: Other files (relative to the gatekit root) that axis 1 requires.
 PROJECT_FILES = ("bin/gatekit.py", "pyproject.toml", "uv.lock")

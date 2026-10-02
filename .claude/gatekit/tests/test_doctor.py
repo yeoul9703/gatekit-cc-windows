@@ -22,6 +22,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from gatekit import doctor, paths, verdict
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from fakebin import make_fake, print_and_exit  # noqa: E402
+from tests import isolation  # noqa: E402
 
 
 GATE_ENTRY = {"hooks": [{
@@ -169,14 +170,63 @@ class TestAxisPluginFiles(DoctorTestCase):
         self.assertEqual(self.check_fake_tree(base)["verdict"], verdict.OK)
 
     def test_each_required_non_gate_file_is_checked(self) -> None:
-        expected = ["bin/gatekit.py", "pyproject.toml", "uv.lock", "scripts/session-check.ps1",
-                    "scripts/setup.ps1", "scripts/verify.ps1"]
+        expected = ["bin/gatekit.py", "pyproject.toml", "uv.lock", "scripts/common.ps1",
+                    "scripts/session-check.ps1", "scripts/setup.ps1"]
         for rel in expected:
             base = self.root / ("tree-" + rel.replace("/", "-"))
             self.make_full_tree(base, skip=rel)
             result = self.check_fake_tree(base)
             self.assertEqual(result["verdict"], verdict.FAIL, rel)
             self.assertIn(rel, result["detail"])
+
+    def test_a_copy_without_the_developer_verify_script_is_ok(self) -> None:
+        """scripts/verify.ps1 runs the tests, pyright and ruff: it is for whoever changes the
+        kit. A copy handed out without it is complete."""
+        self.assertNotIn("verify.ps1", doctor.POWERSHELL_SCRIPTS)
+        base = self.root / "handed-out"
+        self.make_full_tree(base)
+        self.assertEqual(sorted(p.name for p in (base / "scripts").iterdir()),
+                         ["common.ps1", "session-check.ps1", "setup.ps1"])
+        result = self.check_fake_tree(base)
+        self.assertEqual(result["verdict"], verdict.OK, result["detail"])
+        self.assertEqual(result["fix"], "")
+        # The detail counts what it checked: three scripts, not four.
+        self.assertIn("PowerShell 스크립트 3개", result["detail"])
+
+    def doctor_axis_1_of_copy(self, copy) -> dict:
+        """Axis 1 as ``gatekit.py doctor --json`` of the kit at *copy* reports it."""
+        env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
+        proc = isolation.run_gate(
+            [sys.executable, str(copy / "bin" / "gatekit.py"), "doctor", "--root", str(self.root),
+             "--json"], cwd=self.root, capture_output=True, env=env, timeout=120)
+        report = json.loads(proc.stdout.decode("utf-8"))
+        first = report["axes"][0]
+        self.assertEqual(first["axis"], "gatekit files", proc.stderr)
+        return first
+
+    def test_doctor_of_a_kit_copy_without_verify_ps1_reports_the_files_ok(self) -> None:
+        """The kit as a user receives it, <project>/.claude/gatekit, copied from this
+        checkout without scripts/verify.ps1: `gatekit.py doctor` run from the copy."""
+        kit = paths.gatekit_root()
+        copy = self.root / ".claude" / "gatekit"
+        for rel in ("bin", "gatekit", "scripts"):
+            shutil.copytree(kit / rel, copy / rel,
+                            ignore=shutil.ignore_patterns("__pycache__", "verify.ps1"))
+        for rel in ("pyproject.toml", "uv.lock"):
+            shutil.copy2(kit / rel, copy / rel)
+        self.assertFalse((copy / "scripts" / "verify.ps1").exists())
+
+        first = self.doctor_axis_1_of_copy(copy)
+        self.assertEqual(first["verdict"], verdict.OK, first["detail"])
+        self.assertIn("PowerShell 스크립트 3개", first["detail"])
+
+        # The copy is what was checked, not this checkout: a script the user's
+        # machine does run is still required.
+        (copy / "scripts" / "setup.ps1").unlink()
+        first = self.doctor_axis_1_of_copy(copy)
+        self.assertEqual(first["verdict"], verdict.FAIL, first["detail"])
+        self.assertIn("scripts/setup.ps1", first["detail"])
+        self.assertNotIn("verify.ps1", first["detail"])
 
     def test_real_checkout_axis_1_is_ok(self) -> None:
         self.assertEqual(doctor.axis_gatekit_files(self.root)["verdict"], verdict.OK)
