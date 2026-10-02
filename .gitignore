@@ -1,6 +1,10 @@
-# gatekit runtime state (machine-local, created while using gatekit commands)
-.gatekit/runs/
-.gatekit/jobs/
+# gatekit state: everything under .gatekit/ stays on this machine, except what has to travel.
+# approvals.json: an approval must hold on another PC. contract.json: without it the stop
+# gate has nothing to enforce. config.json: present only when someone changed a setting.
+.gatekit/*
+!.gatekit/approvals.json
+!.gatekit/contract.json
+!.gatekit/config.json
 
 # Python bytecode caches
 __pycache__/
