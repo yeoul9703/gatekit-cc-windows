@@ -392,7 +392,7 @@ class TestBuildStateInContext(unittest.TestCase):
         jdir = jobs.job_dir(self.root, job_id)
         (jdir / "tasks").mkdir(parents=True)
         job = {"version": 1, "job_id": job_id, "started_at": jobs._now(),
-               "execution": "host", "tasks": list(states), "backend": {"name": "claude"}}
+               "tasks": list(states)}
         if finished:
             job["finished_at"] = jobs._now()
         jobs.write_json(jdir / "job.json", job)

@@ -1,4 +1,4 @@
-"""8-axis diagnosis (§12).
+"""7-axis diagnosis (§12).
 
 Each axis returns `{"axis", "verdict", "detail", "fix"}` where `fix` is a
 copy-pasteable command or "". The overall verdict is `verdict.aggregate` over
@@ -84,7 +84,7 @@ _LANG = "ko"
 #: Korean display names for the axes (the ``axis`` key of the JSON stays English).
 AXIS_NAMES_KO = {
     "gatekit files": "설치 파일", "hooks registered": "훅 등록", "project state": "프로젝트 상태",
-    "spec set": "스펙 묶음", "contract freshness": "완료 계약 최신 여부", "workers": "워커",
+    "spec set": "스펙 묶음", "contract freshness": "완료 계약 최신 여부",
     "python": "파이썬", "uv": "uv",
 }
 
@@ -338,13 +338,13 @@ def axis_project_state(root) -> dict:
     if not state.is_dir():
         return _axis("project state", verdict.UNVERIFIED,
                      _t("no .gatekit/ in this project yet", "이 프로젝트에 아직 .gatekit/ 이 없습니다"),
-                     _t("/gatekit-setup  (creates .gatekit/config.json)",
-                        "/gatekit-setup  (.gatekit/config.json 을 만듭니다)"))
+                     _t("/gatekit-setup  (makes the .gatekit folder)",
+                        "/gatekit-setup  (.gatekit 폴더를 만듭니다)"))
     problems = []
     cfg = state / "config.json"
     if cfg.is_file():
         try:
-            with cfg.open(encoding="utf-8") as handle:
+            with cfg.open(encoding="utf-8-sig") as handle:  # a BOM is fine, as in config.load
                 loaded = json.load(handle)
             if not isinstance(loaded, dict):
                 problems.append(_t("config.json is not a JSON object", "config.json 이 JSON 객체가 아닙니다"))
@@ -429,69 +429,7 @@ def axis_contract_freshness(root) -> dict:
     return _axis(name, verdict.FAIL, detail, paths.cli_invocation() + " contract derive")
 
 
-# ------------------------------------------------------------------- axis 6
-
-
-def cli_required(root) -> bool:
-    """True when this project's settings start a worker CLI.
-
-    With the defaults nothing does: ``build.execution`` is ``host`` (the session
-    implements the tasks itself) and the reviewer of ``/gatekit-verify`` is a
-    subagent of the session (ADR-0023). A CLI is started only when
-    ``.gatekit/config.json`` says ``build.execution = "worker"`` or names a
-    backend in ``verify.evaluator`` (any value other than ``agent``). The
-    evaluator is read as written, not through ``workers.evaluator_choice``,
-    which falls back to ``agent`` for a backend that cannot review: a project
-    that wrote a name meant the CLI.
-
-    This is the one Python copy of the rule; the PowerShell copy is
-    ``Test-CliRequired`` in ``scripts/common.ps1`` (``setup.ps1`` S6 and
-    ``session-check.ps1``), and the two must agree.
-    """
-    from gatekit import config as config_mod
-    from gatekit import jobs as jobs_mod
-    cfg = config_mod.load(root)
-    if jobs_mod.execution_mode(cfg) == "worker":
-        return True
-    verify = cfg.get("verify")
-    value = verify.get("evaluator") if isinstance(verify, dict) else None
-    name = value.strip() if isinstance(value, str) else ""
-    return bool(name) and name != "agent"
-
-
-def axis_workers(root) -> dict:
-    """The default backend's executable. A project whose settings never start it
-    (:func:`cli_required` is false) is ``ok`` without it, and the detail says so."""
-    try:
-        from gatekit import workers as workers_mod
-        name = workers_mod.default_name(root)
-        result = workers_mod.check(root, name)
-        needed = cli_required(root)
-    except Exception as exc:
-        return _axis("workers", verdict.UNVERIFIED,
-                     _t("worker check could not run: %s", "워커 점검을 실행하지 못했습니다: %s") % exc, "")
-    v = result.get("verdict", verdict.UNVERIFIED)
-    if v != verdict.OK and not needed:
-        if _LANG == "ko":
-            summary = "PATH 에서 찾지 못함" if v == verdict.FAIL else "실행 여부를 확인하지 못함"
-            return _axis("workers", verdict.OK,
-                         "기본 워커 %s: %s. 지금 설정(build.execution=host)에서는 쓰지 않는다" % (name, summary))
-        return _axis("workers", verdict.OK,
-                     "default backend %s — %s; not used with the current settings "
-                     "(build.execution=host)" % (name, result.get("detail", "")))
-    fix = ""
-    if v == verdict.FAIL:
-        fix = _t("install the %s CLI, or: %s workers set-default <name>",
-                 "%s CLI 를 설치하거나 다음을 실행하세요: %s workers set-default <이름>") % (
-                     name, paths.cli_invocation())
-    if _LANG == "ko":
-        summary = {verdict.OK: "실행 확인됨", verdict.FAIL: "PATH 에서 찾지 못함",
-                   verdict.WARN: "확인이 필요함"}.get(v, "실행 여부를 확인하지 못함")
-        return _axis("workers", v, "기본 워커 %s: %s" % (name, summary), fix)
-    return _axis("workers", v, "default backend %s — %s" % (name, result.get("detail", "")), fix)
-
-
-# ------------------------------------------------------------------- axis 7
+# ------------------------------------------------------------- axes 6 and 7
 
 
 def _venv_python(kit):
@@ -579,7 +517,6 @@ AXES = (
     axis_project_state,
     axis_spec_set,
     axis_contract_freshness,
-    axis_workers,
     axis_python,
     axis_uv,
 )

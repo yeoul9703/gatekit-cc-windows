@@ -1,6 +1,6 @@
 """Design as data: `spec/tokens.json` v2, presets, and blast radius (ADR-0008).
 
-Design reaches a worker through code, not through a task author's memory. This
+Design reaches a task's brief through code, not through a task author's memory. This
 module is the one place that reads `spec/tokens.json`, so `spec validate`,
 `jobs.build_prompt` and the token gate can never disagree about its shape.
 
@@ -200,7 +200,7 @@ def impact(root) -> Dict[str, Any]:
     """Tasks that name a design id, and the ids that name them.
 
     This is decision 7: mid-build, the design command reports blast radius
-    instead of editing `04-tasks.md`. Deciding what to redelegate stays with
+    instead of editing `04-tasks.md`. Deciding what to build again stays with
     the user.
     """
     from gatekit import spec as spec_mod
@@ -235,7 +235,7 @@ def _render_impact(report: Dict[str, Any]) -> str:
     for ref in sorted(report["by_id"], key=_sort_key):
         lines.append("  %-6s %s" % (ref, ", ".join(report["by_id"][ref])))
     lines.append("")
-    lines.append("Redelegate these tasks if the design they name changed.")
+    lines.append("Build these tasks again if the design they name changed.")
     return "\n".join(lines)
 
 

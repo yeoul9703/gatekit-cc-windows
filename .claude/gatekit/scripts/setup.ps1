@@ -29,7 +29,7 @@
 #                     same action (install / update / reinstall). Nothing recorded: an info line.
 #                     A failed action is recorded there (time, item, action, exit code, class,
 #                     message) and removed again when the same item succeeds.
-#   -Status           check only, but skip the .venv / config / doctor steps: the programs, the
+#   -Status           check only, but skip the .venv / .gatekit folder / doctor steps: the programs, the
 #                     package table (installed version, update available, install method) and the
 #                     failure record. Cannot be combined with -Install/-Update/-Reinstall/-RetryFailed.
 #   -Json             print ONE ASCII-only JSON object {exit_code, exit_meaning, items:[{id,level,
@@ -60,8 +60,8 @@
 # the version text of the pwsh on PATH (no "-preview" suffix). A preview build alone does not count.
 #
 # Exit codes (when several problems mix, the FIRST matching row wins):
-#   1  something failed that a permission cannot fix (bad switch, .venv or config
-#      could not be built, doctor failed, an install failed for an unknown reason)
+#   1  something failed that a permission cannot fix (bad switch, .venv or the .gatekit
+#      folder could not be made, doctor failed, an install failed for an unknown reason)
 #   4  blocked by policy or network (winget policy block, no network, TLS, a group policy that
 #      pins the execution policy to AllSigned / Restricted, or Windows refusing to start uv.exe
 #      or the .venv python.exe because of an application control policy)
@@ -71,13 +71,11 @@
 #   2  the user must allow or do something (a required program is missing or too
 #      old, Python must be downloaded, .venv is broken)
 #   0  ready
-# The claude CLI (S6) is recommended, not required: with the default settings nothing starts it
-# (build.execution = "host", the reviewer is a subagent). Missing, not visible in this session or
-# older than the recommended version is then a warn that leaves the exit code alone. It is
-# required (missing: fail, exit 2; not visible: exit 3) only in a project whose
-# .gatekit/config.json says build.execution = "worker" or names a backend in verify.evaluator
-# (Test-CliRequired in common.ps1).
-# Git (S7) is recommended too: gatekit runs without it, so a missing Git, or one that is visible
+# S6 shows the Claude Code version (claude --version) and never changes the exit code: gatekit
+# starts no claude process. Without a claude command on the PATH of this session (a PC with only
+# the desktop app or the VS Code extension) the version is reported as unverified, and no install
+# is offered for it. Older than the recommended version is a warn with -Update claude.
+# Git (S7) is recommended: gatekit runs without it, so a missing Git, or one that is visible
 # only after a restart, is a warn that leaves the exit code alone. A Git install the user allowed
 # and that failed is reported like any other failed install (S16-git).
 # Node.js (S18) is optional: gatekit never starts it. It is for what the user builds, and whether
@@ -1431,22 +1429,22 @@ if ($wantVenv -and -not $Status) {
     }
 }
 
-# S12 config and settings --------------------------------------------------------
+# S12 project state folder and settings -------------------------------------------
 if (-not $Status) {
-$cfg = Join-Path $projectRoot '.gatekit\config.json'
-if (Test-Path -LiteralPath $cfg) {
-    Add-Item 'S12-config' 'required' '.gatekit/config.json' 'ok' (T '이미 있어 그대로 둡니다' 'exists, left as is')
-} elseif (-not $venvReady) {
-    Add-Item 'S12-config' 'required' '.gatekit/config.json' 'unverified' (T '.venv 가 없어 만들지 못했습니다' 'not created because .venv is not ready')
+# The gates work only in a project that has a .gatekit folder, so setup makes the folder.
+# No file is written into it: every setting has its default in gatekit/config.py.
+$stateDir = Join-Path $projectRoot '.gatekit'
+$stateName = T '프로젝트 상태 폴더 .gatekit/' 'project state folder .gatekit/'
+if (Test-Path -LiteralPath $stateDir -PathType Container) {
+    Add-Item 'S12-config' 'required' $stateName 'ok' (T '이미 있어 그대로 둡니다' 'exists, left as is')
 } else {
-    $cr = Invoke-Proc $venvPy @($launcher, 'workers', 'set-default', 'claude', '--root', $projectRoot) 60
-    if ($cr.Code -eq 0 -and (Test-Path -LiteralPath $cfg)) {
-        Add-Item 'S12-config' 'required' '.gatekit/config.json' 'ok' (T '생성함(기본 워커: claude)' 'created (default worker: claude)')
+    $stateWhy = ''
+    try { New-Item -ItemType Directory -Path $stateDir -Force -ErrorAction Stop | Out-Null } catch { $stateWhy = "$($_.Exception.Message)" }
+    if (Test-Path -LiteralPath $stateDir -PathType Container) {
+        Add-Item 'S12-config' 'required' $stateName 'ok' (T '만들었습니다' 'created')
     } else {
         Set-Flag 'fail'
-        $why = ''
-        if ($cr.TimedOut) { $why = T '제한 시간(60초)을 넘겨 중단했습니다' 'stopped after the 60 second limit' }
-        Add-Item 'S12-config' 'required' '.gatekit/config.json' 'fail' ((T '생성 실패' 'could not be created') + $(if ($why) { ': ' + $why } else { '' })) '' @(($cr.Out -split "`r?`n") | Where-Object { $_.Trim() } | Select-Object -Last 5 | ForEach-Object { '  ' + $_.Trim() })
+        Add-Item 'S12-config' 'required' $stateName 'fail' ((T '만들지 못했습니다' 'could not be created') + $(if ($stateWhy) { ': ' + $stateWhy } else { '' }))
     }
 }
 
@@ -1507,38 +1505,34 @@ if (-not (Test-Path -LiteralPath $settingsFile)) {
 
 }
 
-# S6 claude ---------------------------------------------------------------------
+# S6 Claude Code version --------------------------------------------------------
+# Shown, never required: gatekit starts no `claude` process, so nothing here sets an exit flag.
+# A PC with only the desktop app or the VS Code extension has no `claude` command. The version is
+# then reported as not checked, and no install is offered just to read a version.
 $claudeFound = Get-App 'claude' $script:sessionPath
 $claudeApps = $claudeFound.apps
 $script:pkgInfo['claude'] = @{ where = $claudeFound.where; path = ''; version = '' }
-# Required only in a project whose settings start the CLI (Test-CliRequired, common.ps1).
-# Otherwise recommended: every verdict below is at most a warn and no exit flag is set.
-$cliRequired = Test-CliRequired $projectRoot
-$claudeLevel = 'recommended'
-if ($cliRequired) { $claudeLevel = 'required' }
-if ($claudeFound.where -eq 'none' -and -not $cliRequired) {
-    Add-Item 'S6' $claudeLevel 'claude CLI' 'warn' (T 'PATH 에 claude 가 없습니다. 지금 설정에서는 필요 없습니다. build 를 워커 방식으로 돌릴 때만 필요합니다.' 'claude is not on PATH. The current settings do not need it; it is needed only when build runs its tasks as workers.') (T '허락하면 설치합니다 (-Install claude)' 'installed if you allow it (-Install claude)')
-} elseif ($claudeFound.where -eq 'none') {
-    Set-Flag 'needs'
-    Add-Item 'S6' $claudeLevel 'claude CLI' 'fail' (T 'PATH 에 claude 가 없습니다(데스크톱 앱만으로는 CLI 가 없습니다). 워커를 실행할 수 없습니다.' 'claude is not on PATH (the desktop app alone does not include the CLI). Workers cannot start.') (T '허락하면 설치합니다 (-Install claude)' 'installed if you allow it (-Install claude)')
+$claudeName = T 'Claude Code 버전' 'Claude Code version'
+if ($claudeFound.where -eq 'none') {
+    Add-Item 'S6' 'recommended' $claudeName 'unverified' (T '확인하지 못했습니다(이 창에 claude 명령이 없습니다). 데스크톱 앱이나 VS Code 확장만 쓴다면 정상입니다. 앱을 최신으로 유지하세요.' 'could not be checked (there is no claude command in this session). That is normal when you use only the desktop app or the VS Code extension. Keep the app up to date.')
 } elseif ($claudeFound.where -eq 'registry') {
-    Add-RestartItem 'S6' $claudeLevel 'claude CLI' $claudeApps[0].Source $cliRequired
+    Add-RestartItem 'S6' 'recommended' $claudeName $claudeApps[0].Source $false
 } else {
     $cp = Invoke-Proc $claudeApps[0].Source @('--version') 30
     $cv = Get-VersionFrom $cp.Out
     $script:pkgInfo['claude'] = @{ where = 'session'; path = $claudeApps[0].Source; version = $(if ($cv) { $cv.ToString() } else { '' }) }
     if (-not $cv) {
-        Add-Item 'S6' $claudeLevel 'claude CLI' 'unverified' ((T 'PATH 에 있으나 버전을 읽지 못했습니다: ' 'on PATH but the version could not be read: ') + $claudeApps[0].Source)
+        Add-Item 'S6' 'recommended' $claudeName 'unverified' ((T 'PATH 에 있으나 버전을 읽지 못했습니다: ' 'on PATH but the version could not be read: ') + $claudeApps[0].Source)
     } elseif ($cv -lt $claudeRecommended) {
-        Add-Item 'S6' $claudeLevel 'claude CLI' 'warn' ('claude ' + $cv + ' < ' + $claudeRecommended + (T ' (권장)' ' (recommended)')) (T '허락하면 업데이트합니다 (-Update claude)' 'updated if you allow it (-Update claude)')
+        Add-Item 'S6' 'recommended' $claudeName 'warn' ('claude ' + $cv + ' < ' + $claudeRecommended + (T ' (권장)' ' (recommended)')) (T '허락하면 업데이트합니다 (-Update claude)' 'updated if you allow it (-Update claude)')
     } else {
-        Add-Item 'S6' $claudeLevel 'claude CLI' 'ok' ('claude ' + $cv)
+        Add-Item 'S6' 'recommended' $claudeName 'ok' ('claude ' + $cv)
     }
 }
 
 # S7 git ------------------------------------------------------------------------
-# Recommended, like the claude CLI with the default settings: gatekit runs without Git, so a
-# missing one, or one that is visible only after a restart, is a warn that sets no exit flag.
+# Recommended: gatekit runs without Git, so a missing one, or one that is visible only after a
+# restart, is a warn that sets no exit flag.
 # It is recommended because a project that came as a zip file has nothing to restore a file from.
 $gitFound = Get-App 'git' $script:sessionPath
 $gitApps = $gitFound.apps

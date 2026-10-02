@@ -1,4 +1,4 @@
-﻿# common.ps1 - helpers shared by setup.ps1, session-check.ps1 and verify.ps1: PATH rule (Get-MergedPath, Find-App, Get-App), PowerShell 7 product rule (Get-PwshProduct), ASCII-only JSON (ConvertTo-AsciiJson), whether this project runs the claude CLI (Test-CliRequired), one argument quoted for a new process (Quote-Arg).
+﻿# common.ps1 - helpers shared by setup.ps1, session-check.ps1 and verify.ps1: PATH rule (Get-MergedPath, Find-App, Get-App), PowerShell 7 product rule (Get-PwshProduct), ASCII-only JSON (ConvertTo-AsciiJson), one argument quoted for a new process (Quote-Arg).
 # Windows PowerShell 5.1 compatible. Each script loads it with:  . "$PSScriptRoot\common.ps1"
 # It only defines functions: it prints nothing, never exits and leaves $ErrorActionPreference to the caller.
 # Every function gets what it needs as a parameter, so none depends on a variable of the script that loaded it.
@@ -142,30 +142,6 @@ function Get-PwshFileKind([string]$path, [string]$previewName = '') {
         return 'stable'
     }
     return 'unknown'
-}
-
-# ---- Does this project run the claude CLI? -------------------------------------------------------
-# With the default settings nothing starts the `claude` command: build.execution is "host" (the
-# session does the work itself) and the reviewer of /gatekit-verify is a subagent of the session.
-# The CLI is started only when .gatekit/config.json says build.execution = "worker", or names a
-# backend in verify.evaluator (any value other than "agent"). Only then is a missing CLI a problem.
-# This is the one PowerShell copy of the rule (setup.ps1 S6 and session-check.ps1 both call it);
-# the Python copy is cli_required in gatekit/doctor.py. The file is only read, and read as JSON
-# here, so the answer does not need the .venv. No file, or one that cannot be read: $false.
-function Test-CliRequired([string]$projectRoot) {
-    try {
-        $file = Join-Path $projectRoot '.gatekit\config.json'
-        if (-not (Test-Path -LiteralPath $file)) { return $false }
-        $cfg = (Get-Content -LiteralPath $file -Raw -Encoding UTF8 | ConvertFrom-Json)
-        if (-not $cfg) { return $false }
-        if ("$($cfg.build.execution)".Trim() -ceq 'worker') { return $true }
-        $evaluator = $cfg.verify.evaluator
-        if ($evaluator -is [string]) {
-            $evaluator = $evaluator.Trim()
-            if ($evaluator -and $evaluator -cne 'agent') { return $true }
-        }
-    } catch { }
-    return $false
 }
 
 # ---- One argument of a command line --------------------------------------------------------------

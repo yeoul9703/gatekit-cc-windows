@@ -202,9 +202,22 @@ class TestSkillBodies(unittest.TestCase):
         self.assertIn(CLI + " design merge-preset <name>", text)
         self.assertIn(".claude/skills/gatekit-shared/assets/presets/design/", text)
 
-    def test_build_reads_default_backend_with_workers_default(self) -> None:
-        text = read(skill("build") / "SKILL.md")
-        self.assertIn(CLI + " workers default", text)
+    def test_no_skill_document_calls_a_removed_command_or_names_a_removed_setting(self) -> None:
+        # A job starts no process: there is nothing to wait for, hand a task back to or
+        # review with, and no setting that chooses a program.
+        from gatekit import jobs
+        seen = 0
+        for path in SKILL_DOCS + REFERENCES:
+            text = read(path)
+            called = (re.findall(r"`jobs ([a-z]+)", text)
+                      + re.findall(re.escape(CLI) + r" jobs ([a-z]+)", text))
+            for sub in called:
+                seen += 1
+                self.assertIn(sub, jobs.COMMAND_NAMES, "%s: jobs %s" % (rel(path), sub))
+            for gone in ("build.execution", "verify.evaluator", "worker.backends",
+                         "--backend", "--parallel", "`execution`"):
+                self.assertNotIn(gone, text, "%s: %s" % (rel(path), gone))
+        self.assertGreater(seen, 20)
 
     def test_rare_paths_live_in_reference_docs(self) -> None:
         build = read(skill("build") / "SKILL.md")
@@ -294,8 +307,8 @@ class TestHandoff(unittest.TestCase):
         self.assertIn("invoking the next skill", flat)
         self.assertIn("never approves for the user", flat)
         self.assertIn("never fixes what it finds", flat)
-        self.assertRegex(flat, r"never hands off while a task is `failed`, `timeout`, "
-                               r"`stopped` or `blocked`")
+        self.assertRegex(flat, r"never hands off while a task is `failed`, `stopped` or "
+                               r"still `queued`")
         self.assertIn("do not offer to go on", flat)
         # and each of the three skills still says it in its own body
         self.assertIn("Do not approve on their behalf", one_line(read(skill("gate") / "SKILL.md")))
@@ -312,7 +325,7 @@ class TestHandoff(unittest.TestCase):
         self.assertIn(CLI + " jobs shape", text)
         self.assertIn(CLI + " jobs status", text)
         self.assertIn(CLI + " jobs start --tasks", text)
-        for word in ("`execution`", "`max_retries`", "`parallel`", "jobs complete", "jobs stop"):
+        for word in ("`max_retries`", "jobs complete", "jobs stop"):
             self.assertIn(word, one_line(text), word)
         # nothing here measures time or cost, so the notice gives no figure for them
         self.assertNotRegex(text, r"\d+\s*(minutes?|hours?|tokens|dollars|%)")
@@ -421,28 +434,31 @@ class TestSetupSkill(unittest.TestCase):
         self.assertIn("**Git (`S7`) is a candidate**", body)
         self.assertIn("tell the user **before** you run the command that a Windows administrator prompt may appear", body)
 
-    def test_the_claude_cli_is_recommended_and_stays_out_of_install_all(self) -> None:
-        # ADR-0018 (2026-10-02): nothing starts the CLI with the default settings.
+    def test_the_claude_command_is_never_needed_and_stays_out_of_install_all(self) -> None:
+        # gatekit starts no claude process: S6 only shows the Claude Code version.
         text = read(self.refs / "install-programs.md")
         row = re.search(r"(?m)^\| `claude` \|[^|]*\| recommended \|([^|]*)\|", text)
         assert row is not None
-        self.assertIn("only needed when build runs its tasks as workers", row.group(1))
+        self.assertIn("gatekit never starts it", row.group(1))
         self.assertIn('never inside "install all"', one_line(text))
+        self.assertIn("do not offer an install just to read a version", one_line(text))
         body = one_line(self.body)
         self.assertIn("gatekit needs three programs: Claude Code, **uv** and **PowerShell 7**", body)
         self.assertIn("the desktop app, the VS Code extension or the terminal", body)
-        self.assertIn("**recommended, not required**", body)
-        self.assertIn("do not make it a candidate", body)
-        self.assertIn("only when its `level` is `required`", body)
+        self.assertIn("**The Claude Code version (`S6`) is never a candidate.**", body)
+        self.assertIn("never offer to install the CLI just to read a version", body)
+        self.assertIn("the app should be kept up to date", body)
         for stale in ("does not provide it", "A missing `claude` CLI is fixed"):
             self.assertNotIn(stale, one_line(self.text))
-        # the example install call does not install what the default settings do not use
+        # the example install call does not install what gatekit never starts
         calls = [line for line in self.body.splitlines() if "setup.ps1 -Install" in line]
         self.assertEqual(len(calls), 1)
         self.assertNotIn("claude", calls[0].split("-Install", 1)[1])
+        # setup makes the state folder and writes no settings file; doctor has no axis for a program
+        self.assertNotIn("config.json", self.text)
         doctor = one_line(read(skill("doctor") / "SKILL.md"))
-        self.assertIn("not used with the current settings", doctor)
-        self.assertIn("do not suggest installing the `claude` CLI", doctor)
+        self.assertIn("The seven axes are", doctor)
+        self.assertNotIn("`claude`", doctor)
 
     def test_settings_reference_carries_both_required_values(self) -> None:
         text = read(self.refs / "settings.md")

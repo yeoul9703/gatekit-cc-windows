@@ -1,4 +1,4 @@
-"""Tests for gatekit.doctor — 8 axes, fault-injected one at a time.
+"""Tests for gatekit.doctor — 7 axes, fault-injected one at a time.
 
 `unverified` is asserted as itself rather than rounded to ok or fail.
 """
@@ -105,9 +105,6 @@ class DoctorTestCase(unittest.TestCase):
         state.mkdir(exist_ok=True)
         (state / "config.json").write_text(json.dumps(data), encoding="utf-8")
 
-    def stub_claude(self) -> None:
-        make_fake(self.bindir, "claude", print_and_exit("claude 1.0.0"))
-
     def axis(self, report: dict, n: int) -> dict:
         return report["axes"][n - 1]
 
@@ -116,9 +113,12 @@ class DoctorTestCase(unittest.TestCase):
 
 
 class TestReportShape(DoctorTestCase):
-    def test_eight_axes_each_with_the_required_keys(self) -> None:
+    def test_seven_axes_each_with_the_required_keys(self) -> None:
         report = doctor.diagnose(self.root)
-        self.assertEqual(len(report["axes"]), 8)
+        self.assertEqual(len(report["axes"]), 7)
+        self.assertEqual([a["n"] for a in report["axes"]], list(range(1, 8)))
+        # no axis is about a program that runs the tasks: the session and its subagents do
+        self.assertNotIn("workers", [a["axis"] for a in report["axes"]])
         self.assertEqual([a["axis"] for a in report["axes"]][:2],
                          ["gatekit files", "hooks registered"])
         self.assertEqual(report["axes"][-1]["axis"], "uv")
@@ -516,6 +516,22 @@ class TestAxisProjectState(DoctorTestCase):
         shutil.rmtree(self.root / ".gatekit")
         self.assertEqual(doctor.axis_project_state(self.root)["verdict"], verdict.UNVERIFIED)
 
+    def test_settings_an_older_kit_wrote_are_still_a_clean_state(self) -> None:
+        # worker, build.execution and verify.evaluator are read by nothing; doctor says nothing
+        # about them, and a file saved with a BOM (Windows PowerShell 5.1) is readable.
+        old = {"worker": {"default": "claude"}, "build": {"execution": "worker"},
+               "verify": {"evaluator": "claude"}}
+        (self.root / ".gatekit" / "config.json").write_text(json.dumps(old), encoding="utf-8-sig")
+        result = doctor.axis_project_state(self.root)
+        self.assertEqual((result["verdict"], result["fix"]), (verdict.OK, ""), result)
+
+    def test_the_fix_for_a_missing_state_folder_names_the_folder(self) -> None:
+        shutil.rmtree(self.root / ".gatekit")
+        fix = doctor.axis_project_state(self.root)["fix"]
+        self.assertIn("/gatekit-setup", fix)
+        self.assertIn(".gatekit 폴더", fix)
+        self.assertNotIn("config.json", fix)
+
     def test_corrupt_config_json_fails(self) -> None:
         (self.root / ".gatekit" / "config.json").write_text("{oops", encoding="utf-8")
         result = doctor.axis_project_state(self.root)
@@ -624,60 +640,7 @@ class TestAxisContractFreshness(DoctorTestCase):
         self.assertEqual(result["verdict"], verdict.UNVERIFIED)
 
 
-# ------------------------------------------------------------------- axis 6
-
-
-class TestAxisWorkers(DoctorTestCase):
-    """The CLI is needed only in a project whose settings start it (doctor.cli_required)."""
-
-    def test_missing_default_worker_binary_fails_when_build_runs_workers(self) -> None:
-        self.write_config({"build": {"execution": "worker"}})
-        result = doctor.axis_workers(self.root)
-        self.assertEqual(result["verdict"], verdict.FAIL)
-        self.assertIn("claude", result["detail"])
-        self.assertTrue(result["fix"])
-
-    def test_missing_default_worker_binary_fails_when_a_backend_is_the_evaluator(self) -> None:
-        self.write_config({"verify": {"evaluator": "claude"}})
-        result = doctor.axis_workers(self.root)
-        self.assertEqual(result["verdict"], verdict.FAIL)
-        self.assertTrue(result["fix"])
-
-    def test_missing_default_worker_binary_is_ok_with_the_default_settings(self) -> None:
-        for data in (None, {"build": {"execution": "host"}}, {"verify": {"evaluator": "agent"}}):
-            with self.subTest(config=data):
-                if data is not None:
-                    self.write_config(data)
-                result = doctor.axis_workers(self.root)
-                self.assertEqual(result["verdict"], verdict.OK)
-                self.assertIn("기본 워커 claude: PATH 에서 찾지 못함", result["detail"])
-                self.assertIn("지금 설정(build.execution=host)에서는 쓰지 않는다", result["detail"])
-                self.assertEqual(result["fix"], "")
-
-    def test_cli_required_reads_the_two_settings(self) -> None:
-        self.assertFalse(doctor.cli_required(self.root))  # no config file
-        cases = (({}, False), ({"build": {"execution": "host"}}, False),
-                 ({"build": {"execution": "worker"}}, True),
-                 ({"build": {"execution": "Worker"}}, False),  # a typo means host (jobs.execution_mode)
-                 ({"verify": {"evaluator": ""}}, False), ({"verify": {"evaluator": "agent"}}, False),
-                 ({"verify": {"evaluator": "claude"}}, True),
-                 ({"verify": {"evaluator": "no-such-backend"}}, True),  # as written, like common.ps1
-                 ({"verify": {"evaluator": 3}}, False))
-        for data, expected in cases:
-            with self.subTest(config=data):
-                self.write_config(data)
-                self.assertEqual(doctor.cli_required(self.root), expected)
-        (self.root / ".gatekit" / "config.json").write_text("{not json", encoding="utf-8")
-        self.assertFalse(doctor.cli_required(self.root))
-
-    def test_present_default_worker_binary_is_ok(self) -> None:
-        self.stub_claude()
-        result = doctor.axis_workers(self.root)
-        self.assertEqual(result["verdict"], verdict.OK)
-        self.assertEqual(result["fix"], "")
-
-
-# ------------------------------------------------------------------- axis 7
+# ------------------------------------------------------------- axes 6 and 7
 
 
 class TestAxisPython(DoctorTestCase):
@@ -849,7 +812,7 @@ class TestHooksExecForm(DoctorTestCase):
 
 
 class TestCli(DoctorTestCase):
-    def test_json_output_parses_and_lists_eight_axes(self) -> None:
+    def test_json_output_parses_and_lists_seven_axes(self) -> None:
         import contextlib
         import io
 
@@ -857,16 +820,16 @@ class TestCli(DoctorTestCase):
         with contextlib.redirect_stdout(buf):
             doctor.run(["--json", "--root", str(self.root)])
         report = json.loads(buf.getvalue())
-        self.assertEqual(len(report["axes"]), 8)
+        self.assertEqual(len(report["axes"]), 7)
 
     def test_exit_1_when_any_axis_fails(self) -> None:
         import contextlib
         import io
 
-        # A project that runs workers, and no `claude` on PATH → axis 6 fails.
-        self.write_config({"build": {"execution": "worker"}})
+        # setUp points PATH at an empty folder, so there is no `uv`: the last axis fails.
         report = doctor.diagnose(self.root)
-        self.assertEqual(self.axis(report, 6)["verdict"], verdict.FAIL)
+        self.assertEqual(report["axes"][-1]["axis"], "uv")
+        self.assertEqual(report["axes"][-1]["verdict"], verdict.FAIL)
         with contextlib.redirect_stdout(io.StringIO()):
             code = doctor.run(["--root", str(self.root)])
         self.assertEqual(code, 1)

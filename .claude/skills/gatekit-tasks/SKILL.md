@@ -115,7 +115,7 @@ after a stop signal.
 Then fill the template, including its YAML frontmatter block (`title`/`date`/
 `status`) at the top, headings verbatim from the heading map. Each task is one
 ` ```gatekit-task ` fence holding a single JSON object, and the instruction must
-be self-contained — a worker reads only that string and its scope. Fill the
+be self-contained — it is read on its own, with only its scope beside it. Fill the
 execution-order table so a human can see the rounds at a glance.
 
 ## Step 6 — validate

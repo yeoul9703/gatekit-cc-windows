@@ -50,24 +50,29 @@ class TestPackagesTable(unittest.TestCase):
             self.assertEqual(row[8], pkg["docs_url"], pkg["key"])
             self.assertEqual(pkg["admin_may_be_required"], row[6] not in ("아니오",), pkg["key"])
 
-    def test_the_claude_command_is_recommended_and_the_exit_codes_say_so(self) -> None:
+    def test_the_claude_command_only_shows_the_version_and_never_changes_the_exit_code(self) -> None:
         claude = next(p for p in PACKAGES if p["key"] == "claude")
         self.assertEqual(claude["level"], "권장")
         text = doc_text()
         self.assertIn("### 2-3. Claude Code (`claude` 명령, 권장)", text)
         section = text[text.index("### 2-3. "):text.index("### 2-3-1. ")]
-        rows = {r[0]: r for r in table_rows("### 2-3. ", section) if len(r) == 3 and "종료 코드" in r[1]}
-        self.assertIn("`fail`(필수), 종료 코드 2, `-Install claude`", rows["이 창의 PATH에 없음"][2])
-        self.assertEqual(rows["이 창의 PATH에 없음"][1], "`warn`(권장), 종료 코드에 영향 없음")
-        self.assertIn("종료 코드 3", rows["설치돼 있지만 이 창의 PATH에 안 보임"][2])
-        self.assertIn(claude["min_version"], section)
-        for key in ('`build.execution`이 `"worker"`', "`verify.evaluator`에 `agent`가 아닌"):
-            self.assertIn(key, section)
+        rows = {r[0]: r for r in table_rows("### 2-3. ", section) if len(r) == 3 and r[0] != "하고 싶은 것"}
+        self.assertEqual(rows["이 창의 PATH에 없음"][1], "`unverified`(확인하지 못함), 종료 코드에 영향 없음")
+        self.assertIn("버전을 보려고 설치를 권하지 않습니다", rows["이 창의 PATH에 없음"][2])
+        self.assertEqual(rows["설치돼 있지만 이 창의 PATH에 안 보임"][1], "`warn`, 종료 코드에 영향 없음")
+        self.assertEqual(rows["권장 버전(%s)보다 낮음" % claude["min_version"]][2], "`-Update claude`")
+        # the wording the script prints for the same state
+        ps1 = ps1_text()
+        self.assertIn("데스크톱 앱이나 VS Code 확장만 쓴다면 정상입니다. 앱을 최신으로 유지하세요.", ps1)
+        self.assertIn("데스크톱 앱이나 VS Code 확장만 쓴다면 정상입니다. 앱을 최신으로 유지하세요.", section)
+        for gone in ("워커", "build.execution", "verify.evaluator", "종료 코드 2, `-Install claude`"):
+            self.assertNotIn(gone, text, gone)
         self.assertNotIn("데스크톱 앱만으로는", text)
         usage = (DOC.parent / "USAGE.md").read_text(encoding="utf-8")
         self.assertIn("| Claude Code | 예 | 데스크톱 앱, VS Code 확장, 터미널 중 어느 것이든 됩니다 |", usage)
         self.assertRegex(usage, r"(?m)^\| `claude` 명령\(CLI\) \| 선택 \|")
         self.assertNotIn("데스크톱 앱만으로는", usage)
+        self.assertNotIn("워커", usage)
 
     def test_git_is_recommended_and_installed_in_the_user_scope_first(self) -> None:
         git = next(p for p in PACKAGES if p["key"] == "git")

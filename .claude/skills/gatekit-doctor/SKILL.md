@@ -1,6 +1,6 @@
 ---
 name: gatekit-doctor
-description: Diagnose the gatekit install across eight axes — gatekit files, hook registration, project state, spec set, contract freshness, workers, python, uv — then show the table and offer the printed fixes. Read-only, for when something looks wrong in a project that is already set up. Korean triggers — "닥터 돌려줘", "설치 점검해줘", "훅이 안 먹는 것 같아", "게이트킷 상태 확인". English triggers — "run doctor", "diagnose gatekit", "why are my hooks not firing", "check the install". NOT the built-in /doctor, which checks Claude Code itself and knows nothing about gatekit. NOT for installing a missing program — that is /gatekit-setup — and NOT for fixing the spec or approving a gate file.
+description: Diagnose the gatekit install across seven axes — gatekit files, hook registration, project state, spec set, contract freshness, python, uv — then show the table and offer the printed fixes. Read-only, for when something looks wrong in a project that is already set up. Korean triggers — "닥터 돌려줘", "설치 점검해줘", "훅이 안 먹는 것 같아", "게이트킷 상태 확인". English triggers — "run doctor", "diagnose gatekit", "why are my hooks not firing", "check the install". NOT the built-in /doctor, which checks Claude Code itself and knows nothing about gatekit. NOT for installing a missing program — that is /gatekit-setup — and NOT for fixing the spec or approving a gate file.
 argument-hint: "[optional: --json]"
 allowed-tools: Read, Glob, Grep, Bash, PowerShell
 ---
@@ -35,16 +35,16 @@ Render one row per axis, in order, in `output_lang`:
 | # | axis | verdict | what it means |
 |---|------|---------|---------------|
 
-The eight axes are: gatekit files, hooks registered, project state, spec set,
-contract freshness, workers, python, uv.
+The seven axes are: gatekit files, hooks registered, project state, spec set,
+contract freshness, python, uv.
 
 Reading the verdicts:
 
 - `ok` — checked, and it holds.
 - `warn` — checked, works, worth knowing.
 - `fail` — checked, and it is broken. This is what exit 1 reports.
-- `unverified` — **not checked.** No install manifest to read, no `spec/` yet, a
-  worker whose version probe went unanswered. Say "not checked" and why. Never
+- `unverified` — **not checked.** No `.gatekit/` folder yet, no `spec/` yet, a
+  `uv` whose version probe went unanswered. Say "not checked" and why. Never
   round it up to `ok` or down to `fail`, and never summarize a report containing
   `unverified` axes as "all good".
 
@@ -74,21 +74,14 @@ Common cases:
   derived, or a design input did (`02-screens.md`, `02-design.md`, or
   `tokens.json`); the detail names which file changed. Fix either case with
   `/gatekit-tasks` then `/gatekit-gate`.
-- **workers** fail — the project is set to run a worker CLI (`build.execution`
-  is `worker`, or `verify.evaluator` names a backend) and the default
-  backend's binary is not on PATH. Route to `/gatekit-setup`.
-- **workers** ok with "not used with the current settings" in the detail — the
-  binary is missing, and nothing runs it: with the default settings
-  (`build.execution` is `host`) the session does the work itself. Nothing to
-  fix; do not suggest installing the `claude` CLI.
 - **python** fail — `.claude/gatekit/.venv` is missing (hooks are silently
   inactive) or its interpreter is below 3.14. Route to `/gatekit-setup`.
 - **uv** fail — `uv` is not on PATH. Route to `/gatekit-setup`, which shows the
   install command; install it only after the user agrees.
 
-Ask before running any fix. **Never** run a fix that rewrites `spec/05-gate.md`,
-records an approval, or enables an unsafe backend; those are the user's calls,
-taken through their own commands.
+Ask before running any fix. **Never** run a fix that rewrites `spec/05-gate.md`
+or records an approval; those are the user's calls, taken through their own
+commands.
 
 ## Step 4 — machine output
 

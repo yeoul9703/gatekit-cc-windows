@@ -36,7 +36,7 @@ from `spec/02-screens.md` (layout, components, the four states) and
 
 Then loop until the user is done: show it → they say what to change → **edit
 `spec/02-screens.md`**, never only the HTML, since that file is what reaches
-the workers → redraw and show again. Nothing is recorded as approved and no
+the task briefs → redraw and show again. Nothing is recorded as approved and no
 assumption closes; the corrections are the point and they travel in the spec.
 Re-run `spec validate` after any edit, and **never cite the preview in an
 evidence cell** — it is drawn from this spec, so it cannot be evidence for it

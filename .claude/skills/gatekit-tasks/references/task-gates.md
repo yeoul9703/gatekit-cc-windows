@@ -29,8 +29,8 @@ This is not a style preference. It is the defect that made a real trial
 (`gk-todo`) record three features as complete without a line of code being
 written for them. All three tasks shared an `npm test` gate; the first
 feature's tests alone made that suite pass; so `jobs start`'s preflight
-found the gate already green, skipped the worker for each, and recorded
-`passed`. The trial's own retro states the rule it arrived at: *"작업별
+found the gate already green and recorded each as `passed` with nothing
+written. The trial's own retro states the rule it arrived at: *"작업별
 게이트를 항상 그 작업의 write_scope 안 경로로 좁힐 것 — 전체 스위트
 게이트는 완료 기준(05)에서만 보조적으로 쓸 것."*
 
@@ -42,13 +42,13 @@ The whole suite still belongs in `spec/05-gate.md` as a completion
 criterion, where it checks that everything holds together once every task
 is done. That is a different question from "did this task do its job," and
 a run where the suite passes but a feature was never wired up is exactly
-what `/gatekit-verify`'s independent evaluator exists to catch.
+what `/gatekit-verify`'s independent reviewer exists to catch.
 
 Two runners need glob patterns, not directories: `node --test` loads a bare
 directory as a module and fails with `Cannot find module`, so write
 `tests/rules/*.test.js`; `gates/tokens.py` scans zero files for a bare
 directory and exits 3, so write `src/**`. `jobs start` runs every gate once
-before spawning a worker (ADR-0009) and refuses to start when a gate's
+before the job starts (ADR-0009) and refuses to start when a gate's
 command itself errors — write the gate so that, with no code yet, it fails
 the way the runner reports "tests failed" (exit 1), not a usage error.
 
@@ -85,6 +85,6 @@ command's job is only to make that possible: name the task so `<task-id>`
 is stable and unique (it already must be, per Step 3's uniqueness rule),
 and do not write anything to `spec/design/` yourselves — the screenshot is
 captured once the task's own gates already pass, as evidence for
-`/gatekit-verify`'s evaluator to look at later, not a gate this command or the worker
+`/gatekit-verify`'s reviewer to look at later, not a gate this command or the build
 clears itself.
 

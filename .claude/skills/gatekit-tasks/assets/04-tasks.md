@@ -6,8 +6,8 @@ status: "초안"
 
 # {{project_name}} — 작업 목록
 
-각 작업은 아래 형식의 `gatekit-task` 블록 하나로 표현한다. `jobs.py`가 이
-블록을 읽어 워커에 넘기고, 쓰기 게이트가 `write_scope`를 강제한다.
+각 작업은 아래 형식의 `gatekit-task` 블록 하나로 표현한다. build가 이
+블록을 읽어 작업마다 안내문을 만들고, 그 작업의 `gates`가 통과를 판정한다.
 
 ## 작업 목록
 
@@ -56,5 +56,6 @@ status: "초안"
 
 - 같은 라운드의 두 작업은 `write_scope`가 겹칠 수 없다. 겹치면
   `uv run --project .claude/gatekit --frozen python .claude/gatekit/bin/gatekit.py spec validate`가 `fail`을 낸다.
-- 워커는 자기 `write_scope` 밖을 쓸 수 없다. 쓰기 게이트가 막는다.
-- 범위를 넓혀야 하면 워커가 임의로 넓히지 말고 작업을 다시 나눈다.
+- 작업을 구현할 때 그 작업의 `write_scope` 밖은 고치지 않는다.
+- 작업을 하위 에이전트에 나눠 맡길 때 같은 때 도는 둘의 범위가 겹치면 위임이 막힌다.
+- 범위를 넓혀야 하면 임의로 넓히지 말고 작업을 다시 나눈다.

@@ -1193,7 +1193,7 @@ def _check_tokens(root: pathlib.Path, lang: str) -> List[dict]:
     """Validate ``spec/tokens.json`` when it exists.
 
     Every finding is a ``warn``. The kernel does not depend on this file to
-    run: a malformed one costs the worker its design section, not the build.
+    run: a malformed one costs the task brief its design section, not the build.
     Naming the offending key is the whole value of the check.
     """
     from gatekit import design as design_mod

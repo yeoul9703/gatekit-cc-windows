@@ -81,7 +81,7 @@ Rules for the report:
 - `unverified` stays `unverified` everywhere it appears. A criterion that timed
   out, a step nobody could run, a missing artifact that could not be checked —
   none of these are passes and none are failures.
-- Never restate a worker's or the reviewer's claim of success as a verdict
+- Never restate a subagent's or the reviewer's claim of success as a verdict
   for a command criterion. The contract run decides.
 - **The `contract run` aggregate (`ok`/`fail`/`unverified`) only ever counts
   code criteria — it has no way to see a `-visual` verdict, since that comes

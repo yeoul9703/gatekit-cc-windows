@@ -155,7 +155,7 @@ def build_context(root, led: "ledger.Ledger") -> str:
     if contract_status != "unverified":
         parts.append(f"contract={contract_status}")
 
-    # ADR-0013 decision 1a: a build under host execution lives in this session,
+    # ADR-0013 decision 1a: a build lives in this session,
     # so a compaction can take the narrative with it. Name the live job and the
     # next task; spec/PROGRESS.md holds the rest (written by the PreCompact
     # hook). An unfinished job is the only one worth reporting.

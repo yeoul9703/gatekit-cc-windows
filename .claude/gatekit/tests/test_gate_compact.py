@@ -44,8 +44,7 @@ class CompactProject(unittest.TestCase):
         (jdir / "tasks").mkdir(parents=True)
         jobs.write_json(jdir / "job.json", {
             "version": 1, "job_id": job_id, "started_at": jobs._now(),
-            "execution": "host", "tasks": list(states),
-            "backend": {"name": "claude"}})
+            "tasks": list(states)})
         for task_id, state in states.items():
             tdir = jdir / "tasks" / task_id
             tdir.mkdir(parents=True)

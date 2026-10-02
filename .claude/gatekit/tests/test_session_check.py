@@ -3,7 +3,7 @@ user-visible warning plus a Claude-facing hint when it is not.
 
 The script is copied into a scratch ``.claude/gatekit/scripts`` tree and run
 with Windows PowerShell 5.1 (the one every Windows has) with a PATH that holds
-only the fake ``uv``/``claude`` executables the test chooses to provide.
+only the fake executables (``uv``, ``pwsh``) the test chooses to provide.
 """
 from __future__ import annotations
 
@@ -63,7 +63,6 @@ class TestSessionCheck(unittest.TestCase):
 
     def test_everything_present_prints_nothing(self) -> None:
         self.fake("uv")
-        self.fake("claude")
         self.venv()
         proc = self.run_check()
         self.assertEqual(proc.returncode, 0, proc.stderr)
@@ -71,7 +70,6 @@ class TestSessionCheck(unittest.TestCase):
 
     def test_missing_venv_warns_user_and_tells_claude_to_run_setup(self) -> None:
         self.fake("uv")
-        self.fake("claude")
         proc = self.run_check()
         self.assertEqual(proc.returncode, 0, proc.stderr)
         data = json.loads(proc.stdout.decode("ascii"))  # pure ASCII (\u escapes)
@@ -87,57 +85,22 @@ class TestSessionCheck(unittest.TestCase):
         state.mkdir(exist_ok=True)
         (state / "config.json").write_text(json.dumps(data), encoding="utf-8")
 
-    def test_missing_claude_is_silent_with_the_default_settings(self) -> None:
-        # Nothing starts the CLI by default (build.execution = host, the reviewer is a subagent).
+    def test_a_missing_claude_command_is_never_reported(self) -> None:
+        # gatekit starts no claude process: a PC with only the desktop app or the VS Code
+        # extension is fine, and settings an older kit wrote (a worker build, a backend
+        # reviewer) are read by nothing.
         self.fake("uv")
         self.venv()
-        for data in (None, {}, {"build": {"execution": "host"}}, {"verify": {"evaluator": "agent"}}):
+        for data in (None, {}, {"build": {"execution": "worker"}}, {"verify": {"evaluator": "claude"}}):
             with self.subTest(config=data):
                 if data is not None:
                     self.config(data)
-                proc = self.run_check()
+                proc = self.run_check(GATEKIT_SETUP_KEEP_PATH="1")
                 self.assertEqual(proc.returncode, 0, proc.stderr)
                 self.assertEqual(proc.stdout.strip(), b"")
 
-    def test_missing_claude_is_reported_when_the_project_runs_it(self) -> None:
-        self.fake("uv")
-        self.venv()
-        for data in ({"build": {"execution": "worker"}}, {"verify": {"evaluator": "claude"}}):
-            with self.subTest(config=data):
-                self.config(data)
-                # KEEP_PATH: this machine's registry PATH (which may hold a claude) is not read
-                proc = self.run_check(GATEKIT_SETUP_KEEP_PATH="1")
-                self.assertEqual(proc.returncode, 0, proc.stderr)
-                message = json.loads(proc.stdout.decode("ascii"))["systemMessage"]
-                self.assertIn("claude CLI: not found on PATH", message)
-                self.assertNotIn("uv:", message)
-
-    def test_claude_that_needs_a_restart_is_named_only_when_the_project_runs_it(self) -> None:
-        self.fake("uv")
-        self.venv()
-        elsewhere = self.root / "elsewhere"
-        elsewhere.mkdir()
-        (elsewhere / "claude.exe").write_bytes(b"")
-        proc = self.run_check(GATEKIT_SETUP_REGISTRY_PATH=str(elsewhere))
-        self.assertEqual(proc.stdout.strip(), b"")
-        self.config({"build": {"execution": "worker"}})
-        proc = self.run_check(GATEKIT_SETUP_REGISTRY_PATH=str(elsewhere))
-        message = json.loads(proc.stdout.decode("ascii"))["systemMessage"]
-        self.assertIn("claude CLI: installed but not visible in this session", message)
-
-    def test_missing_uv_and_claude_are_both_reported(self) -> None:
-        self.venv()
-        self.config({"build": {"execution": "worker"}})
-        proc = self.run_check()
-        self.assertEqual(proc.returncode, 0, proc.stderr)
-        message = json.loads(proc.stdout.decode("ascii"))["systemMessage"]
-        self.assertIn("uv:", message)
-        self.assertIn("claude CLI", message)
-        self.assertNotIn(".venv", message)
-
     def test_venv_whose_python_home_is_gone_is_reported(self) -> None:
         self.fake("uv")
-        self.fake("claude")
         self.venv()
         cfg = self.root / ".claude" / "gatekit" / ".venv" / "pyvenv.cfg"
         cfg.write_text("home = %s" % (self.root / "no-such-python"), encoding="utf-8")
@@ -148,7 +111,6 @@ class TestSessionCheck(unittest.TestCase):
 
     def test_venv_with_an_existing_python_home_is_silent(self) -> None:
         self.fake("uv")
-        self.fake("claude")
         self.venv()
         cfg = self.root / ".claude" / "gatekit" / ".venv" / "pyvenv.cfg"
         cfg.write_text("home = %s" % self.root, encoding="utf-8")
@@ -156,7 +118,6 @@ class TestSessionCheck(unittest.TestCase):
 
     def test_minimum_python_comes_from_packages_json(self) -> None:
         self.fake("uv")
-        self.fake("claude")
         self.venv()
         (self.scripts / "packages.json").write_text('{"python_min": "3.99"}', encoding="utf-8")
         cfg = self.root / ".claude" / "gatekit" / ".venv" / "pyvenv.cfg"
@@ -166,7 +127,6 @@ class TestSessionCheck(unittest.TestCase):
 
     def test_venv_python_below_3_14_is_reported(self) -> None:
         self.fake("uv")
-        self.fake("claude")
         self.venv()
         cfg = self.root / ".claude" / "gatekit" / ".venv" / "pyvenv.cfg"
         for old in ("3.11.9", "3.13.5"):
@@ -180,7 +140,6 @@ class TestSessionCheck(unittest.TestCase):
 
     def test_venv_with_a_zero_byte_python_is_reported_as_damaged(self) -> None:
         self.fake("uv")
-        self.fake("claude")
         self.venv()
         py = self.root / ".claude" / "gatekit" / ".venv" / "Scripts" / "python.exe"
         py.write_bytes(b"")
@@ -191,7 +150,6 @@ class TestSessionCheck(unittest.TestCase):
     def test_missing_powershell_7_is_reported(self) -> None:
         (self.bin / "pwsh.exe").unlink()
         self.fake("uv")
-        self.fake("claude")
         self.venv()
         empty = self.root / "empty"  # stands in for the registry PATH: this machine's own pwsh must not count
         empty.mkdir()
@@ -208,7 +166,6 @@ class TestSessionCheck(unittest.TestCase):
     def ready(self) -> None:
         """Everything else is fine, and packages.json (the package names) is in place."""
         self.fake("uv")
-        self.fake("claude")
         self.venv()
         shutil.copy(KIT / "scripts" / "packages.json", self.scripts / "packages.json")
 
@@ -251,7 +208,6 @@ class TestSessionCheck(unittest.TestCase):
 
     def test_without_packages_json_the_package_lookup_is_skipped(self) -> None:
         self.fake("uv")
-        self.fake("claude")
         self.venv()
         self.assertEqual(self.run_check(GATEKIT_SETUP_PWSH_PACKAGES=self.PREVIEW).stdout.strip(), b"")
 
@@ -278,7 +234,6 @@ class TestSessionCheck(unittest.TestCase):
         elsewhere = self.root / "elsewhere"
         elsewhere.mkdir()
         (elsewhere / "uv.exe").write_bytes(b"")
-        self.fake("claude")
         self.venv()
         proc = self.run_check(GATEKIT_SETUP_REGISTRY_PATH=str(elsewhere))
         message = json.loads(proc.stdout.decode("ascii"))["systemMessage"]
@@ -311,7 +266,6 @@ class TestSessionCheck(unittest.TestCase):
         self.assertLess(message.rindex(reopen), message.index(self.TRAY_EN))
 
     def test_program_missing_everywhere_is_still_not_found(self) -> None:
-        self.fake("claude")
         self.venv()
         proc = self.run_check(GATEKIT_SETUP_REGISTRY_PATH=str(self.root / "empty"))
         message = json.loads(proc.stdout.decode("ascii"))["systemMessage"]
@@ -329,7 +283,6 @@ class TestSessionCheck(unittest.TestCase):
 
     def test_check_never_creates_a_venv(self) -> None:
         self.fake("uv")
-        self.fake("claude")
         self.run_check()
         self.assertFalse((self.root / ".claude" / "gatekit" / ".venv").exists())
 

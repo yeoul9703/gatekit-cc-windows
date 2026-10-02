@@ -57,7 +57,7 @@ nothing.
 ## Looking without changing (`-Status`)
 
 `-Status` shows the program table and the failure record and skips the
-`.venv`, the config and doctor. It needs no permission.
+`.venv`, the `.gatekit` folder and doctor. It needs no permission.
 
 ## winget error codes
 
@@ -147,21 +147,3 @@ When the winget install of the same run fails, the `S16-pwsh` item says "the
 winget install failed, so PowerShell 7 could not be installed". The cause is
 the `S16-winget` item: handle that one (the Microsoft Store link, or the IT
 contact for exit code 4) and do not ask for `-Install winget` again.
-
-## Worker backends in more detail
-
-```
-uv run --project .claude/gatekit --frozen python .claude/gatekit/bin/gatekit.py workers check claude
-uv run --project .claude/gatekit --frozen python .claude/gatekit/bin/gatekit.py workers list
-```
-
-With the default settings no worker is started (build runs in the session
-itself), so these commands matter only in a project that set
-`build.execution` to `worker` or named a backend in `verify.evaluator`.
-
-`workers check` verdicts: `ok` — the CLI answered its version probe;
-`unverified` — the binary is there but the probe did not answer (not a
-failure, not a pass; builds will still run); `fail` — the binary is missing.
-An additional backend is added by hand in `.gatekit/config.json` under
-`worker.backends` and enabled only by the user. If they ask how, tell them
-the usage guide in the project's docs folder describes it.

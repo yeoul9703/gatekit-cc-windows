@@ -55,24 +55,3 @@ The rest of the prompt says, in `output_lang`:
 - Reply with the verdict table only. Do not paste command transcripts.
 
 The reviewer writes nothing. `spec/PROGRESS.md` is yours to write in Step 5.
-
-## A different program as the reviewer (opt-in)
-
-A project that has set `verify.evaluator` to an enabled backend name in
-`.gatekit/config.json` runs the same brief through that program instead of a
-subagent: write the bullet list above to `.gatekit/evaluator-prompt.md`, then
-
-```
-uv run --project .claude/gatekit --frozen python .claude/gatekit/bin/gatekit.py jobs evaluate --prompt .gatekit/evaluator-prompt.md
-```
-
-`evaluate` always uses the backend's read-only arguments. `failed` or
-`timeout` means every listed item is `unverified`, never a pass. A backend
-that cannot read image files cannot judge a screenshot: treat its `-visual`
-verdicts as `unverified`. Nothing is configured this way by default; the
-`evaluator` field of this command's output names the reviewer (`agent` unless
-the project chose otherwise):
-
-```
-uv run --project .claude/gatekit --frozen python .claude/gatekit/bin/gatekit.py workers list --json
-```

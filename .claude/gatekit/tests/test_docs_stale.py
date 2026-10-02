@@ -17,7 +17,6 @@ STALE = [
     ("python3 ", re.compile(r"python3 ")),
     ("hooks.json", re.compile(r"hooks\.json")),
     ("no-install claim", re.compile(r"설치 과정 없이|설치 불필요|설치할 필요가 없")),
-    ("seven axes", re.compile(r"7가지 항목|7축|seven axes|7-axis", re.I)),
     ("CLAUDE_PLUGIN_ROOT", re.compile(r"CLAUDE_PLUGIN_ROOT")),
 ]
 

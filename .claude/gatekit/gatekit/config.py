@@ -4,10 +4,12 @@ A missing or corrupt config file must never stop a gate, so :func:`load` always
 returns a complete, usable dictionary: the file is deep-merged onto
 :data:`DEFAULTS` and anything unparseable falls back to the defaults entirely.
 
-Sandboxing is never disabled by default. A backend that passes a bypass flag has
-to say so explicitly with ``"unsafe": true``, and the job receipt records it.
-Each backend carries two argv lists: ``argv`` for build workers and
-``read_only_argv`` for the evaluator, which must never be able to write.
+The file is optional: setup does not write one, and every setting has its
+default here. It is read as UTF-8 with or without a BOM, because a file saved by
+Windows PowerShell 5.1 (``Set-Content -Encoding UTF8``) carries one, and a
+setting a person edited by hand must not be dropped without a word. A key this
+module does not know (one written by an older kit) passes through the merge
+and is read by nothing.
 """
 from __future__ import annotations
 
@@ -24,51 +26,10 @@ from . import paths
 DEFAULTS: Dict[str, Any] = {
     "version": 1,
     "enforce_spec_before_code": True,
-    "worker": {
-        "default": "claude",
-        "backends": {
-            "claude": {
-                "argv": [
-                    "claude",
-                    "-p",
-                    "--output-format",
-                    "json",
-                    "--permission-mode",
-                    "acceptEdits",
-                ],
-                "read_only_argv": [
-                    "claude",
-                    "-p",
-                    "--output-format",
-                    "json",
-                    "--permission-mode",
-                    "plan",
-                ],
-                "enabled": True,
-            },
-        },
-    },
-    # ADR-0013: `execution` names who implements a task — "host" (the
-    # session running the build) or "worker" (a spawned backend). "host" is
-    # the default: a worker is a cold session of the same model, paying a
-    # fresh project discovery per task to buy a second opinion from the
-    # model already present. On the `gk-trial2` run that measured this, 26
-    # minutes of real work took 4.5 hours across 35 spawns. Spawn a worker
-    # when the model must actually differ (adversarial verification) or
-    # when a round holds enough independent tasks for parallelism to pay —
-    # both decided per round, not by this default. A project that wants the
-    # old behaviour sets `"execution": "worker"` explicitly.
-    "build": {"max_retries": 2, "parallel": 3, "task_timeout_s": 900,
-              "execution": "host"},
+    # How many consecutive failures of one task `jobs start` accepts before it
+    # refuses the task (ADR-0014). 0 turns the limit off.
+    "build": {"max_retries": 2},
     "questions": {"interview_max_calls": 2, "items_per_call": 4},
-    # Who grades in /gatekit-verify: "agent" spawns a read-only subagent of
-    # the host; a backend name runs that CLI with its read_only_argv, so the
-    # grader can be a different model from the one that built the code.
-    # Unset by design (ADR-0013): an absent evaluator resolves at call time
-    # to an enabled backend whose name differs from the host, so the grader
-    # is not the model that wrote the code. A user who wants the host's own
-    # subagent writes "agent" here explicitly and that always wins.
-    "verify": {"evaluator": ""},
 }
 
 
@@ -76,8 +37,8 @@ def _deep_merge(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any
     """Recursively merge *override* onto a copy of *base*.
 
     Dictionaries merge key by key; every other value (lists included) is
-    replaced wholesale. Replacing lists is deliberate: a user who writes an
-    ``argv`` means that exact command line, not the default with extras.
+    replaced wholesale. Replacing lists is deliberate: a user who writes a
+    list means exactly that list, not the default with extras.
     """
     result = copy.deepcopy(base)
     for key, value in override.items():
@@ -97,7 +58,7 @@ def load(root: pathlib.Path) -> Dict[str, Any]:
     """
     target = paths.config_file(root)
     try:
-        raw = json.loads(target.read_text(encoding="utf-8"))
+        raw = json.loads(target.read_text(encoding="utf-8-sig"))
     except (OSError, ValueError):
         return copy.deepcopy(DEFAULTS)
     if not isinstance(raw, dict):

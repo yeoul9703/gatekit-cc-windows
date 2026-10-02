@@ -36,64 +36,66 @@ class TestDefaults(TempProject):
         cfg = config.load(self.root)
         self.assertEqual(cfg["version"], 1)
         self.assertTrue(cfg["enforce_spec_before_code"])
-        self.assertEqual(cfg["worker"]["default"], "claude")
-        self.assertTrue(cfg["worker"]["backends"]["claude"]["enabled"])
-        self.assertEqual(cfg["build"]["max_retries"], 2)
-        self.assertEqual(cfg["build"]["parallel"], 3)
-        self.assertEqual(cfg["build"]["task_timeout_s"], 900)
+        self.assertEqual(cfg["build"], {"max_retries": 2})
         self.assertEqual(cfg["questions"]["interview_max_calls"], 2)
         self.assertEqual(cfg["questions"]["items_per_call"], 4)
 
+    def test_defaults_name_no_program_to_start(self) -> None:
+        # Nothing starts a worker process or a reviewer program: no setting chooses one.
+        for gone in ("worker", "verify"):
+            self.assertNotIn(gone, config.DEFAULTS)
+        for gone in ("execution", "parallel", "task_timeout_s"):
+            self.assertNotIn(gone, config.DEFAULTS["build"])
+
     def test_load_does_not_mutate_module_defaults(self) -> None:
         cfg = config.load(self.root)
-        cfg["worker"]["backends"]["claude"]["enabled"] = False
+        cfg["questions"]["items_per_call"] = 99
         cfg["build"]["max_retries"] = 99
         fresh = config.load(self.root)
-        self.assertTrue(fresh["worker"]["backends"]["claude"]["enabled"])
+        self.assertEqual(fresh["questions"]["items_per_call"], 4)
         self.assertEqual(fresh["build"]["max_retries"], 2)
         self.assertEqual(config.DEFAULTS["build"]["max_retries"], 2)
-
-    def test_defaults_never_disable_sandbox(self) -> None:
-        for backend in config.DEFAULTS["worker"]["backends"].values():
-            self.assertFalse(backend.get("unsafe", False))
 
 
 class TestDeepMerge(TempProject):
     def test_partial_override_keeps_sibling_defaults(self) -> None:
-        self.write_config({"build": {"parallel": 8}})
+        self.write_config({"questions": {"items_per_call": 3}})
         cfg = config.load(self.root)
-        self.assertEqual(cfg["build"]["parallel"], 8)
+        self.assertEqual(cfg["questions"]["items_per_call"], 3)
+        self.assertEqual(cfg["questions"]["interview_max_calls"], 2)
         self.assertEqual(cfg["build"]["max_retries"], 2)
-        self.assertEqual(cfg["worker"]["default"], "claude")
 
-    def test_nested_backend_override(self) -> None:
-        self.write_config(
-            {"worker": {"backends": {"claude": {"enabled": False}}}}
-        )
-        cfg = config.load(self.root)
-        self.assertFalse(cfg["worker"]["backends"]["claude"]["enabled"])
-        # argv default survives the partial override
-        self.assertEqual(
-            cfg["worker"]["backends"]["claude"]["argv"],
-            config.DEFAULTS["worker"]["backends"]["claude"]["argv"],
-        )
+    def test_nested_override_merges_at_every_depth(self) -> None:
+        base = {"a": {"b": {"keep": 1, "change": 1}, "sibling": True}}
+        merged = config._deep_merge(base, {"a": {"b": {"change": 2}}})
+        self.assertEqual(merged, {"a": {"b": {"keep": 1, "change": 2}, "sibling": True}})
+        self.assertEqual(base["a"]["b"]["change"], 1)  # the base is not changed
 
-    def test_user_backend_is_added(self) -> None:
-        self.write_config(
-            {"worker": {"backends": {"mine": {"argv": ["mytool"], "enabled": True}}}}
-        )
+    def test_a_key_the_defaults_do_not_know_is_kept(self) -> None:
+        # Settings an older kit wrote are not an error: they pass through and nothing reads them.
+        old = {"worker": {"default": "claude"}, "build": {"execution": "worker"},
+               "verify": {"evaluator": "claude"}}
+        self.write_config(old)
         cfg = config.load(self.root)
-        self.assertEqual(cfg["worker"]["backends"]["mine"]["argv"], ["mytool"])
-        self.assertIn("claude", cfg["worker"]["backends"])
+        self.assertEqual(cfg["worker"], {"default": "claude"})
+        self.assertEqual(cfg["build"], {"max_retries": 2, "execution": "worker"})
 
     def test_list_is_replaced_not_merged(self) -> None:
-        self.write_config({"worker": {"backends": {"claude": {"argv": ["x"]}}}})
-        cfg = config.load(self.root)
-        self.assertEqual(cfg["worker"]["backends"]["claude"]["argv"], ["x"])
+        merged = config._deep_merge({"names": ["a", "b"]}, {"names": ["x"]})
+        self.assertEqual(merged["names"], ["x"])
 
     def test_enforce_flag_can_be_turned_off(self) -> None:
         self.write_config({"enforce_spec_before_code": False})
         self.assertFalse(config.load(self.root)["enforce_spec_before_code"])
+
+    def test_a_file_saved_with_a_bom_is_read(self) -> None:
+        # Windows PowerShell 5.1 writes a BOM (Set-Content -Encoding UTF8). Read as plain
+        # UTF-8 the file is not valid JSON, and the setting fell back to the default silently.
+        (self.root / ".gatekit").mkdir()
+        (self.root / ".gatekit" / "config.json").write_text(
+            json.dumps({"build": {"max_retries": 5}}), encoding="utf-8-sig")
+        self.assertTrue((self.root / ".gatekit" / "config.json").read_bytes().startswith(b"\xef\xbb\xbf"))
+        self.assertEqual(config.load(self.root)["build"]["max_retries"], 5)
 
 
 class TestCorruptInput(TempProject):
@@ -111,12 +113,12 @@ class TestCorruptInput(TempProject):
 class TestSave(TempProject):
     def test_save_creates_dir_and_roundtrips(self) -> None:
         cfg = config.load(self.root)
-        cfg["build"]["parallel"] = 5
+        cfg["build"]["max_retries"] = 5
         config.save(self.root, cfg)
         target = self.root / ".gatekit" / "config.json"
         self.assertTrue(target.is_file())
-        self.assertEqual(json.loads(target.read_text(encoding="utf-8"))["build"]["parallel"], 5)
-        self.assertEqual(config.load(self.root)["build"]["parallel"], 5)
+        self.assertEqual(json.loads(target.read_text(encoding="utf-8"))["build"]["max_retries"], 5)
+        self.assertEqual(config.load(self.root)["build"]["max_retries"], 5)
 
     def test_save_leaves_no_tmp_files(self) -> None:
         config.save(self.root, config.load(self.root))

@@ -1,16 +1,16 @@
 """PreCompact gate — stamp the live build state into spec/PROGRESS.md.
 
-ADR-0013 decision 1a. With `build.execution = "host"` a build lives in the
-session that runs it, so the host's compaction is a normal event rather than
-an exceptional one. Nothing here is a recovery mechanism: everything a build
-must not forget is *already* on disk — `status.json` per task, `gates.json`,
-the job dir — because gatekit's stages talk through files, never through
-conversation memory. What a compaction removes is the narrative.
+ADR-0013 decision 1a. A build lives in the session that runs it, so that
+session's compaction is a normal event rather than an exceptional one. Nothing
+here is a recovery mechanism: everything a build must not forget is *already*
+on disk — `status.json` per task, `gates.json`, the job dir — because gatekit's
+stages talk through files, never through conversation memory. What a
+compaction removes is the narrative.
 
 So this hook writes the narrative down: one section in `spec/PROGRESS.md`
-naming the job, its execution mode, and every task's state, so the session
-that comes back after the summary can pick up from a file instead of from
-what survived the summariser.
+naming the job and every task's state, so the session that comes back after
+the summary can pick up from a file instead of from what survived the
+summariser.
 
 The section is delimited and rewritten in place, so repeated compactions leave
 one stamp rather than a pile. Everything a human or another pipeline wrote is
@@ -32,7 +32,8 @@ else:
 
     ensure_package_path()
 
-from gatekit import hookio, jobs, paths  # noqa: E402
+# jobstore and util, not jobs: jobs.py is the heavy runner a hook must not import.
+from gatekit import hookio, jobstore, paths, util  # noqa: E402
 
 #: Opening line of the block this hook owns. Anything between it and
 #: END_MARKER is replaced wholesale on the next compaction; nothing outside is
@@ -47,17 +48,17 @@ def _now() -> str:
 
 def build_state(root) -> Optional[Dict[str, Any]]:
     """The latest job's task states, or ``None`` when there is no job."""
-    job_id = jobs.latest_job_id(root)
+    job_id = jobstore.latest_job_id(root)
     if not job_id:
         return None
-    jdir = jobs.job_dir(root, job_id)
-    job = jobs.read_json(jdir / "job.json", None)
+    jdir = jobstore.job_dir(root, job_id)
+    job = util.read_json(jdir / "job.json", None)
     if not isinstance(job, dict):
         return None
 
     rows = []
     for task_id in job.get("tasks") or []:
-        status = jobs.read_json(jdir / "tasks" / str(task_id) / "status.json", {})
+        status = util.read_json(jdir / "tasks" / str(task_id) / "status.json", {})
         if not isinstance(status, dict):
             status = {}
         rows.append({
@@ -68,8 +69,6 @@ def build_state(root) -> Optional[Dict[str, Any]]:
         })
     return {
         "job_id": job_id,
-        "execution": str(job.get("execution", "worker")),
-        "backend": str((job.get("backend") or {}).get("name", "")),
         "finished": bool(job.get("finished_at")),
         "tasks": rows,
     }
@@ -91,8 +90,6 @@ def render(state: Dict[str, Any]) -> str:
         "| | |",
         "|---|---|",
         "| job | `%s` |" % state["job_id"],
-        "| execution | %s |" % state["execution"],
-        "| backend | %s |" % (state["backend"] or "—"),
         "| progress | %d / %d passed |" % (passed, total),
         "| job finished | %s |" % ("yes" if state["finished"] else "no"),
         "| stamped | %s |" % _now(),

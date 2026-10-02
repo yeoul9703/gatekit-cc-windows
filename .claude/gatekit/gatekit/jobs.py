@@ -1,9 +1,11 @@
-"""Worker jobs (§10).
+"""Build jobs (§10).
 
-`jobs start` builds `.gatekit/jobs/<job_id>/`, writes one directory per task,
-spawns the configured worker backend with the task prompt on stdin, then runs
-the task's gates. A worker that exits 0 but fails a gate is `failed`, never
-`passed` — the worker's own report never decides the verdict.
+`jobs start` builds `.gatekit/jobs/<job_id>/`, writes one directory per task
+(`task.json`, the brief `prompt.md`, `status.json`) and hands back the ordered
+plan. It starts nothing: the session that runs the build implements each task
+and calls `jobs complete`, which runs the task's gates. A task whose gates do
+not pass is `failed`, never `passed` — a report of success never decides the
+verdict.
 
 Every JSON write goes through `write_json` (tmp file + `os.replace`) so a job
 directory read concurrently never sees a half-written file.
@@ -23,7 +25,7 @@ import sys
 import time
 from typing import Optional
 
-from gatekit import config, jobstore, paths, spec, util, verdict, workers
+from gatekit import config, jobstore, paths, spec, util, verdict
 
 #: States after which a task will not change again on its own. Defined once in
 #: jobstore (spec.py reads the same list); see there for every state a task has.
@@ -35,20 +37,9 @@ NOT_DONE_STATES = ("failed", "timeout", "stopped")
 
 GATE_TIMEOUT_S = 60.0
 
-#: ADR-0013 decision 1. Who implements a task.
-#:
-#: ``host``   — the session running `/gatekit-build` writes the code itself.
-#:              A worker is a *cold* session of the same model; spawning one
-#:              per task pays a fresh project discovery each time and buys a
-#:              second opinion from the model that is already here.
-#: ``worker`` — spawn the configured backend per task, as before. Correct when
-#:              the model must differ (adversarial verification) or when a
-#:              round is wide enough that real parallelism beats the spawn
-#:              cost.
-EXECUTION_MODES = ("host", "worker")
-DEFAULT_EXECUTION = "host"
-#: A round with at least this many independent tasks is worth spawning for even
-#: under `host`: they run at once instead of one after another.
+#: A round with at least this many independent tasks is marked
+#: `parallel_candidate` in the plan: wide enough to be handed out and done at
+#: once instead of one after another.
 HOST_PARALLEL_HANDOFF = 3
 
 #: ADR-0009 decision 1. A failing gate is a broken *command* only when the
@@ -72,20 +63,12 @@ COMMAND_ERROR_EXITS = (126, 127)
 #: exit ≥ 2 from a runner that documents 1 as "tests failed", a usage banner
 #: at the top of stderr, or a pattern above that does not name an argument.
 SUSPICIOUS_MIN_EXIT = 2
-#: `jobs stop` signals a recorded pid only when the live process's age agrees
-#: with the recorded spawn time within this many seconds (recycled-pid guard).
-STOP_PID_AGE_TOLERANCE_S = 10.0
-#: Seconds `jobs stop` waits after SIGTERM before SIGKILL.
-STOP_GRACE_S = 5.0
-STOP_MARKER = "stop.json"
 #: Exit code by which a task gate reports `unverified`: it ran, but it could not
 #: judge (ADR-0008 decision 5 — the token gate uses it when tokens.json is
 #: absent or the task wrote no file it knows how to scan). 0 is `ok`, every
 #: other non-zero code is `fail`.
 GATE_UNVERIFIED_EXIT = 3
 TAIL_BYTES = 4000
-#: How much failed-gate output `redelegate` appends to the next prompt.
-REDELEGATE_TAIL_CHARS = 2000
 
 
 # --------------------------------------------------------------------- helpers
@@ -174,7 +157,7 @@ def _token_lines(prefix: str, value) -> list:
 
     A dict carrying a ``value`` key is one token that knows where it came from,
     which is the shape ``design merge-preset`` writes. Only its value reaches
-    the worker: ``evidence`` is bookkeeping for the spec reader, and rendering
+    the brief: ``evidence`` is bookkeeping for the spec reader, and rendering
     it as ``color.primary.evidence`` would read like a second usable token.
     A dict without ``value`` is a genuinely nested group and still recurses.
     """
@@ -189,7 +172,7 @@ def _token_lines(prefix: str, value) -> list:
 
 
 def has_design(tokens: dict) -> bool:
-    """True when *tokens* carries anything a worker could act on.
+    """True when *tokens* carries anything a task could be built from.
 
     A parsable file is not the same as a design. ``{}`` and a file holding only
     ``version``/``source`` normalize to a truthy dict but say nothing, so the
@@ -205,7 +188,7 @@ def has_design(tokens: dict) -> bool:
 def _design_lines(task: dict, tokens: dict) -> list:
     """The ``## Design`` section body, generated from tokens.json by code.
 
-    ADR-0008 decision 4: a pattern reaches the worker through the same brief as
+    ADR-0008 decision 4: a pattern reaches the task through the same brief as
     its instruction, so nothing depends on the task author having remembered to
     write "follow P2" into the text.
     """
@@ -249,7 +232,7 @@ _SCREEN_HEADING_RE = re.compile(r"^###\s+(?P<id>[Ss]\d+)\b\s*[—\-–:]?\s*(?P<
 _FENCE_RE = re.compile(r"^\s*(?P<mark>`{3,}|~{3,})")
 #: Longest a single copied layout paragraph or state row may be before it is
 #: cut. Spec prose has no natural bound, unlike the `name: value` token lines
-#: beside it, and an unbounded paragraph would become an unusable worker stdin.
+#: beside it, and an unbounded paragraph would make the brief unusable.
 SCREEN_TEXT_MAX_CHARS = 1200
 #: Longest the whole `## Screens` block may be. A task naming a dozen screens
 #: must not crowd out its own instruction.
@@ -359,11 +342,11 @@ def _screen_lines(task: dict, screens: dict) -> list:
     names no screen carries no block and a task that names several carries
     each. A named screen the spec does not describe is skipped rather than
     reported: the task file and the screen spec disagreeing is a spec problem,
-    not something to raise inside a worker's brief.
+    not something to raise inside a task's brief.
 
     Copied prose is bounded twice — per paragraph and per block — because spec
     text, unlike the `name: value` token lines beside it, has no natural limit
-    and an unbounded paragraph would become an unusable worker stdin.
+    and an unbounded paragraph would make the brief unusable.
     """
     from gatekit import design as design_mod
 
@@ -413,8 +396,11 @@ def _screens_for(task: dict, root) -> list:
         return []
 
 
-def build_prompt(task: dict, job_id: str, extra: str = "", root=None) -> str:
-    """The self-contained brief handed to the worker on stdin.
+def build_prompt(task: dict, job_id: str, root=None) -> str:
+    """The self-contained brief for one task, written to its `prompt.md`.
+
+    Whoever implements the task reads it: the instruction, the paths it may
+    write, the gates that judge it, and the design and screens it names.
 
     *root* is optional so existing callers keep working: without it, and
     whenever ``spec/tokens.json`` is absent or unparsable, the prompt is
@@ -446,14 +432,14 @@ def build_prompt(task: dict, job_id: str, extra: str = "", root=None) -> str:
         "",
         "## Write scope",
         "",
-        "You may create or modify ONLY these paths. Writes outside this scope are",
-        "denied by a hook, not by convention.",
+        "You may create or modify ONLY these paths. Do not change anything outside",
+        "this scope.",
         "",
         scope_text,
         "",
         "## Gates that will judge this task",
         "",
-        "These commands run after you exit. They decide whether the task passed.",
+        "These commands decide whether the task passed.",
         "",
         gate_text,
         "",
@@ -467,7 +453,7 @@ def build_prompt(task: dict, job_id: str, extra: str = "", root=None) -> str:
             parts += ["## Design", ""] + _design_lines(task, tokens) + [""]
         # ADR-0011 decision 3: the screen spec is pushed into the brief, not
         # pointed at, so a correction the owner made at preview time reaches
-        # the worker as text.
+        # the brief as text.
         screen_lines = _screens_for(task, root)
         if screen_lines:
             parts += ["## Screens", ""] + screen_lines
@@ -478,8 +464,6 @@ def build_prompt(task: dict, job_id: str, extra: str = "", root=None) -> str:
         "When you are done, reply with a short report: what you changed and what",
         "you could not do. Do not claim success; the gates decide.",
     ]
-    if extra:
-        parts += ["", "## Previous attempt failed", "", extra.strip()]
     return "\n".join(parts) + "\n"
 
 
@@ -669,11 +653,11 @@ def _scope_has_files(root, task: dict) -> bool:
 
 
 def preflight(root, jdir, tasks: list) -> dict:
-    """ADR-0009 decision 1: run every task's gates once before any worker.
+    """ADR-0009 decision 1: run every task's gates once before the job starts.
 
     Writes `tasks/<id>/preflight.json`. Returns
     `{"passed": [ids], "warnings": [str]}`. Raises `GatePreflightError` when a
-    gate is a broken command, before any worker has been spawned.
+    gate is a broken command, before any task is queued.
     """
     passed, warnings, broken = [], [], []
     for task in tasks:
@@ -682,7 +666,7 @@ def preflight(root, jdir, tasks: list) -> dict:
         write_json(_task_dir(jdir, task_id) / "preflight.json", result)
         gates = result.get("gates") or []
         if result.get("total", 0) > 0 and result.get("verdict") == verdict.OK:
-            detail = "gates passed at preflight; no worker spawned"
+            detail = "gates passed at preflight; nothing left to implement"
             if not _scope_has_files(root, task):
                 note = ("warn: gate passed before any work existed in the write scope "
                         "— check that it can fail")
@@ -709,223 +693,9 @@ def preflight(root, jdir, tasks: list) -> dict:
     if broken:
         raise GatePreflightError(
             "gate preflight refused to start the job — the command itself fails, "
-            "no worker could make it pass:\n" + "\n".join(broken)
+            "no code change could make it pass:\n" + "\n".join(broken)
         )
     return {"passed": passed, "warnings": warnings}
-
-
-def _spawn_worker(root, backend: dict, task: dict, job_id: str, tdir, timeout_s: float,
-                  on_spawn=None) -> dict:
-    """Run the worker for one task; returns {"exit", "timed_out"}."""
-    # A worker gets exactly the two gatekit variables it needs; nothing a
-    # parent worker or evaluator session exported leaks into it.
-    env = {k: v for k, v in os.environ.items() if not k.startswith("GATEKIT_")}
-    env["GATEKIT_TASK_ID"] = str(task.get("id", ""))
-    env["GATEKIT_JOB_ID"] = job_id
-    prompt = (tdir / "prompt.md").read_text(encoding="utf-8")
-
-    out_path, err_path = tdir / "output.txt", tdir / "stderr.txt"
-    started = time.time()
-    with open(out_path, "wb") as out_f, open(err_path, "wb") as err_f:
-        try:
-            proc = subprocess.Popen(
-                paths.resolve_argv(backend["argv"]),
-                cwd=str(root),
-                env=env,
-                stdin=subprocess.PIPE,
-                stdout=out_f,
-                stderr=err_f,
-            )
-        except OSError as exc:
-            err_f.write(("gatekit: could not spawn worker: %s\n" % exc).encode("utf-8"))
-            return {"exit": None, "timed_out": False, "spawn_error": str(exc),
-                    "elapsed_s": round(time.time() - started, 3)}
-        if on_spawn is not None:
-            try:
-                # A `jobs stop` that landed between the "running" status and
-                # this pid being recorded found no pid to signal; on_spawn
-                # reports it so the freshly spawned worker is not left running.
-                if on_spawn(proc.pid, started):
-                    proc.kill()
-            except Exception:  # recording the pid must never break the run
-                pass
-        try:
-            proc.communicate(prompt.encode("utf-8"), timeout=timeout_s)
-            timed_out = False
-        except subprocess.TimeoutExpired:
-            if _IS_WINDOWS:
-                # `claude.cmd`-style shims: end the whole tree, not just cmd.exe.
-                _terminate_pid(proc.pid)
-            proc.kill()
-            try:
-                proc.communicate(timeout=5)
-            except Exception:
-                pass
-            timed_out = True
-    return {
-        "exit": proc.returncode,
-        "timed_out": timed_out,
-        "elapsed_s": round(time.time() - started, 3),
-    }
-
-
-def execute_task(root, jdir, job_id: str, task: dict, backend: dict, timeout_s: float) -> dict:
-    """Spawn worker, then gates. Returns the final status dict."""
-    task_id = str(task.get("id"))
-    tdir = _task_dir(jdir, task_id)
-    _set_status(jdir, task_id, state="running", started_at=_now())
-
-    def record_pid(pid, started):
-        _set_status(jdir, task_id, pid=int(pid), pid_started_at=float(started))
-        return _stop_requested(jdir)
-
-    result = _spawn_worker(root, backend, task, job_id, tdir, timeout_s, on_spawn=record_pid)
-    # The worker has been reaped; its pid may be reused by anything now, so
-    # `jobs stop` must never signal it again.
-    _set_status(jdir, task_id, pid=None)
-
-    if _stop_requested(jdir):
-        # ADR-0009 decision 3: `jobs stop` ended this worker; whatever exit code
-        # the signal produced is not a verdict on the work.
-        return _set_status(jdir, task_id, state="stopped", exit=result.get("exit"),
-                           elapsed_s=result.get("elapsed_s"), finished_at=_now(),
-                           detail="stopped by jobs stop")
-
-    if result["timed_out"]:
-        return _set_status(
-            jdir,
-            task_id,
-            state="timeout",
-            exit=None,
-            elapsed_s=result.get("elapsed_s"),
-            finished_at=_now(),
-            detail="worker exceeded task_timeout_s=%s and was killed" % timeout_s,
-        )
-
-    _set_status(jdir, task_id, state="gating", exit=result["exit"],
-                elapsed_s=result.get("elapsed_s"))
-    gates = run_gates(root, task)
-    write_json(tdir / "gates.json", gates)
-
-    worker_ok = result["exit"] == 0
-    all_gates_ok = gates["total"] > 0 and gates["verdict"] == verdict.OK
-    state = "passed" if (worker_ok and all_gates_ok) else "failed"
-    if not worker_ok:
-        detail = "worker exited %s" % result["exit"]
-    elif not all_gates_ok:
-        detail = "worker exited 0 but gates verdict is %s (%d/%d ok)" % (
-            gates["verdict"], gates["passed"], gates["total"],
-        )
-    else:
-        detail = "worker exited 0 and %d/%d gates ok" % (gates["passed"], gates["total"])
-
-    # ADR-0014: the count follows the task across jobs.
-    record_attempt(root, task_id, state, job_id=job_id,
-                   gate=_first_failing_gate(gates))
-    return _set_status(
-        jdir,
-        task_id,
-        state=state,
-        exit=result["exit"],
-        gates_verdict=gates["verdict"],
-        gates_passed=gates["passed"],
-        gates_total=gates["total"],
-        finished_at=_now(),
-        detail=detail,
-    )
-
-
-# ------------------------------------------------------------------ evaluate
-
-EVALUATOR_BRIEF = """# Evaluator brief
-
-You are the evaluator. You did not write this code and you must not change it.
-Your session is read-only: the CLI sandbox and the write gate both refuse
-writes, and any attempt to write is itself a finding against you.
-
-1. Run `{launcher} contract run --json` from the project root.
-2. Read `spec/05-gate.md` and carry out every E2E step it describes by hand,
-   in order. Record what you actually observed, not what should happen.
-3. For each criterion and each E2E step give one verdict from
-   `ok / warn / fail / unverified`. A step you could not run is `unverified`;
-   never round it to either side.
-4. Do not fix anything you find. Report it.
-5. Reply with the verdict table only — one row per criterion and per E2E step,
-   then the aggregate — in {lang}. Do not paste command transcripts.
-"""
-
-
-def evaluator_brief(root, lang: str = "ko") -> str:
-    return EVALUATOR_BRIEF.format(launcher=paths.cli_invocation(), lang=lang)
-
-
-def evaluate(root, backend_name=None, prompt_path=None, timeout_s=None, lang: str = "ko",
-             force_read_only_evaluator: bool = False) -> dict:
-    """Run one worker as the independent evaluator.
-
-    The backend is *backend_name* or ``verify.evaluator`` from config; ``agent``
-    means the host's own subagent and is not runnable from here. The worker
-    gets ``GATEKIT_TASK_ID=evaluate`` with a read-only ``task.json`` so the
-    write gate refuses writes inside its session.
-
-    Always runs the backend's read-only sandbox: the write gate is the real
-    protection, and running the writable sandbox would be a code-writing
-    session with nothing watching it. ``force_read_only_evaluator`` is kept
-    for callers that pass it explicitly; it is a no-op today since read-only
-    is already the only mode.
-    """
-    name = backend_name or workers.evaluator_name(root)
-    if name == "agent":
-        raise ValueError(
-            "verify.evaluator is 'agent' (the host's own subagent); run "
-            "`workers set-evaluator <backend>` or pass --backend to use a CLI evaluator"
-        )
-
-    use_read_only = True
-    backend = workers.resolve(root, name, read_only=use_read_only)
-    cfg = config.load(root)
-    if timeout_s is None:
-        timeout_s = float((cfg.get("build") or {}).get("task_timeout_s", 900))
-
-    job_id = new_job_id()
-    jdir = job_dir(root, job_id)
-    edir = jdir / "evaluate"
-    edir.mkdir(parents=True, exist_ok=True)
-    task = {"id": "evaluate", "title": "independent evaluation", "write_scope": "read-only"}
-    write_json(edir / "task.json", task)
-    if prompt_path is not None:
-        prompt = pathlib.Path(prompt_path).read_text(encoding="utf-8")
-    else:
-        prompt = evaluator_brief(root, lang)
-    (edir / "prompt.md").write_text(prompt, encoding="utf-8")
-    write_json(jdir / "job.json", {
-        "job_id": job_id,
-        "kind": "evaluate",
-        "started_at": _now(),
-        "backend": {"name": backend["name"], "argv": backend["argv"],
-                    "unsafe": backend["unsafe"], "read_only": use_read_only},
-        "timeout_s": timeout_s,
-    })
-    write_json(edir / "status.json", {"task_id": "evaluate", "state": "running", "started_at": _now()})
-
-    result = _spawn_worker(root, backend, task, job_id, edir, timeout_s)
-    if result["timed_out"]:
-        state, detail = "timeout", "evaluator exceeded %ss and was killed" % timeout_s
-    elif result["exit"] == 0:
-        state, detail = "passed", "evaluator exited 0"
-    else:
-        state, detail = "failed", "evaluator exited %s" % result["exit"]
-    status_doc = {
-        "task_id": "evaluate", "state": state, "exit": result["exit"],
-        "elapsed_s": result.get("elapsed_s"), "finished_at": _now(), "detail": detail,
-    }
-    write_json(edir / "status.json", status_doc)
-    try:
-        output = (edir / "output.txt").read_text(encoding="utf-8", errors="replace")
-    except OSError:
-        output = ""
-    return {"job_id": job_id, "backend": backend["name"], "state": state,
-            "exit": result["exit"], "detail": detail, "output_tail": _tail(output)}
 
 
 # ----------------------------------------------------------------- scheduling
@@ -965,118 +735,18 @@ def order_tasks(tasks: list) -> list:
     return waves
 
 
-def _run_wave(root, jdir, job_id, wave, backend, timeout_s, parallel) -> None:
-    """Run one wave, at most `parallel` tasks at a time.
-
-    Tasks are run sequentially within each slot using threads; the heavy lifting
-    is subprocess I/O, so threads are sufficient and keep the stdlib-only rule.
-    """
-    import threading
-
-    limit = max(1, int(parallel or 1))
-    lock = threading.Semaphore(limit)
-    errors = []
-
-    def worker(task):
-        with lock:
-            try:
-                if _stop_requested(jdir):
-                    _set_status(jdir, str(task.get("id")), state="stopped",
-                                finished_at=_now(), detail="stopped by jobs stop")
-                    return
-                execute_task(root, jdir, job_id, task, backend, timeout_s)
-            except BaseException as exc:  # never let one task kill the job
-                errors.append((task.get("id"), exc))
-                _set_status(
-                    jdir,
-                    str(task.get("id")),
-                    state="failed",
-                    finished_at=_now(),
-                    detail="gatekit internal error: %s" % exc,
-                )
-
-    threads = [threading.Thread(target=worker, args=(t,)) for t in wave]
-    for t in threads:
-        t.start()
-    for t in threads:
-        t.join()
-
-
 # ---------------------------------------------------------------- subcommands
 
 
-def _stop_requested(jdir) -> bool:
-    return (pathlib.Path(jdir) / STOP_MARKER).is_file()
+def start(root, task_ids=None, dry_run=False, no_preflight=False) -> dict:
+    """Create a job directory and hand back the ordered plan. Starts nothing.
 
-
-def _split_wave_by_dependencies(jdir, wave: list, job_task_ids: set) -> tuple:
-    """ADR-0009 decision 5: a task runs only when every in-job dependency passed.
-
-    Returns `(runnable, waiting)`; each waiting task's status gains a detail
-    naming the dependency and its state. Dependencies outside the job are not
-    the job's business and never block.
-    """
-    runnable, waiting = [], []
-    for task in wave:
-        blocker = None
-        for dep in task.get("depends_on") or []:
-            dep = str(dep)
-            if dep not in job_task_ids:
-                continue
-            dep_status = read_json(_task_dir(jdir, dep) / "status.json", {}) or {}
-            state = str(dep_status.get("state", "queued"))
-            if state != "passed":
-                shown = state
-                if dep_status.get("gates_verdict") == verdict.UNVERIFIED:
-                    shown = "%s, gates unverified" % state
-                blocker = (dep, shown)
-                break
-        if blocker is None:
-            runnable.append(task)
-        else:
-            _set_status(jdir, str(task.get("id")), state="queued",
-                        detail="waiting on %s (%s)" % blocker)
-            waiting.append(task)
-    return runnable, waiting
-
-
-def _finalise_unrun(jdir, tasks: list, stopped: bool) -> None:
-    """After the waves: tasks still queued are `stopped` or `blocked`."""
-    for task in tasks:
-        task_id = str(task.get("id"))
-        st = read_json(_task_dir(jdir, task_id) / "status.json", {}) or {}
-        if st.get("state", "queued") != "queued":
-            continue
-        if stopped:
-            _set_status(jdir, task_id, state="stopped", finished_at=_now(),
-                        detail="stopped by jobs stop")
-            continue
-        # Re-read the dependency's *final* state: the "waiting on" detail was
-        # frozen mid-run and a cascade (a → b → c) would name b as `queued`
-        # when it actually ended `blocked`.
-        dep = "a dependency"
-        for candidate in task.get("depends_on") or []:
-            dep_status = read_json(_task_dir(jdir, str(candidate)) / "status.json", None)
-            if not dep_status:
-                continue
-            state = str(dep_status.get("state", "queued"))
-            if state != "passed":
-                shown = state
-                if dep_status.get("gates_verdict") == verdict.UNVERIFIED:
-                    shown = "%s, gates unverified" % state
-                dep = "%s (%s)" % (candidate, shown)
-                break
-        _set_status(jdir, task_id, state="blocked", finished_at=_now(),
-                    detail="dependency %s ended before this task could run" % dep)
-
-
-def start(root, task_ids=None, backend_name=None, parallel=None, dry_run=False,
-          no_preflight=False) -> dict:
-    """Create a job directory and (unless dry_run) run every selected task.
-
-    ADR-0009: unless `no_preflight`, every task's gates run once before any
-    worker is spawned (see `preflight`), and a task whose in-job dependency
-    did not pass is left `blocked` rather than run.
+    Every selected task gets its directory: `task.json`, the brief
+    `prompt.md`, and `status.json` as `queued`. ADR-0009: unless
+    `no_preflight`, every task's gates run once first (see `preflight`), and
+    a task whose gates already pass is recorded `passed`. ADR-0013: the
+    session that called this implements each remaining task and calls
+    `complete_task`, which runs the task's gates.
     """
     cfg = config.load(root)
     build_cfg = cfg.get("build") or {}
@@ -1093,9 +763,9 @@ def start(root, task_ids=None, backend_name=None, parallel=None, dry_run=False,
             "no tasks found; expected ```gatekit-task fences in spec/04-tasks.md"
         )
 
-    # ADR-0014: the budget binds here too. Starting a fresh job was how it was
+    # ADR-0014: the budget binds here. Starting a fresh job was how it was
     # escaped on gk-trial2 — the counter lived in status.json, which `start`
-    # resets — so refusing only in `redelegate` closes half the door.
+    # resets — so the count is kept per task, across jobs.
     retry_limit = int(build_cfg.get("max_retries", 2) or 0)
     exhausted = [
         str(t.get("id")) for t in tasks
@@ -1112,15 +782,6 @@ def start(root, task_ids=None, backend_name=None, parallel=None, dry_run=False,
                 retry_limit)
         )
 
-    mode = execution_mode(cfg)
-    if backend_name:
-        # Naming a backend is an explicit request for that model to do the work.
-        mode = "worker"
-    backend = workers.resolve(root, backend_name)
-    parallel = int(parallel or build_cfg.get("parallel", 3) or 1)
-    timeout_s = float(build_cfg.get("task_timeout_s", 900) or 900)
-    max_retries = int(build_cfg.get("max_retries", 2) or 0)
-
     job_id = new_job_id()
     jdir = job_dir(root, job_id)
     (jdir / "tasks").mkdir(parents=True, exist_ok=True)
@@ -1129,17 +790,8 @@ def start(root, task_ids=None, backend_name=None, parallel=None, dry_run=False,
         "version": 1,
         "job_id": job_id,
         "started_at": _now(),
-        "backend": {
-            "name": backend["name"],
-            "argv": backend["argv"],
-            "unsafe": backend["unsafe"],
-        },
-        "parallel": parallel,
-        "task_timeout_s": timeout_s,
-        "max_retries": max_retries,
         "dry_run": bool(dry_run),
         "no_preflight": bool(no_preflight),
-        "execution": mode,
         "preflight_warnings": [],
         "tasks": [str(t.get("id")) for t in tasks],
         "config": {"build": build_cfg},
@@ -1160,7 +812,7 @@ def start(root, task_ids=None, backend_name=None, parallel=None, dry_run=False,
         return job
 
     if not no_preflight:
-        pre = preflight(root, jdir, tasks)  # raises GatePreflightError before any spawn
+        pre = preflight(root, jdir, tasks)  # raises GatePreflightError before any task is queued
         job["preflight_warnings"] = pre["warnings"]
         job["preflight_passed"] = pre["passed"]
         write_json(jdir / "job.json", job)
@@ -1169,39 +821,24 @@ def start(root, task_ids=None, backend_name=None, parallel=None, dry_run=False,
     else:
         tasks_to_run = list(tasks)
 
-    if mode == "host":
-        # ADR-0013 decision 1: hand the ordered plan back and stop. The session
-        # that called this already knows the project; it implements each task
-        # and calls `complete_task`, which runs the same gates a worker's exit
-        # would have triggered. A wide round is still worth spawning for, and
-        # the plan marks those rounds so the caller can hand them off.
-        plan = []
-        for index, wave in enumerate(order_tasks(tasks_to_run), start=1):
-            for task in wave:
-                plan.append({
-                    "id": str(task.get("id")),
-                    "round": index,
-                    "parallel_candidate": len(wave) >= HOST_PARALLEL_HANDOFF,
-                })
-            for task in wave:
-                _set_status(jdir, str(task.get("id")), state="queued",
-                            detail="awaiting the host session (build.execution=host)")
-        job["plan"] = plan
-        write_json(jdir / "job.json", job)
-        return job
-
-    job_task_ids = {str(t.get("id")) for t in tasks}
-    waiting_all = []
-    for wave in order_tasks(tasks_to_run):
-        if _stop_requested(jdir):
-            break
-        runnable, waiting = _split_wave_by_dependencies(jdir, wave, job_task_ids)
-        waiting_all.extend(waiting)
-        if runnable:
-            _run_wave(root, jdir, job_id, runnable, backend, timeout_s, parallel)
-
-    _finalise_unrun(jdir, tasks_to_run, stopped=_stop_requested(jdir))
-    return _finalise_job(jdir, job)
+    # ADR-0013 decision 1: hand the ordered plan back and stop. The session
+    # that called this already knows the project; it implements each task and
+    # calls `complete_task`, which runs the task's gates. The plan marks the
+    # rounds wide enough to be handed out rather than done one after another.
+    plan = []
+    for index, wave in enumerate(order_tasks(tasks_to_run), start=1):
+        for task in wave:
+            plan.append({
+                "id": str(task.get("id")),
+                "round": index,
+                "parallel_candidate": len(wave) >= HOST_PARALLEL_HANDOFF,
+            })
+        for task in wave:
+            _set_status(jdir, str(task.get("id")), state="queued",
+                        detail="awaiting the host session")
+    job["plan"] = plan
+    write_json(jdir / "job.json", job)
+    return job
 
 
 # --------------------------------------------------- attempts (ADR-0014)
@@ -1407,24 +1044,11 @@ def shape(root, task_ids=None) -> dict:
     }
 
 
-def execution_mode(cfg: dict) -> str:
-    """``build.execution`` — ``host`` or ``worker`` (ADR-0013 decision 1).
-
-    An unset value means ``host``. An unrecognised one also means ``host``
-    rather than an error: the field decides who types, and a typo must not
-    stop a build.
-    """
-    value = str(((cfg.get("build") or {}).get("execution") or DEFAULT_EXECUTION)).strip()
-    return value if value in EXECUTION_MODES else DEFAULT_EXECUTION
-
-
 def complete_task(root, task_id: str, job_id: Optional[str] = None) -> dict:
-    """Run a host-implemented task's gates and record the verdict.
+    """Run an implemented task's gates and record the verdict.
 
-    The counterpart of `execute_task` for `build.execution = "host"`: the
-    session wrote the code itself, so there is no worker exit code to weigh —
-    the gates alone decide, exactly as they do when a worker exits 0. Same
-    `gates.json`, same `status.json`, same words.
+    The session wrote the code; the gates alone decide whether the task
+    passed. Writes the task's `gates.json` and `status.json`.
     """
     job_id = job_id or latest_job_id(root)
     if not job_id:
@@ -1443,7 +1067,7 @@ def complete_task(root, task_id: str, job_id: Optional[str] = None) -> dict:
     gates = run_gates(root, task)
     write_json(_task_dir(jdir, task_id) / "gates.json", gates)
     passed = gates["total"] > 0 and gates["verdict"] == verdict.OK
-    # A host attempt is an attempt: it must count exactly as a worker's does.
+    # ADR-0014: every completed attempt counts, and the count follows the task across jobs.
     record_attempt(root, task_id, "passed" if passed else "failed",
                    job_id=job_id, gate=_first_failing_gate(gates))
     return _set_status(
@@ -1461,17 +1085,17 @@ def complete_task(root, task_id: str, job_id: Optional[str] = None) -> dict:
 
 
 def recheck(root, task_ids=None, job_id: Optional[str] = None) -> dict:
-    """Re-run a task's gates against the working tree. No worker, no new job.
+    """Re-run a task's gates against the working tree. No new job, no attempt counted.
 
     ADR-0013 decision 3. A gate names test files and commands that do not exist
     until the work is done, so refining one mid-build is normal — on the
-    gk-trial2 run 28 of 35 worker spawns existed only because a gate moved
+    gk-trial2 run 28 of 35 task runs existed only because a gate moved
     while the code was already correct. The right response to a moved gate is
     to run it, which takes seconds; re-deriving the code takes minutes.
 
     Gates are read from the **current** `spec/04-tasks.md`, not from the job's
     snapshot, since the point is to pick up the edit. Verdicts are recorded
-    exactly as `execute_task` records them, `unverified` included — a gate that
+    exactly as `complete_task` records them, `unverified` included — a gate that
     could not judge still does not round to a pass.
     """
     job_id = job_id or latest_job_id(root)
@@ -1503,7 +1127,7 @@ def recheck(root, task_ids=None, job_id: Optional[str] = None) -> dict:
             gates_passed=gates["passed"],
             gates_total=gates["total"],
             finished_at=_now(),
-            detail="recheck: %d/%d gates %s (no worker)"
+            detail="recheck: %d/%d gates %s"
             % (gates["passed"], gates["total"], gates["verdict"]),
         )
         rechecked.append(task_id)
@@ -1513,8 +1137,8 @@ def recheck(root, task_ids=None, job_id: Optional[str] = None) -> dict:
 def _merge_job_json(jdir, fields: dict, fallback: Optional[dict] = None) -> dict:
     """Re-read `job.json`, apply *fields*, write it back.
 
-    `jobs stop` and the draining runner both finish a job, and either may hold
-    a copy read before the other wrote. Re-reading immediately before the
+    `jobs stop` and `jobs status` both write to it (`stopped_at`,
+    `finished_at`), and either may hold a copy read before the other wrote. Re-reading immediately before the
     write keeps `stopped_at` and `finished_at` from erasing each other; the
     write itself is atomic, so the surviving loser is a lost field, never a
     corrupt file.
@@ -1533,9 +1157,8 @@ def _job_json_lock(jdir, wait_s: float = 5.0, stale_s: float = 30.0):
     """Cross-process mutex around a `job.json` read-modify-write.
 
     Re-reading right before the write narrows the lost-update window between
-    `jobs stop` and the draining runner but does not close it (they are
-    separate processes, and the runner reacts to the worker being killed within
-    milliseconds). `os.mkdir` is atomic on every platform, so a lock directory
+    two commands that write `job.json` but does not close it (they are
+    separate processes). `os.mkdir` is atomic on every platform, so a lock directory
     serialises them. A lock older than *stale_s* is a crashed holder's and is
     broken; if the lock cannot be taken within *wait_s* the write proceeds
     unlocked rather than hanging a hook or a stop.
@@ -1611,18 +1234,15 @@ def status(root, job_id: Optional[str] = None) -> dict:
         overall = verdict.OK
     done = all(s in TERMINAL_STATES for s in states) if states else False
     finished_at = job.get("finished_at")
-    # ADR-0013 host execution: `start()` returns the plan and spawns nothing,
-    # so nothing else ever calls `_finalise_job`. A worker-mode job stamps
-    # `finished_at` when its own loop drains; a host-mode job only becomes
-    # done when `complete_task` records the last terminal state, and this is
-    # the first place that moment is visible. Found on a real retrial where
-    # every task passed but the job never recorded when.
+    # ADR-0013: `start()` returns the plan and starts nothing, so a job only
+    # becomes done when `complete_task` (or `stop`) records the last terminal
+    # state, and this is the first place that moment is visible. Found on a
+    # real retrial where every task passed but the job never recorded when.
     if done and not finished_at:
         finished_at = _finalise_job(jdir, job).get("finished_at")
     return {
         "job_id": job_id,
         "verdict": overall,
-        "backend": (job.get("backend") or {}).get("name"),
         "started_at": job.get("started_at"),
         "finished_at": finished_at,
         "stopped_at": job.get("stopped_at"),
@@ -1632,194 +1252,14 @@ def status(root, job_id: Optional[str] = None) -> dict:
     }
 
 
-def _process_age_s(pid: int) -> Optional[float]:
-    """Seconds since `pid` started; None when unknown.
-
-    POSIX: `ps -o etime=`. Windows has no `ps`, so the creation time comes
-    from GetProcessTimes.
-    """
-    if _IS_WINDOWS:
-        return _windows_process_age_s(pid)
-    try:
-        out = subprocess.run(["ps", "-o", "etime=", "-p", str(pid)],
-                             stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-                             timeout=5).stdout.decode("utf-8", "replace").strip()
-    except (OSError, subprocess.SubprocessError):
-        return None
-    return _parse_etime(out)
-
-
-_IS_WINDOWS = os.name == "nt"
-_WIN_QUERY_LIMITED = 0x1000          # PROCESS_QUERY_LIMITED_INFORMATION
-_WIN_STILL_ACTIVE = 259
-#: 100-ns FILETIME ticks between 1601-01-01 and the Unix epoch.
-_WIN_EPOCH_DELTA_S = 11644473600
-
-
-def _windows_open(pid: int):
-    """(kernel32, handle) for a query-only handle to `pid`; handle is 0 when
-    the process does not exist or cannot be opened."""
-    import ctypes
-    from ctypes import wintypes
-
-    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-    kernel32.OpenProcess.restype = wintypes.HANDLE
-    kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
-    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
-    return kernel32, kernel32.OpenProcess(_WIN_QUERY_LIMITED, False, int(pid))
-
-
-def _windows_process_age_s(pid: int) -> Optional[float]:
-    try:
-        import ctypes
-        from ctypes import wintypes
-
-        kernel32, handle = _windows_open(pid)
-        if not handle:
-            return None
-        try:
-            created, exited, kernel, user = (wintypes.FILETIME() for _ in range(4))
-            kernel32.GetProcessTimes.argtypes = [wintypes.HANDLE] + [ctypes.POINTER(wintypes.FILETIME)] * 4
-            if not kernel32.GetProcessTimes(handle, ctypes.byref(created), ctypes.byref(exited),
-                                            ctypes.byref(kernel), ctypes.byref(user)):
-                return None
-            ticks = (created.dwHighDateTime << 32) | created.dwLowDateTime
-        finally:
-            kernel32.CloseHandle(handle)
-        return max(0.0, time.time() - (ticks / 1e7 - _WIN_EPOCH_DELTA_S))
-    except Exception:  # unknown age must degrade to "do not touch the pid"
-        return None
-
-
-def _pid_alive(pid: int) -> bool:
-    """True when a process with this pid exists and has not exited.
-
-    Never use `os.kill(pid, 0)` for this on Windows: there every signal other
-    than CTRL_*_EVENT is TerminateProcess, so a "probe" would kill the worker.
-    """
-    if _IS_WINDOWS:
-        try:
-            import ctypes
-            from ctypes import wintypes
-
-            kernel32, handle = _windows_open(pid)
-            if not handle:
-                return False
-            try:
-                code = wintypes.DWORD()
-                kernel32.GetExitCodeProcess.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
-                if not kernel32.GetExitCodeProcess(handle, ctypes.byref(code)):
-                    return False
-                return code.value == _WIN_STILL_ACTIVE
-            finally:
-                kernel32.CloseHandle(handle)
-        except Exception:
-            return False
-    try:
-        os.kill(pid, 0)
-    except (OSError, ValueError):
-        return False
-    return True
-
-
-def _parse_etime(text: str) -> Optional[float]:
-    """Parse `ps -o etime=` output, `[[dd-]hh:]mm:ss`, into seconds; None if odd."""
-    rest = (text or "").strip()
-    if not rest:
-        return None
-    days = 0
-    if "-" in rest:
-        d, rest = rest.split("-", 1)
-        try:
-            days = int(d)
-        except ValueError:
-            return None
-    try:
-        nums = [int(p) for p in rest.split(":")]
-    except ValueError:
-        return None
-    if len(nums) == 3:
-        h, m, s = nums
-    elif len(nums) == 2:
-        h, (m, s) = 0, nums
-    else:
-        return None
-    return float(days * 86400 + h * 3600 + m * 60 + s)
-
-
-def _pid_belongs_to_status(pid: int, pid_started_at: float) -> bool:
-    """True only when a live process of that pid is as old as the recorded spawn."""
-    if not _pid_alive(pid):
-        return False
-    age = _process_age_s(pid)
-    if age is None:
-        return False
-    expected = time.time() - float(pid_started_at)
-    return abs(age - expected) <= STOP_PID_AGE_TOLERANCE_S
-
-
-def _terminate_pid(pid: int, grace_s: Optional[float] = None) -> bool:
-    """SIGTERM, wait up to `grace_s`, then SIGKILL. True when a signal was sent.
-
-    Windows has neither signal: `os.kill(pid, SIGTERM)` is an immediate
-    TerminateProcess, and there is no SIGKILL. There the worker's whole process
-    tree is ended with `taskkill /T /F` (a `.cmd` shim leaves its child
-    running otherwise), falling back to `os.kill`.
-    """
-    import signal
-
-    if _IS_WINDOWS:
-        return _terminate_pid_windows(pid, signal)
-    grace = STOP_GRACE_S if grace_s is None else float(grace_s)
-    try:
-        os.kill(pid, signal.SIGTERM)
-    except OSError:
-        return False
-    deadline = time.time() + grace
-    while time.time() < deadline:
-        if not _pid_alive(pid):
-            return True  # gone
-        time.sleep(0.05)
-    try:
-        # Unreachable on Windows (returned above); SIGKILL exists on POSIX only.
-        os.kill(pid, signal.SIGKILL)  # pyright: ignore[reportAttributeAccessIssue]
-    except OSError:
-        pass
-    return True
-
-
-def _terminate_pid_windows(pid: int, signal_mod) -> bool:
-    sent = False
-    try:
-        result = subprocess.run(["taskkill", "/PID", str(int(pid)), "/T", "/F"],
-                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=10)
-        sent = result.returncode == 0
-    except (OSError, subprocess.SubprocessError):
-        pass
-    if not sent:
-        # taskkill /T ends the children first; a launcher (.venv python.exe, a .cmd shim) can
-        # then exit by itself before taskkill reaches it, and taskkill reports failure for a
-        # tree that is in fact gone. Gone is what was asked for.
-        if not _pid_alive(pid):
-            return True
-        try:
-            os.kill(pid, signal_mod.SIGTERM)  # TerminateProcess
-            sent = True
-        except OSError:
-            return not _pid_alive(pid)
-    deadline = time.time() + 5.0
-    while time.time() < deadline and _pid_alive(pid):
-        time.sleep(0.05)
-    return True
-
-
 def stop(root, job_id: Optional[str] = None) -> dict:
-    """ADR-0009 decision 3: end a running job.
+    """End a job early: every task that has not finished becomes `stopped`.
 
-    Writes the stop marker so the runner stops taking tasks, signals every
-    recorded worker pid that is still alive *and* was started by this job
-    (age check against `pid_started_at`, so a recycled pid is never touched),
-    then records `stopped` on every task that was running or queued.
+    A job starts no process, so there is nothing to signal. What this closes
+    is the record: an open job is named on every prompt and stamped at every
+    compaction, so a job the session will not finish has to be ended, and
+    this is the one command that does it. `stopped` is not a verdict on the
+    work; the job verdict reports it as `fail` (not done).
     """
     job_id = job_id or latest_job_id(root)
     if not job_id:
@@ -1829,160 +1269,31 @@ def stop(root, job_id: Optional[str] = None) -> dict:
     if not job:
         raise ValueError("job %s has no job.json" % job_id)
 
-    write_json(jdir / STOP_MARKER, {"requested_at": _now()})
-    stopped, signalled, skipped = [], [], []
+    stopped = []
     for task_id in job.get("tasks", []):
         st = read_json(_task_dir(jdir, task_id) / "status.json", {}) or {}
-        state = st.get("state", "queued")
-        if state in TERMINAL_STATES:
+        if st.get("state", "queued") in TERMINAL_STATES:
             continue
-        pid = st.get("pid")
-        # Only a task still in `running` owns a live worker; `gating` has
-        # already reaped it and the pid may belong to anyone by now.
-        if state == "running" and isinstance(pid, int):
-            if _pid_belongs_to_status(pid, st.get("pid_started_at") or 0.0) \
-                    and _terminate_pid(pid):
-                signalled.append(task_id)
-            else:
-                skipped.append(task_id)
         _set_status(jdir, task_id, state="stopped", finished_at=_now(),
                     detail="stopped by jobs stop")
         stopped.append(task_id)
 
-    _merge_job_json(jdir, {"stopped_at": _now()}, job)
-    return {"job_id": job_id, "stopped": stopped, "signalled": signalled, "skipped": skipped}
-
-
-def wait(root, job_id: Optional[str] = None, timeout: float = 0.0) -> dict:
-    """Poll `status` until every task is terminal or `timeout` seconds elapse."""
-    deadline = time.time() + timeout if timeout and timeout > 0 else None
-    while True:
-        current = status(root, job_id)
-        if current.get("done"):
-            return current
-        if deadline is not None and time.time() >= deadline:
-            current["detail"] = "wait timed out after %ss" % timeout
-            return current
-        time.sleep(0.2)
+    job = _merge_job_json(jdir, {"stopped_at": _now()}, job)
+    # Every task is finished now, so the job is too. Stamp it here: `finished_at` is what
+    # the prompt hook reads, and without it a job that was just ended is still named as the
+    # live build on every prompt until something calls `jobs status`.
+    if not job.get("finished_at"):
+        _finalise_job(jdir, job)
+    return {"job_id": job_id, "stopped": stopped}
 
 
 def results(root, job_id: Optional[str] = None) -> dict:
     return status(root, job_id)
 
 
-def redelegate(root, task_id: str, job_id: Optional[str] = None) -> dict:
-    """Archive the failed attempt, extend the prompt with the gate output, rerun."""
-    job_id = job_id or latest_job_id(root)
-    if not job_id:
-        raise ValueError("no job to redelegate in")
-    jdir = job_dir(root, job_id)
-    job = read_json(jdir / "job.json", {}) or {}
-    tdir = _task_dir(jdir, task_id)
-    if not tdir.is_dir():
-        raise ValueError("task %r is not part of job %s" % (task_id, job_id))
-
-    st = read_json(tdir / "status.json", {}) or {}
-    attempt = int(st.get("attempt", 1) or 1)
-    max_retries = int(job.get("max_retries", 2) or 0)
-    # ADR-0014: whichever is further along — this job's attempts or the count
-    # carried across jobs. The in-job number alone was resettable by starting
-    # another job, which is how a task failed eight times under a budget of 2.
-    carried = consecutive_failures(root, task_id)
-    if max_retries > 0 and (attempt > max_retries or carried > max_retries):
-        raise RetryBudgetExceeded(
-            "task %r has failed %d consecutive time(s) across jobs "
-            "(attempt %d in this job; max_retries=%d). Read spec/RECOVERY.md "
-            "and the failing gate's output; once the cause is addressed, "
-            "`jobs start --force-retry %s`."
-            % (task_id, max(carried, attempt - 1), attempt, max_retries, task_id)
-        )
-
-    # ADR-0009 decision 2: the operator may have fixed the task since the job
-    # started; re-read it from spec/04-tasks.md rather than the snapshot.
-    current = {str(t.get("id")): t for t in load_tasks(root)}
-    if task_id not in current:
-        raise ValueError(
-            "task %r is no longer in spec/04-tasks.md; put it back or start a new job"
-            % task_id
-        )
-    snapshot = read_json(tdir / "task.json", {}) or {}
-    fresh = current[task_id]
-    changed = []
-    if fresh.get("gates") != snapshot.get("gates"):
-        changed.append("gates changed")
-    if fresh.get("instruction") != snapshot.get("instruction"):
-        changed.append("instruction changed")
-    if fresh.get("write_scope") != snapshot.get("write_scope"):
-        changed.append("write_scope changed")
-    reread_note = ""
-    if fresh != snapshot:
-        write_json(tdir / "task.json", fresh)
-        reread_note = "task re-read from spec/04-tasks.md (%s)" % (
-            ", ".join(changed) or "other fields changed")
-
-    archive = tdir / ("attempt-%d" % attempt)
-    archive.mkdir(parents=True, exist_ok=True)
-    for name in ("prompt.md", "output.txt", "stderr.txt", "gates.json", "status.json"):
-        src = tdir / name
-        if src.is_file():
-            shutil.move(str(src), str(archive / name))
-
-    gates = read_json(archive / "gates.json", {}) or {}
-    failed = [
-        g for g in gates.get("gates", []) if g.get("verdict") in (verdict.FAIL, verdict.UNVERIFIED)
-    ]
-    if failed:
-        last = failed[-1]
-        extra = "\n".join(
-            [
-                "Attempt %d failed gate `%s` (%s)." % (attempt, last.get("name"), last.get("detail", "")),
-                "",
-                "stdout (tail):",
-                "```",
-                _tail(last.get("stdout_tail", ""), REDELEGATE_TAIL_CHARS),
-                "```",
-                "",
-                "stderr (tail):",
-                "```",
-                _tail(last.get("stderr_tail", ""), REDELEGATE_TAIL_CHARS),
-                "```",
-                "",
-                "Fix the cause, stay inside the write scope, then stop.",
-            ]
-        )
-    else:
-        extra = "Attempt %d did not pass. No gate output was captured (the worker " \
-                "may have exited non-zero or timed out). Re-do the task." % attempt
-    # ADR-0009 decision 4: name the residual case preflight cannot catch.
-    extra += (
-        "\n\nIf the gate command itself looks wrong — it names a file or directory "
-        "this task was never asked to create, or it fails in a way no code change "
-        "could fix — do not adapt the code so that the wrong command passes. Stop, "
-        "and say in your last message which gate looks wrong and why. A human will "
-        "fix the task file."
-    )
-
-    task = read_json(tdir / "task.json", {}) or {}
-    (tdir / "prompt.md").write_text(
-        build_prompt(task, job_id, extra, root=root), encoding="utf-8"
-    )
-    detail = "redelegated after attempt %d" % attempt
-    if reread_note:
-        detail += "; " + reread_note
-    _set_status(jdir, task_id, state="queued", attempt=attempt + 1, created_at=_now(),
-                detail=detail)
-
-    backend = workers.resolve(root, (job.get("backend") or {}).get("name"))
-    timeout_s = float(job.get("task_timeout_s", 900) or 900)
-    final = execute_task(root, jdir, job_id, task, backend, timeout_s)
-    if reread_note:
-        final = _set_status(jdir, task_id,
-                            detail="%s; %s" % (final.get("detail", ""), reread_note))
-    return final
-
-
 class RetryBudgetExceeded(Exception):
-    """Raised when `redelegate` is asked to exceed `build.max_retries`."""
+    """Raised when `start` is asked to run a task whose consecutive failures
+    have reached `build.max_retries`."""
 
 
 def clean(root, all_jobs: bool = False) -> list:
@@ -2005,7 +1316,7 @@ def clean(root, all_jobs: bool = False) -> list:
 #: a command cannot be reachable without being listed (tests/test_jobs.py
 #: holds the other direction: every branch in `run` and every flag it reads).
 COMMANDS = (
-    ("start", "[--tasks id,id] [--backend name] [--parallel N] [--dry-run] [--no-preflight]",
+    ("start", "[--tasks id,id] [--dry-run] [--no-preflight]",
      ("[--force-retry id,id] [--json]",
       "--force-retry clears the listed tasks' consecutive-failure",
       "count before starting (ADR-0014)")),
@@ -2013,17 +1324,15 @@ COMMANDS = (
      ("task count and rounds of the current spec/04-tasks.md;",
       "starts nothing")),
     ("status", "[--job ID] [--compact|--json]", ()),
-    ("wait", "[--job ID] [--timeout S] [--json]", ()),
     ("results", "[--job ID] [--compact|--json]", ()),
     ("complete", "<task_id> [--job ID]",
-     ("run a host-implemented task's gates and record",
-      "the verdict (build.execution=host, ADR-0013)")),
+     ("run an implemented task's gates and record",
+      "the verdict")),
     ("recheck", "[task_id ...] [--task a,b] [--job ID] [--json]",
      ("re-run gates from the current spec/04-tasks.md;",
-      "no worker, no new job (ADR-0013)")),
-    ("redelegate", "<task_id> [--job ID]", ()),
-    ("stop", "[--job ID]", ()),
-    ("evaluate", "[--backend name] [--prompt FILE] [--lang ko|en] [--json]", ()),
+      "no new job, no attempt counted")),
+    ("stop", "[--job ID]",
+     ("end a job early: unfinished tasks become stopped",)),
     ("clean", "[--all]", ()),
 )
 COMMAND_NAMES = tuple(name for name, _synopsis, _notes in COMMANDS)
@@ -2062,17 +1371,14 @@ def _positionals(argv: list) -> list:
         if arg.startswith("--"):
             # Value-taking flags are those `_opt` is asked for; the rest are
             # bare switches whose next argument is a real positional.
-            skip = arg in ("--root", "--job", "--task", "--tasks", "--backend",
-                           "--parallel", "--timeout", "--prompt", "--lang",
-                           "--force-retry")
+            skip = arg in ("--root", "--job", "--task", "--tasks", "--force-retry")
             continue
         out.append(arg)
     return out
 
 
 def _print_table(payload: dict) -> None:
-    print("job %s  backend=%s  verdict=%s" % (
-        payload.get("job_id"), payload.get("backend"), payload.get("verdict")))
+    print("job %s  verdict=%s" % (payload.get("job_id"), payload.get("verdict")))
     for row in payload.get("tasks", []):
         # ADR-0014: a carried count beyond this job's own attempt is the case
         # that used to be invisible — a task freshly "attempt 1" here that has
@@ -2116,8 +1422,6 @@ def run(argv: list) -> int:
             job = start(
                 root,
                 task_ids=tasks_arg.split(",") if tasks_arg else None,
-                backend_name=_opt(rest, "--backend"),
-                parallel=_opt(rest, "--parallel"),
                 dry_run="--dry-run" in rest,
                 no_preflight="--no-preflight" in rest,
             )
@@ -2132,10 +1436,8 @@ def run(argv: list) -> int:
 
         if cmd == "stop":
             result = stop(root, job_id)
-            print("job %s stopped — %d task(s) marked stopped, %d worker(s) signalled%s" % (
-                result["job_id"], len(result["stopped"]), len(result["signalled"]),
-                (", %d pid(s) skipped (not this job's process)" % len(result["skipped"]))
-                if result["skipped"] else ""))
+            print("job %s stopped — %d task(s) marked stopped" % (
+                result["job_id"], len(result["stopped"])))
             return 0
 
         if cmd == "shape":
@@ -2189,41 +1491,6 @@ def run(argv: list) -> int:
             else:
                 _print_table(payload)
             return 0 if payload["verdict"] != verdict.FAIL else 1
-
-        if cmd == "wait":
-            timeout = float(_opt(rest, "--timeout") or 0)
-            payload = wait(root, job_id, timeout)
-            if "--json" in rest:
-                print(json.dumps(payload, indent=2))
-            else:
-                _print_table(payload)
-            return 0 if payload["verdict"] != verdict.FAIL else 1
-
-        if cmd == "redelegate":
-            positional = _positionals(rest)
-            if not positional:
-                print("jobs redelegate: missing <task_id>", file=sys.stderr)
-                return 2
-            st = redelegate(root, positional[0], job_id)
-            print("%s %s — %s" % (st.get("task_id"), st.get("state"), st.get("detail", "")))
-            return 0 if st.get("state") == "passed" else 1
-
-        if cmd == "evaluate":
-            result = evaluate(
-                root,
-                backend_name=_opt(rest, "--backend"),
-                prompt_path=_opt(rest, "--prompt"),
-                lang=_opt(rest, "--lang") or "ko",
-                force_read_only_evaluator="--force-read-only-evaluator" in rest,
-            )
-            if "--json" in rest:
-                print(json.dumps(result, indent=2, ensure_ascii=False))
-            else:
-                print("evaluate job %s  backend=%s  state=%s — %s" % (
-                    result["job_id"], result["backend"], result["state"], result["detail"]))
-                print("--- evaluator reply (tail) ---")
-                print(result["output_tail"].rstrip("\n"))
-            return 0 if result["state"] == "passed" else 1
 
         if cmd == "clean":
             removed = clean(root, all_jobs="--all" in rest)

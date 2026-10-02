@@ -214,7 +214,7 @@ def gate_file(root: pathlib.Path) -> pathlib.Path:
 
 
 #: The design files a build is judged against alongside ``05-gate.md``
-#: (ADR-0008 decision 6). A worker builds against these, so a change to one of
+#: (ADR-0008 decision 6). A task is built against these, so a change to one of
 #: them makes the frozen contract describe a design that no longer exists.
 #: Absent files hash to ``""``, which is a real recorded value: creating one
 #: later is as much a change as editing one.
@@ -622,7 +622,7 @@ def tree_fingerprint(root: pathlib.Path) -> Optional[str]:
     """A digest of every file's path, size and modification time under *root*.
 
     Two equal digests mean no file was added, removed or rewritten in between
-    — by a tool call, a worker in another session, or the user's own editor.
+    — by a tool call, another session, or the user's own editor.
     ``None`` when the tree cannot be read or holds more than
     :data:`FINGERPRINT_MAX_FILES` files; a caller treats that as "changed".
     """

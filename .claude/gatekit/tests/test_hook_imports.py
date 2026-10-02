@@ -14,11 +14,11 @@ import unittest
 
 KIT = pathlib.Path(__file__).resolve().parents[1]
 
-GATES = ("prompt", "write", "bash", "powershell", "spawn", "release", "skill", "stop")
+GATES = ("prompt", "write", "bash", "powershell", "spawn", "release", "skill", "stop", "compact")
 
-#: gatekit modules a gate must never load at import time (the runner, the spec
-#: checker, worker backends, the doctor, design, the CLI).
-HEAVY_GATEKIT = ("gatekit.jobs", "gatekit.spec", "gatekit.workers", "gatekit.doctor",
+#: gatekit modules a gate must never load at import time (the job commands, the
+#: spec checker, the doctor, design, the CLI).
+HEAVY_GATEKIT = ("gatekit.jobs", "gatekit.spec", "gatekit.doctor",
                  "gatekit.design", "gatekit.cli")
 
 #: Standard-library modules that cost milliseconds and that no gate needs on import.

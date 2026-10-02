@@ -87,7 +87,7 @@ def runs_dir(root: pathlib.Path) -> pathlib.Path:
 
 
 def jobs_dir(root: pathlib.Path) -> pathlib.Path:
-    """``<root>/.gatekit/jobs`` — worker job directories."""
+    """``<root>/.gatekit/jobs`` — one directory per build job."""
     return state_dir(root) / "jobs"
 
 

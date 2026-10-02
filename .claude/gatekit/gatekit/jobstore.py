@@ -1,7 +1,7 @@
 """Where jobs live and which states end a task: the light half of ``jobs.py``.
 
 Hooks need to know which job is newest, where its files are and whether a task
-is finished, without importing ``jobs.py`` (the runner: workers, spec checks,
+is finished, without importing ``jobs.py`` (the job commands: spec checks,
 subprocess handling; over a hundred milliseconds of import on a hook that has
 maybe a hundred to spend). Everything here reads only ``paths``, so a hook can
 import it freely. ``jobs.py`` and ``spec.py`` take their names from here.
@@ -16,9 +16,11 @@ from . import paths
 #: States after which a task will not change again on its own. The one place
 #: this list is written down: ``jobs.py`` (job verdict, ``stop``) and
 #: ``spec.py`` (is PROGRESS.md older than the latest result?) both import it, so
-#: a task that was stopped or blocked counts as finished in both.
-#: A task moves through queued -> running -> gating and ends in one of these
-#: (``stopped``: ended by ``jobs stop``; ``blocked``: a dependency did not pass).
+#: a task that was stopped counts as finished in both.
+#: A task is ``queued`` until it ends as ``passed`` or ``failed``, or as
+#: ``stopped`` (ended by ``jobs stop``). No command produces ``timeout``,
+#: ``redelegated`` or ``blocked`` any more; they stay in the list because a job
+#: folder written by an older kit may hold them and must still read as finished.
 TERMINAL_STATES = ("passed", "failed", "timeout", "redelegated", "stopped", "blocked")
 
 

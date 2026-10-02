@@ -1,7 +1,7 @@
-"""Task gate: every colour literal a worker wrote must be a design token.
+"""Task gate: every colour literal a task wrote must be a design token.
 
 This is a *task* gate, not a hook. ``jobs.run_gates`` runs it in the project
-root after the worker exits, with the task's ``write_scope`` globs as
+root when the task is completed, with the task's ``write_scope`` globs as
 arguments::
 
     uv run --project .claude/gatekit --frozen python .claude/gatekit/bin/gatekit.py _gate tokens [--root DIR]

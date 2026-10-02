@@ -1,21 +1,21 @@
 ---
 name: gatekit-setup
-description: Prepare gatekit on Windows — check uv, build the .venv from uv.lock, initialize .gatekit/config.json, report whether the optional claude CLI is present and run doctor. Installs a program only after the user says yes. Korean triggers — "처음인데 뭐부터 해?", "방금 받았는데 준비해줘", "셋업 해줘", "초기 설정", "설치해줘", "워커 확인해줘", "백엔드 설정". English triggers — "I just cloned this, get it ready", "first time here, what do I install", "set up gatekit", "install gatekit", "check my workers", "configure the backend". NOT for diagnosing a project that is already set up — that is /gatekit-doctor — and NOT for enabling a bypass or unsandboxed backend, which gatekit refuses.
+description: Prepare gatekit on Windows — check PowerShell 7, uv and git, build the .venv from uv.lock, show the Claude Code version and run doctor. Installs a program only after the user says yes. Korean triggers — "처음인데 뭐부터 해?", "방금 받았는데 준비해줘", "셋업 해줘", "초기 설정", "설치해줘". English triggers — "I just cloned this, get it ready", "first time here, what do I install", "set up gatekit", "install gatekit". NOT for diagnosing a project that is already set up — that is /gatekit-doctor.
 allowed-tools: Read, Write, Edit, Glob, Grep, Bash, PowerShell
 ---
 
 # /gatekit-setup
 
-Input: `$ARGUMENTS` — unused; reserved for future backend configuration.
+Input: `$ARGUMENTS` — unused.
 
 gatekit needs three programs: Claude Code, **uv** and **PowerShell 7**. Claude
 Code in any form will do: the desktop app, the VS Code extension or the
 terminal. uv downloads the Python it needs by itself; nothing else has to be
-installed. The `claude` command (the CLI) is **recommended, not required**:
-with the default settings nothing starts it, and it is needed only when build
-runs its tasks as workers. **Git** is recommended too: gatekit runs without
-it, and setup offers to install it because without Git a changed file cannot
-be restored from the repository.
+installed. The `claude` command (the CLI) is **not needed**: gatekit never
+starts it, and setup only reads the Claude Code version from it when it is
+there. **Git** is recommended: gatekit runs without it, and setup offers to
+install it because without Git a changed file cannot be restored from the
+repository.
 The work is done by one script, `.claude/gatekit/scripts/setup.ps1`; this
 skill runs it, shows the result, and installs something **only after the user
 says yes in the chat**. The user may not know the terminal: use plain words,
@@ -32,10 +32,8 @@ These hold in every step and in every reference file this skill reads.
 - **A reinstall and a retry are separate permissions.** An earlier yes does
   not cover `-Reinstall` or `-RetryFailed`; ask again each time. Never offer a
   reinstall on your own.
-- **No bypass.** Never enable a bypass flag or an unsandboxed backend to make
-  a worker run, and never look for a way around a company policy or a blocked
-  network. When a project does need the `claude` CLI (`S6` is `fail`), that
-  is fixed by installing it, nothing else.
+- **No bypass.** Never enable a bypass flag, and never look for a way around
+  a company policy or a blocked network.
 
 ## Reference files
 
@@ -59,8 +57,8 @@ Before the first tool call, tell the user in one sentence (in `output_lang`):
 anything is a separate question I will ask here in the chat." (Korean: "권한 창은
 실행을 허락하는 창이고, 프로그램 설치를 허락하는 질문은 채팅에서 따로 드립니다.")
 
-Then run the check. It changes nothing except the project's own
-`.gatekit/config.json` and, when `.venv` is missing, one
+Then run the check. It changes nothing except making the project's
+`.gatekit` folder when that is missing and, when `.venv` is missing, one
 `uv sync --frozen --no-dev --no-python-downloads` (no download, nothing
 deleted). It never installs or updates a program and never downloads Python.
 Run it with the PowerShell tool (or Bash), in exactly this form — the flags
@@ -92,13 +90,15 @@ Installable candidates are the items with verdict `fail` **or `warn`** whose
 but are old or broken go to `-Update`; use the names exactly as `action`
 gives them (for example `-Install winget,pwsh` when both are missing).
 
-**The `claude` CLI (`S6`) is the exception.** When its `level` is
-`recommended`, this project does not use it: do not make it a candidate, do
-not count it under "install all", and do not describe it as something
-missing. Mention it once below the table as optional ("only needed when build
-runs its tasks as workers; I can install it if you want"). It is a candidate
-like the others only when its `level` is `required`, which the script reports
-for a project whose `.gatekit/config.json` runs workers.
+**The Claude Code version (`S6`) is never a candidate.** gatekit starts no
+`claude` process; `S6` only shows the version. `unverified` means this session
+has no `claude` command, which is normal with only the desktop app or the VS
+Code extension: say once below the table that the version could not be read
+and that the app should be kept up to date, and never offer to install the
+CLI just to read a version. `warn` with `-Update claude` means the command is
+older than the recommended version: mention it once as optional, and pass
+`-Update claude` only if the user asks for it. Neither is counted under
+"install all" or described as something missing.
 
 **Git (`S7`) is a candidate** when it is missing: `recommended`, verdict
 `warn`, action `-Install git`. Its line in the question says that gatekit
@@ -170,8 +170,8 @@ When several apply, the first of `1, 4, 3, 2` wins.
 
 ## Step 5 — confirm
 
-Report in `output_lang` what changed (installed programs, created
-`.gatekit/config.json` or left as it was, a rebuilt `.venv`, a key added to
+Report in `output_lang` what changed (installed programs, the `.gatekit`
+folder made or left as it was, a rebuilt `.venv`, a key added to
 `.claude/settings.json`) and name the file each change landed in. Doctor
 already ran inside the script (the `S15` item), so do not run
 `/gatekit-doctor` again here. Then name the next command:

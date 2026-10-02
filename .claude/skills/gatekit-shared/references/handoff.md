@@ -37,14 +37,13 @@ the next skill, and what "more work here" means.
 
 - `/gatekit-gate` never approves for the user, and never hands off to
   `/gatekit-build` while `approve check` prints anything but `ok`.
-- `/gatekit-build` never hands off while a task is `failed`, `timeout`,
-  `stopped` or `blocked`. A build that passed is not a completion contract
+- `/gatekit-build` never hands off while a task is `failed`, `stopped` or
+  still `queued`. A build that passed is not a completion contract
   that passed; only `/gatekit-verify` reports that.
 - `/gatekit-verify` never fixes what it finds. A failure goes back to
   `/gatekit-build`.
 - `/gatekit-doctor` never runs a fix without asking, and never one that
-  rewrites `spec/05-gate.md`, records an approval or enables an unsafe
-  backend.
+  rewrites `spec/05-gate.md` or records an approval.
 - No skill edits a file to make a check pass so that the handoff can happen.
 
 ## Which skill comes next
@@ -60,7 +59,7 @@ the next skill, and what "more work here" means.
 | `/gatekit-gate` | `/gatekit-build` | The user approved and `approve check` printed `ok`. Not approved: the write gate stays closed; say so and stop. |
 | `/gatekit-build` | `/gatekit-verify` | Every task is `passed`. Otherwise name the tasks and the failing gate, and stay in build. |
 | `/gatekit-verify` | none — finished | The aggregate is `ok` and no `-visual` verdict is `fail`. A failure: `/gatekit-build`. A stale contract: `/gatekit-tasks`, then `/gatekit-gate`. |
-| `/gatekit-doctor` | the skill that owns the first axis not `ok` | workers, python, uv: `/gatekit-setup`. Contract freshness: `/gatekit-tasks`, then `/gatekit-gate`. Spec set: the skill that writes the failing file. Every axis `ok`: nothing to hand off. |
+| `/gatekit-doctor` | the skill that owns the first axis not `ok` | python, uv: `/gatekit-setup`. Contract freshness: `/gatekit-tasks`, then `/gatekit-gate`. Spec set: the skill that writes the failing file. Every axis `ok`: nothing to hand off. |
 
 The required path is `/gatekit-interview` → `/gatekit-tasks` →
 `/gatekit-gate` → `/gatekit-build` → `/gatekit-verify`, with

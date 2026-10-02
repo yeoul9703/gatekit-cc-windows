@@ -40,7 +40,7 @@ Check the session ledger (`uv run --project .claude/gatekit --frozen python .cla
 `active_pipeline` is `build`, run
 `uv run --project .claude/gatekit --frozen python .claude/gatekit/bin/gatekit.py design impact --json`,
 report every task it lists grouped by id, and tell the user those tasks need
-redelegation once `/gatekit-tasks` and `/gatekit-gate` bring the contract
+to be built again once `/gatekit-tasks` and `/gatekit-gate` bring the contract
 current again. **Do not edit `spec/04-tasks.md` or `spec/05-gate.md`** —
 that stays the job of those two commands. Then continue to Step 3; the
 design files are still written as usual.
@@ -122,8 +122,8 @@ a mid-build report).
 In `output_lang`: files written (including anything under `spec/design/`);
 patterns and tokens extracted as counts; the `spec validate` verdict quoted
 from the run; the not-covered list; new or superseded assumption rows by
-number; and, if Step 2 found the pipeline mid-build, the tasks needing
-redelegation. State what the source showed and what you filled in. Never
+number; and, if Step 2 found the pipeline mid-build, the tasks to build
+again. State what the source showed and what you filled in. Never
 present a designed value as an observed one.
 
 ## Step 10 — hand off

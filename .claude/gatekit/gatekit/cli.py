@@ -10,13 +10,12 @@ import importlib
 import sys
 
 SUBCOMMANDS = {
-    "doctor":   ("gatekit.doctor",   "Diagnose install, hooks, state, workers (ok/warn/fail/unverified); --lang ko|en."),
+    "doctor":   ("gatekit.doctor",   "Diagnose install, hooks, project state, spec, contract, python, uv (ok/warn/fail/unverified); --lang ko|en."),
     "spec":     ("gatekit.spec",     "Validate the spec set (spec/01..05, RECOVERY, PROGRESS)."),
     "contract": ("gatekit.contract", "Derive and run the completion contract from spec/05-gate.md."),
     "approve":  ("gatekit.approval", "Hash-anchored approvals: approve / check / list."),
     "design":   ("gatekit.design",   "Design tokens: merge-preset / impact."),
-    "jobs":     ("gatekit.jobs",     "Worker jobs: start / shape / status / wait / results / complete / recheck / redelegate / stop / evaluate / clean."),
-    "workers":  ("gatekit.workers",  "Worker backends: list / check / set-default."),
+    "jobs":     ("gatekit.jobs",     "Build jobs: start / shape / status / results / complete / recheck / stop / clean."),
     "ledger":   ("gatekit.ledger",   "Session ledger: show / init / set-pipeline / release-scopes."),
     "lang":     ("gatekit.lang",     "Print the output language: always ko. Kept for the skills that still call it."),
 }
