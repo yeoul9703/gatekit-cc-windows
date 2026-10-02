@@ -14,6 +14,7 @@ says what to tell the user about each candidate and which cases stay out of
 | `claude` | `-Install claude` / `-Update claude` | recommended | the Claude Code CLI; only needed when build runs its tasks as workers. With the default settings nothing starts it, so the desktop app or the VS Code extension alone is enough | none | tens of MB | no |
 | `venv` | `-Install venv` only | required | Python and packages for the hooks; **a damaged `.claude/gatekit/.venv` is deleted and rebuilt** | none | tens of MB | no |
 | `git` | `-Install git` only | recommended | Git for Windows; gatekit runs without it, but a project that came as a zip file has nothing to restore a changed file from and keeps no history | includes winget source and package terms | tens of MB | not for the first attempt (user scope); a Windows administrator prompt (UAC) may appear if that attempt does not work |
+| `node` | `-Install node` only | optional (`info`) | Node.js, for what the user builds; gatekit itself never starts it | includes winget source and package terms | tens of MB | not for the first attempt (user scope); a Windows administrator prompt (UAC) may appear if that attempt does not work |
 
 Only the names passed to `-Install` or `-Update` receive winget's
 `--accept-source-agreements --accept-package-agreements`. That is why the
@@ -42,6 +43,14 @@ how much is downloaded, whether administrator rights are needed.
   recommended so that a changed file can be restored and the work keeps a
   history, and a Windows administrator prompt (UAC) may appear. See the next
   section for what to say before the install runs.
+- **`node`**: not a candidate here and never inside "install all". What the
+  user builds may need a program of its own, and that is asked about only
+  after the interview has fixed the stack, not in `/gatekit-setup`. The
+  `S18` item is `info` for a missing or an old Node.js, so do not describe
+  it as something missing. `/gatekit-gate` asks when a completion criterion
+  needs it and passes `-Install node` after a yes
+  (`.claude/skills/gatekit-gate/references/gate-criteria.md`); the script
+  then installs it the way it installs Git, user scope first.
 
 ## Git (`S7`): user scope first, then the administrator prompt
 

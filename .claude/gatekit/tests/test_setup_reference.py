@@ -127,8 +127,28 @@ class TestPackagesTable(unittest.TestCase):
         match = re.search(r"\$allowed = @\(([^)]*)\)", ps1_text())
         assert match is not None
         names = re.findall(r"'(\w+)'", match.group(1))
-        self.assertEqual(names, ["winget", "pwsh", "uv", "claude", "git", "venv"])
+        self.assertEqual(names, ["winget", "pwsh", "uv", "claude", "git", "node", "venv"])
         self.assertIn("`-Install %s`" % ",".join(names), doc_text())
+
+    def test_node_is_optional_and_the_documented_commands_are_the_scripts(self) -> None:
+        node = next(p for p in PACKAGES if p["key"] == "node")
+        self.assertEqual(node["level"], "선택")
+        text = doc_text()
+        self.assertIn("### 2-5. Node.js (`node`, 선택)", text)
+        section = text[text.index("### 2-5. "):text.index("## 3. ")]
+        # the same order as Git: the user scope first, then once more without a scope
+        self.assertIn("| 설치 | `winget install --id %s -e --source winget --scope user` |"
+                      % node["winget_id"], section)
+        self.assertIn("`winget install --id %s -e --source winget` (또는 %s"
+                      % (node["winget_id"], node["docs_url"]), section)
+        for phrase in ("| 없음 | `info`(선택) |", "`S10-node`", "`S16-node`", "`/gatekit-gate`",
+                       "%s 미만" % node["min_version"], "`@playwright/test`"):
+            self.assertIn(phrase, section)
+        # the script reports a missing or an old Node.js as info: never an item setup offers to install
+        ps1 = ps1_text()
+        block = ps1[ps1.index("# S18 node"):ps1.index("# S19 package table")]
+        self.assertNotIn("Set-Flag", block)
+        self.assertNotRegex(block, r"Add-Item 'S18' \$nodeLevel 'node' '(warn|fail)'")
 
     def test_winget_install_section_names_both_steps_and_the_store(self) -> None:
         text = doc_text()

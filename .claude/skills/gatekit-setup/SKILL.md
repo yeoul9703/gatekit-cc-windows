@@ -129,8 +129,9 @@ assume it.
 ## Step 4 — install only what was allowed, then check again
 
 Pass exactly the allowed names and nothing else (`winget`, `pwsh`, `uv`,
-`claude`, `git`, `venv` are the only names the script accepts). Both switches
-may be given in one call:
+`claude`, `git`, `node`, `venv` are the only names the script accepts; `node`
+is never a candidate here, `/gatekit-gate` asks for it once the stack is
+known). Both switches may be given in one call:
 
 ```
 powershell -NoProfile -ExecutionPolicy Bypass -File .claude/gatekit/scripts/setup.ps1 -Install uv,venv -Update pwsh -Json -Lang <output_lang>

@@ -493,6 +493,17 @@ class TestSetupWithoutUv(SetupCase):
         _, _, by_id = self.run_json("-Lang", "en")
         self.assertEqual(by_id["S12-settings"]["verdict"], "ok", by_id["S12-settings"])
 
+    def test_real_settings_set_no_permission_mode_and_no_allow_list(self) -> None:
+        # Permissions are left to the mode the user starts Claude Code in (auto). A project
+        # settings.json that names a defaultMode replaces the one in the user's own settings
+        # (and "auto" written there is not applied at all), and an allow list is the thing the
+        # template decided not to keep. Neither key belongs in the file that is handed out.
+        settings = json.loads((PROJECT / ".claude" / "settings.json").read_text(encoding="utf-8"))
+        permissions = settings.get("permissions", {})
+        self.assertNotIn("defaultMode", permissions,
+                         "a project defaultMode overrides the mode of whoever receives the template")
+        self.assertNotIn("allow", permissions, "the template keeps no permission allow list")
+
 
 @unittest.skipUnless(POWERSHELL.is_file(), "Windows PowerShell 5.1 not available")
 class TestSetupInstallPaths(SetupCase):
@@ -655,10 +666,12 @@ class TestSetupInstallPaths(SetupCase):
 
 
 #: A fake winget whose `install` answers USER when `--scope user` is passed and PLAIN without a
-#: scope (after sleeping SLEEP seconds). With CREATE a successful install really puts a fake git
-#: on PATH. Every call is logged.
+#: scope (after sleeping SLEEP seconds). With CREATE a successful install really puts the program
+#: on PATH (MADE: a fake git for Git, a fake node and npm for Node.js). Every call is logged.
 FAKE_WINGET_SCOPED = r'''
 import sys, time
+MADE = {'Git.Git': [('git', 'git version 2.55.0.windows.5')],
+        'OpenJS.NodeJS.LTS': [('node', 'v24.19.0'), ('npm', '11.6.0')]}
 a = sys.argv[1:]
 open(LOG, 'a').write('winget ' + ' '.join(a) + chr(10))
 if a[0] == '--version':
@@ -674,10 +687,20 @@ if not scoped:
     time.sleep(SLEEP)
 code = USER if scoped else PLAIN
 if code == 0 and CREATE:
-    open(BIN + '/git.cmd', 'w').write('@echo off' + chr(13) + chr(10)
-                                      + 'echo git version 2.55.0.windows.5' + chr(13) + chr(10))
+    for name, text in MADE[a[a.index('--id') + 1]]:
+        open(BIN + '/' + name + '.cmd', 'w').write('@echo off' + chr(13) + chr(10)
+                                                    + 'echo ' + text + chr(13) + chr(10))
 sys.exit(code)
 '''
+
+
+def scoped_winget(case: "SetupCase", user: int, plain: int = 0, create: bool = False,
+                  sleep: float = 0.0) -> None:
+    """Put FAKE_WINGET_SCOPED on the PATH of *case*."""
+    src = ("LOG = %r\nBIN = %r\nUSER = %d\nPLAIN = %d\nCREATE = %r\nSLEEP = %r\n"
+           % (str(case.log), str(case.bin), user, plain, create, sleep)) + FAKE_WINGET_SCOPED
+    fakebin.make_fake(case.bin, "winget", src)
+
 
 #: winget's "no applicable installer" (what --scope user answers when a package has no
 #: user-scope installer). setup.ps1 has no row for it, so it is class "unknown".
@@ -698,9 +721,7 @@ class TestSetupGit(SetupCase):
     MANUAL = "winget install --id Git.Git -e --source winget --scope user"
 
     def winget(self, user: int, plain: int = 0, create: bool = False, sleep: float = 0.0) -> None:
-        src = ("LOG = %r\nBIN = %r\nUSER = %d\nPLAIN = %d\nCREATE = %r\nSLEEP = %r\n"
-               % (str(self.log), str(self.bin), user, plain, create, sleep)) + FAKE_WINGET_SCOPED
-        fakebin.make_fake(self.bin, "winget", src)
+        scoped_winget(self, user, plain, create, sleep)
 
     def install_calls(self) -> list:
         return [c for c in self.calls() if c.startswith("winget install")]
@@ -887,6 +908,178 @@ class TestSetupGit(SetupCase):
         for banned in ("gsudo", "sudo ", "-Verb RunAs", "runas"):
             self.assertNotIn(banned, code, banned)
         self.assertEqual(code.count("@('--scope', 'user')"), 1)
+
+
+@unittest.skipUnless(POWERSHELL.is_file(), "Windows PowerShell 5.1 not available")
+class TestSetupNode(SetupCase):
+    """Node.js is optional (level 선택 in packages.json): it is for what the user builds, and
+    whether that needs Node.js is known only after the runtime is chosen. A check reports it as
+    info and installs nothing, a first run offers no install for it, and -Install node (passed by
+    /gatekit-gate after a yes in the chat) installs it the way Git is installed."""
+
+    NODE_ID = "OpenJS.NodeJS.LTS"
+    #: An item the setup skill would offer an install for names a switch in its action or hints.
+    OFFERS_NODE = re.compile(r"-(Install|Update|Reinstall)\b[^)\n]*\bnode\b")
+
+    def winget(self, user: int, plain: int = 0, create: bool = False) -> None:
+        scoped_winget(self, user, plain, create)
+
+    def install_calls(self) -> list:
+        return [c for c in self.calls() if c.startswith("winget install")]
+
+    def fake_node(self, version: str = "v24.19.0", npm: bool = True) -> None:
+        fakebin.make_fake(self.bin, "node", "print(%r)\n" % version)
+        if npm:
+            fakebin.make_fake(self.bin, "npm", "print('11.6.0')\n")
+        else:
+            for name in ("npm.cmd", "npm.fake.py"):
+                (self.bin / name).unlink(missing_ok=True)
+
+    def ready(self) -> None:
+        """Every required program is there (uv, a stable PowerShell 7); no Node.js."""
+        self.fake_uv()
+        self.fake_pwsh("7.6.1")
+
+    def test_missing_node_is_reported_as_optional_and_a_check_installs_nothing(self) -> None:
+        self.winget(0, create=True)
+        _, data, by_id = self.run_json("-Lang", "en")
+        item = by_id["S18"]
+        self.assertEqual((item["level"], item["verdict"]), ("info", "info"), item)
+        self.assertIn("Node.js not found (optional)", item["detail"])
+        self.assertIn("installed if you allow it (-Install node)", item["action"])
+        row = by_id["P-node"]
+        self.assertEqual((row["level"], row["verdict"]), ("info", "info"), row)
+        self.assertIn("not installed (winget %s)" % self.NODE_ID, row["detail"])
+        self.assertEqual(self.install_calls(), [])  # no permission, no install
+        self.assertFalse((self.bin / "node.cmd").exists())
+        # A first run must not ask about Node.js. The setup skill offers an install for every
+        # item that is fail or warn and names a switch, so no such item may name node.
+        for other in data["items"]:
+            if other["verdict"] in ("fail", "warn"):
+                self.assertNotRegex(" ".join([other["action"]] + other["hints"]), self.OFFERS_NODE, other)
+
+    def test_missing_node_leaves_the_exit_code_alone(self) -> None:
+        self.ready()
+        self.winget(0)
+        code, _, by_id = self.run_json("-Status", "-Lang", "en")
+        self.assertEqual(by_id["S18"]["verdict"], "info", by_id["S18"])
+        self.assertEqual(code, 0, by_id)
+        self.assertNotIn("S11", by_id)  # nothing left to do, so no summary line
+
+    def test_node_on_path_is_ok_and_an_old_one_or_one_without_npm_is_info_with_no_switch(self) -> None:
+        self.ready()
+        self.fake_node()
+        code, _, by_id = self.run_json("-Status", "-Lang", "en")
+        item = by_id["S18"]
+        self.assertEqual((item["level"], item["verdict"], item["action"]), ("info", "ok", ""), item)
+        self.assertIn("node 24.19.0, npm present", item["detail"])
+        self.assertIn("installed 24.19.0", by_id["P-node"]["detail"])
+        self.assertEqual(code, 0)
+        for prepare, said in ((lambda: self.fake_node("v18.20.4"), "node 18.20.4 < 20.0.0"),
+                              (lambda: self.fake_node(npm=False), "npm is missing")):
+            with self.subTest(said=said):
+                prepare()
+                code, _, by_id = self.run_json("-Status", "-Lang", "en")
+                item = by_id["S18"]
+                self.assertEqual((item["level"], item["verdict"]), ("info", "info"), item)
+                self.assertIn(said, item["detail"])
+                self.assertNotRegex(item["action"], self.OFFERS_NODE)
+                self.assertEqual(code, 0, by_id)
+
+    def test_node_visible_only_after_a_restart_leaves_the_exit_code_alone(self) -> None:
+        self.ready()
+        elsewhere = self.root / "elsewhere"
+        elsewhere.mkdir()
+        fakebin.make_fake(elsewhere, "node", "print('v24.19.0')\n")
+        code, _, by_id = self.run_json("-Status", "-Lang", "en", env={
+            "GATEKIT_SETUP_KEEP_PATH": "", "GATEKIT_SETUP_REGISTRY_PATH": str(elsewhere)})
+        item = by_id["S18"]
+        self.assertEqual(item["level"], "info", item)
+        self.assertIn("not visible", item["detail"])
+        self.assertIn(REOPEN_EN, item["action"])
+        self.assertNotRegex(item["action"], self.OFFERS_NODE)
+        self.assertEqual(code, 0, by_id)
+        # node is visible but npm is not yet: the line names npm, not node
+        fakebin.make_fake(self.bin, "node", "print('v24.19.0')\n")
+        fakebin.make_fake(elsewhere, "npm", "print('11.6.0')\n")
+        code, _, by_id = self.run_json("-Status", "-Lang", "en", env={
+            "GATEKIT_SETUP_KEEP_PATH": "", "GATEKIT_SETUP_REGISTRY_PATH": str(elsewhere)})
+        item = by_id["S18"]
+        self.assertEqual((item["name"], item["level"]), ("npm", "info"), item)
+        self.assertIn("npm.cmd) but not visible", item["detail"])
+        self.assertEqual(code, 0, by_id)
+
+    def test_install_node_asks_winget_for_the_user_scope(self) -> None:
+        self.winget(0, create=True)
+        _, _, by_id = self.run_json("-Install", "node", "-Lang", "en")
+        calls = self.install_calls()
+        self.assertEqual(len(calls), 1, self.calls())
+        for part in ("--id %s -e --source winget" % self.NODE_ID, "--scope user", "--disable-interactivity",
+                     "--accept-source-agreements", "--accept-package-agreements"):
+            self.assertIn(part, calls[0])
+        self.assertEqual(by_id["A-node"]["verdict"], "ok", by_id["A-node"])
+        self.assertNotIn("S10-node", by_id)  # no second attempt, so no administrator notice
+        self.assertNotIn("S16-node", by_id)
+        self.assertEqual(by_id["S18"]["verdict"], "ok", by_id["S18"])
+        self.assertIn("node install", by_id["S11"]["detail"])
+        for call in self.calls():
+            if call not in calls:
+                self.assertNotIn("--accept", call)  # agreements only for the allowed install
+
+    def test_user_scope_that_does_not_work_is_retried_without_a_scope_after_the_uac_notice(self) -> None:
+        self.winget(NO_APPLICABLE_INSTALLER, 0, create=True)
+        _, data, by_id = self.run_json("-Install", "node", "-Lang", "en")
+        calls = self.install_calls()
+        self.assertEqual(len(calls), 2, self.calls())
+        self.assertIn("--scope user", calls[0])
+        self.assertNotIn("--scope", calls[1])
+        notice = by_id["S10-node"]
+        self.assertEqual((notice["level"], notice["verdict"]), ("info", "info"), notice)
+        self.assertIn("administrator prompt (UAC) may appear", notice["action"])
+        ids = [i["id"] for i in data["items"]]
+        running = [n for n, i in enumerate(data["items"])
+                   if i["id"] == "A-node" and "running winget install" in i["detail"]]
+        self.assertEqual(len(running), 2, ids)
+        self.assertLess(ids.index("S10-node"), running[1])  # said BEFORE the second attempt
+        self.assertEqual(by_id["A-node"]["verdict"], "ok", by_id["A-node"])
+
+    def test_an_install_that_cannot_work_is_reported_and_node_stays_optional(self) -> None:
+        code, _, by_id = self.run_json("-Install", "node", "-Lang", "en")  # no winget at all
+        self.assertIn("winget is missing", by_id["S16-node"]["detail"])
+        self.assertIn("-Install winget", by_id["S16-node"]["action"])
+        self.assertEqual(code, 2)
+        self.winget(NO_APPLICABLE_INSTALLER, 0x8A150999)  # both attempts fail
+        code, _, by_id = self.run_json("-Install", "node", "-Lang", "en")
+        self.assertEqual(len(self.install_calls()), 2, self.calls())
+        item = by_id["S16-node"]
+        self.assertEqual(item["verdict"], "fail", item)
+        self.assertIn("https://nodejs.org/en/download", "\n".join(item["hints"]))
+        self.assertEqual(code, 1)
+        self.assertEqual(by_id["S18"]["verdict"], "info")  # still missing, still optional
+
+    def test_update_only_reports_and_reinstall_is_refused(self) -> None:
+        self.winget(0)
+        self.fake_node()
+        _, _, by_id = self.run_json("-Update", "node", "-Lang", "en")
+        self.assertIn("not updated automatically", by_id["A-node"]["detail"])
+        self.assertEqual([c for c in self.calls() if " install " in c or " upgrade " in c], [])
+        code, out = self.run_setup("-Reinstall", "node", "-Lang", "en")
+        self.assertEqual(code, 1, out)
+        self.assertIn("refused", out)
+
+    def test_korean_lines_have_no_english_sentence(self) -> None:
+        self.winget(NO_APPLICABLE_INSTALLER, 0x8A150999)
+        _, out = self.run_setup("-Lang", "ko")  # the check: S18 and the package row
+        self.assertIn("Node.js 가 없습니다(선택)", out)
+        self.assertIn("허락하면 설치합니다 (-Install node)", out)
+        self.assertEqual(english_sentence_lines(out), [], out)
+        _, out = self.run_setup("-Install", "node", "-Lang", "ko")  # both attempts fail
+        self.assertIn("관리자 확인 창(UAC)이 뜰 수 있습니다", out)
+        self.assertEqual(english_sentence_lines(out), [], out)
+        for prepare in (lambda: self.fake_node("v18.20.4"), lambda: self.fake_node(npm=False), self.fake_node):
+            prepare()
+            _, out = self.run_setup("-Status", "-Lang", "ko")
+            self.assertEqual(english_sentence_lines(out), [], out)
 
 
 #: GATEKIT_SETUP_PWSH_PACKAGES values: what Get-AppxPackage would answer.

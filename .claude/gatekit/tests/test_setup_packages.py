@@ -135,6 +135,22 @@ class TestPackageTable(PackagesCase):
         self.assertEqual(by_id["P-pwsh"]["level"], "required")
         self.assertEqual(by_id["P-git"]["level"], "recommended")
 
+    def test_an_optional_program_is_listed_without_a_winget_lookup(self) -> None:
+        # Node.js is for what the user builds: a newer release is not a warn here, and the
+        # check does not start one more `winget list` for it.
+        self.fake_uv()
+        fakebin.make_fake(self.bin, "node", "print('v24.19.0')\n")
+        fakebin.make_fake(self.bin, "npm", "print('11.6.0')\n")
+        self.winget({"astral-sh.uv": row("uv", "astral-sh.uv", "0.10.7"),
+                     "OpenJS.NodeJS.LTS": row("Node.js", "OpenJS.NodeJS.LTS", "24.19.0", "24.21.0")})
+        _, _, by_id = self.run_json("-Lang", "en")
+        item = by_id["P-node"]
+        self.assertEqual((item["level"], item["verdict"], item["action"]), ("info", "info", ""), item)
+        self.assertIn("installed 24.19.0", item["detail"])
+        self.assertIn("optional, so the update lookup was not run", item["detail"])
+        self.assertEqual([c for c in self.winget_calls("list") if "OpenJS" in c], [])
+        self.assertEqual(by_id["P-uv"]["verdict"], "ok", by_id["P-uv"])  # the others are still looked up
+
     def test_not_installed_row(self) -> None:
         self.winget({})
         _, _, by_id = self.run_json("-Lang", "en")
@@ -337,7 +353,7 @@ class TestStatus(PackagesCase):
         self.assertEqual(self.sync_calls(), [])
         self.assertFalse((self.kit / ".venv").exists())
         self.assertFalse((self.root / ".gatekit" / "config.json").exists())
-        for key in ("P-pwsh", "P-uv", "P-claude", "P-git", "P-failures"):
+        for key in ("P-pwsh", "P-uv", "P-claude", "P-git", "P-node", "P-failures"):
             self.assertIn(key, by_id)
         self.assertIn("skips", by_id["S5"]["detail"])
         self.assertIn("skips", by_id["S15"]["detail"])

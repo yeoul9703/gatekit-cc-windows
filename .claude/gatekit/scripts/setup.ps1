@@ -6,7 +6,7 @@
 #                     project's own .venv: if it is missing, ONE `uv sync --frozen --no-dev
 #                     --no-python-downloads` is tried (it never downloads Python and never
 #                     deletes anything). Everything else needs a name in -Install / -Update.
-#   -Install <list>   install the listed items. Allowed names: winget, pwsh, uv, claude, git, venv.
+#   -Install <list>   install the listed items. Allowed names: winget, pwsh, uv, claude, git, node, venv.
 #                     "winget" is always done first: it asks Windows to register the App Installer
 #                     that is already on the PC and, only if that is not enough, downloads the
 #                     Microsoft.WinGet.Client module into the user's folders and runs
@@ -15,11 +15,11 @@
 #                     "git" asks winget for the user-scope installer first (--scope user). Only if
 #                     that attempt does not work is it tried once more without a scope, after a
 #                     line that says a Windows administrator prompt (UAC) may appear and may hide
-#                     behind other windows.
+#                     behind other windows. "node" (Node.js, optional) is installed the same way.
 #                     "venv" builds .claude/gatekit/.venv WITH downloads (Python and packages,
 #                     tens of MB) and deletes and rebuilds a broken .venv. Only this switch may.
-#   -Update <list>    update the listed programs (pwsh, uv, claude, git; not venv, not winget).
-#                     git is accepted but only reported: an existing Git is not updated here.
+#   -Update <list>    update the listed programs (pwsh, uv, claude, git, node; not venv, not winget).
+#                     git and node are accepted but only reported: an existing one is not updated here.
 #   -Reinstall <list> reinstall the listed programs. Allowed names: uv, pwsh, claude only (git is
 #                     never reinstalled here; venv is rebuilt with -Install venv). uv: winget
 #                     --force when uv came from winget, otherwise the official installer script
@@ -80,6 +80,11 @@
 # Git (S7) is recommended too: gatekit runs without it, so a missing Git, or one that is visible
 # only after a restart, is a warn that leaves the exit code alone. A Git install the user allowed
 # and that failed is reported like any other failed install (S16-git).
+# Node.js (S18) is optional: gatekit never starts it. It is for what the user builds, and whether
+# that needs Node.js is known only after the runtime is chosen (spec/03-architecture.md). A
+# missing or an old Node.js is therefore reported as info (not warn or fail, which the setup
+# skill offers an install for), it sets no exit flag, and nothing is installed without
+# -Install node, which /gatekit-gate passes after the user said yes in the chat.
 # Test hooks (environment): GATEKIT_SETUP_KEEP_PATH=1 never reads the registry PATH;
 #   GATEKIT_SETUP_REGISTRY_PATH replaces the registry PATH value (these two are read by
 #   common.ps1, so session-check.ps1 honors them too); GATEKIT_SETUP_SYNC_TIMEOUT
@@ -120,7 +125,7 @@ $venvDir = Join-Path $kit '.venv'
 $venvPy = Join-Path $venvDir 'Scripts\python.exe'
 $launcher = Join-Path $kit 'bin\gatekit.py'
 $dash = [string][char]0x2014
-$allowed = @('winget', 'pwsh', 'uv', 'claude', 'git', 'venv')
+$allowed = @('winget', 'pwsh', 'uv', 'claude', 'git', 'node', 'venv')
 $allowedReinstall = @('uv', 'pwsh', 'claude')
 
 # The PATH rule and the ASCII-only JSON live in common.ps1 (shared with session-check.ps1).
@@ -158,13 +163,19 @@ try {
     $pkgData = (Get-Content -LiteralPath (Join-Path $PSScriptRoot 'packages.json') -Raw -Encoding UTF8 | ConvertFrom-Json)
     foreach ($pk in @($pkgData.packages)) { $script:pkgs[[string]$pk.key] = $pk }
 } catch { $script:pkgLoadError = "$_" }
+# The entries this script reads by key. The file is checked for these keys, not for how many
+# entries it holds: a count would end every run the moment an entry is added or taken out.
+$pkgKeysNeeded = @('winget', 'pwsh', 'uv', 'claude', 'git', 'node')
+$pkgKeysMissing = @($pkgKeysNeeded | Where-Object { -not $script:pkgs.ContainsKey($_) })
 $uvMinimum = [version]'0.0.0'
 $claudeRecommended = [version]'0.0.0'
 $pwshMinimum = [version]'0.0.0'
+$nodeMinimum = [version]'0.0.0'
 try {
     if ($script:pkgs['uv'].min_version) { $uvMinimum = [version]$script:pkgs['uv'].min_version }
     if ($script:pkgs['claude'].min_version) { $claudeRecommended = [version]$script:pkgs['claude'].min_version }
     if ($script:pkgs['pwsh'].min_version) { $pwshMinimum = [version]$script:pkgs['pwsh'].min_version }
+    if ($script:pkgs['node'].min_version) { $nodeMinimum = [version]$script:pkgs['node'].min_version }
 } catch { }
 $pythonMinimum = [version]'3.14'
 try { if ("$($pkgData.python_min)" -match '^\d+\.\d+$') { $pythonMinimum = [version]$pkgData.python_min } } catch { }
@@ -377,9 +388,11 @@ if ($RetryFailed -and -not $Status) {
         Say 'info' 'retry' '-RetryFailed' (T ('기록된 실패 항목만 같은 동작으로 다시 시도합니다: ' + $rt) ('retrying only the recorded failures with the same action: ' + $rt))
     }
 }
-if ($script:pkgs.Count -lt 5) {
+if ($pkgKeysMissing.Count -gt 0) {
     $argsBad = $true
-    Add-Item 'args' 'required' 'packages.json' 'fail' (T ('scripts/packages.json 을 읽지 못했습니다: ' + $script:pkgLoadError) ('could not read scripts/packages.json: ' + $script:pkgLoadError)) (Get-RestoreAdvice '.claude/gatekit/scripts/packages.json')
+    $pkgWhy = $script:pkgLoadError
+    if (-not $pkgWhy) { $pkgWhy = (T '빠진 항목: ' 'missing entries: ') + ($pkgKeysMissing -join ', ') }
+    Add-Item 'args' 'required' 'packages.json' 'fail' (T ('scripts/packages.json 을 읽지 못했습니다: ' + $pkgWhy) ('could not read scripts/packages.json: ' + $pkgWhy)) (Get-RestoreAdvice '.claude/gatekit/scripts/packages.json')
 }
 foreach ($n in (@($installList) + @($updateList))) {
     if ($allowed -notcontains $n) {
@@ -490,6 +503,15 @@ function New-ExecDeniedInquiry([string]$what, [int]$code) {
 function Get-VersionFrom([string]$text) {
     if ($text -match '(\d+)\.(\d+)\.(\d+)') { return [version]($Matches[1] + '.' + $Matches[2] + '.' + $Matches[3]) }
     return $null
+}
+
+# The level of a packages.json entry as an item level: 필수 = required, 권장 = recommended,
+# anything else (선택) = info.
+function Get-PkgLevel([string]$key) {
+    $level = "$($script:pkgs[$key].level)"
+    if ($level -eq '필수') { return 'required' }
+    if ($level -eq '권장') { return 'recommended' }
+    return 'info'
 }
 
 # $setFlag = $false: the line is shown but the exit code stays as it is (a program this project
@@ -826,6 +848,38 @@ function Install-Winget {
     Add-Item 'S16-winget' 'recommended' ('winget ' + (T '설치' 'install')) 'fail' $msg $act $hints
 }
 
+# S10: Git for Windows and Node.js come through winget only (no official installer script), and
+# both are installed the same way. First the user-scope installer (--scope user), which needs no
+# administrator rights. Only when that attempt fails for a reason of its own (class "unknown": no
+# user-scope installer applies, or the installer itself failed) is the install tried once more
+# without a scope. winget and the installer may then show the Windows administrator prompt (UAC)
+# themselves; the S10-<name> line says so BEFORE that attempt. A policy block, a network problem,
+# agreements that are not accepted and a timeout are not retried: another scope does not change
+# them. Returns $true when the program was installed.
+function Install-UserScopeFirst([string]$name, [string]$label) {
+    $id = $script:pkgs[$name].winget_id
+    $what = $label + ' (winget ' + $id + ')'
+    $ok = Invoke-WingetAction 'install' $id $name $what @('--scope', 'user') $true
+    if ($ok -or -not $script:lastWingetFail) { return $ok }
+    $wf = $script:lastWingetFail
+    if ($wf.fail.cls -ne 'unknown') {
+        Report-InstallFailure $name $wf.what $wf.fail $wf.out
+        return $false
+    }
+    Add-Item ('S10-' + $name) (Get-PkgLevel $name) $name 'info' (T ('사용자 범위 설치가 되지 않았습니다(0x' + $wf.fail.hex + '). 범위를 정하지 않고 다시 시도합니다.') ('the user-scope install did not work (0x' + $wf.fail.hex + '). Trying again without a scope.')) `
+        (T '관리자 확인 창(UAC)이 뜰 수 있습니다. 그 창은 다른 창 뒤에 숨을 수 있으니, 보이지 않으면 작업 표시줄에서 깜박이는 아이콘을 눌러 허용하세요' 'a Windows administrator prompt (UAC) may appear. It can hide behind other windows: if you do not see it, click the flashing icon on the taskbar and allow it')
+    $uacHint = T '관리자 확인 창(UAC)에 답하지 않아 멈췄을 수 있습니다. 작업 표시줄에서 그 창을 찾아 허용한 뒤 다시 시도하세요.' 'it may have been waiting for the Windows administrator prompt (UAC). Find that window on the taskbar, allow it, then try again.'
+    $ok = Invoke-WingetAction 'install' $id $name $what @() $true @($uacHint)
+    if (-not $ok -and $script:lastWingetFail) {
+        $wf = $script:lastWingetFail
+        if ($wf.fail.cls -eq 'unknown') {
+            $wf.fail.can = (T '관리자 확인 창에서 허용하지 않았거나 이 계정에 관리자 권한이 없으면 설치되지 않습니다. 다시 시도하거나, 이 주소에서 설치 파일을 받아 직접 설치하세요: ' 'it is not installed when the administrator prompt was not allowed or this account has no administrator rights. Try again, or download the installer from this address and install it yourself: ') + $script:pkgs[$name].docs_url
+        }
+        Report-InstallFailure $name $wf.what $wf.fail $wf.out
+    }
+    return $ok
+}
+
 function Invoke-Action([string]$name, [string]$mode) {
     if ($name -eq 'venv') { return }                     # handled by the .venv step below
     if ($name -eq 'winget') { Install-Winget; return }
@@ -851,8 +905,8 @@ function Invoke-Action([string]$name, [string]$mode) {
         Set-Flag 'needs'
         return
     }
-    if ($mode -eq 'update' -and $name -eq 'git') {
-        Say 'ok' ('A-git') 'git' (T '이미 설치되어 있습니다. 관리자 권한이 필요할 수 있어 자동 업데이트는 하지 않습니다(필요하면 직접 업데이트하세요).' 'already installed. It may need administrator rights, so it is not updated automatically (update it yourself if you want).')
+    if ($mode -eq 'update' -and ($name -eq 'git' -or $name -eq 'node')) {
+        Say 'ok' ('A-' + $name) $name (T '이미 설치되어 있습니다. 관리자 권한이 필요할 수 있어 자동 업데이트는 하지 않습니다(필요하면 직접 업데이트하세요).' 'already installed. It may need administrator rights, so it is not updated automatically (update it yourself if you want).')
         return
     }
     $ok = $false
@@ -948,37 +1002,8 @@ function Invoke-Action([string]$name, [string]$mode) {
                 }
             }
         }
-        'git' {
-            # S10: Git for Windows comes through winget only (no official installer script).
-            # First the user-scope installer (--scope user), which needs no administrator rights.
-            # Only when that attempt fails for a reason of its own (class "unknown": no
-            # user-scope installer applies, or the installer itself failed) is the install tried
-            # once more without a scope. winget and the installer may then show the Windows
-            # administrator prompt (UAC) themselves; the S10-git line says so BEFORE that attempt.
-            # A policy block, a network problem, agreements that are not accepted and a timeout
-            # are not retried: another scope does not change them.
-            $gitId = $script:pkgs['git'].winget_id
-            $gitWhat = 'Git for Windows (winget ' + $gitId + ')'
-            $ok = Invoke-WingetAction 'install' $gitId 'git' $gitWhat @('--scope', 'user') $true
-            if (-not $ok -and $script:lastWingetFail) {
-                $wf = $script:lastWingetFail
-                if ($wf.fail.cls -eq 'unknown') {
-                    Add-Item 'S10-git' 'recommended' 'git' 'info' (T ('사용자 범위 설치가 되지 않았습니다(0x' + $wf.fail.hex + '). 범위를 정하지 않고 다시 시도합니다.') ('the user-scope install did not work (0x' + $wf.fail.hex + '). Trying again without a scope.')) `
-                        (T '관리자 확인 창(UAC)이 뜰 수 있습니다. 그 창은 다른 창 뒤에 숨을 수 있으니, 보이지 않으면 작업 표시줄에서 깜박이는 아이콘을 눌러 허용하세요' 'a Windows administrator prompt (UAC) may appear. It can hide behind other windows: if you do not see it, click the flashing icon on the taskbar and allow it')
-                    $uacHint = T '관리자 확인 창(UAC)에 답하지 않아 멈췄을 수 있습니다. 작업 표시줄에서 그 창을 찾아 허용한 뒤 다시 시도하세요.' 'it may have been waiting for the Windows administrator prompt (UAC). Find that window on the taskbar, allow it, then try again.'
-                    $ok = Invoke-WingetAction 'install' $gitId 'git' $gitWhat @() $true @($uacHint)
-                    if (-not $ok -and $script:lastWingetFail) {
-                        $wf = $script:lastWingetFail
-                        if ($wf.fail.cls -eq 'unknown') {
-                            $wf.fail.can = (T '관리자 확인 창에서 허용하지 않았거나 이 계정에 관리자 권한이 없으면 설치되지 않습니다. 다시 시도하거나, 이 주소에서 설치 파일을 받아 직접 설치하세요: ' 'it is not installed when the administrator prompt was not allowed or this account has no administrator rights. Try again, or download the installer from this address and install it yourself: ') + $script:pkgs['git'].docs_url
-                        }
-                        Report-InstallFailure 'git' $wf.what $wf.fail $wf.out
-                    }
-                } else {
-                    Report-InstallFailure 'git' $wf.what $wf.fail $wf.out
-                }
-            }
-        }
+        'git' { $ok = Install-UserScopeFirst 'git' 'Git for Windows' }
+        'node' { $ok = Install-UserScopeFirst 'node' 'Node.js' }
     }
     if ($ok) {
         $after = Get-App $name $script:sessionPath
@@ -1540,6 +1565,42 @@ if ($gitFound.where -eq 'none') {
     }
 }
 
+# S18 node ----------------------------------------------------------------------
+# Optional (level 선택 in packages.json): it is for what the user builds, not for gatekit. A
+# missing or an old Node.js is therefore info, never warn or fail (the setup skill offers an
+# install for those, and a first run must not ask about Node.js), and no exit flag is set.
+# The minimum is what the Playwright test runner accepts: the completion criterion of a task with
+# a screen starts `npx playwright test`. npx comes with npm, so npm is looked up too (on the PATH
+# only; it is not started).
+$nodeFound = Get-App 'node' $script:sessionPath
+$nodeApps = $nodeFound.apps
+$nodeLevel = Get-PkgLevel 'node'
+$script:pkgInfo['node'] = @{ where = $nodeFound.where; path = ''; version = '' }
+if ($nodeFound.where -eq 'none') {
+    Add-Item 'S18' $nodeLevel 'node' 'info' (T 'Node.js 가 없습니다(선택). gatekit 은 쓰지 않고, 만들 것이 Node.js 로 돌 때만 필요합니다.' 'Node.js not found (optional). gatekit does not use it; it is needed only when what you build runs on Node.js.') `
+        (T '만들 것의 실행 환경이 정해진 뒤, 필요할 때 묻고 허락하면 설치합니다 (-Install node)' 'asked about once the runtime of what you build is decided, and installed if you allow it (-Install node)')
+} elseif ($nodeFound.where -eq 'registry') {
+    Add-RestartItem 'S18' $nodeLevel 'node' $nodeApps[0].Source $false
+} else {
+    $np = Invoke-Proc $nodeApps[0].Source @('--version') 15
+    $nv = Get-VersionFrom $np.Out
+    $script:pkgInfo['node'] = @{ where = 'session'; path = $nodeApps[0].Source; version = $(if ($nv) { $nv.ToString() } else { '' }) }
+    $npmFound = Get-App 'npm' $script:sessionPath
+    if (-not $nv) {
+        Add-Item 'S18' $nodeLevel 'node' 'unverified' ((T '실행해서 버전을 읽지 못했습니다: ' 'could not run it to read the version: ') + $nodeApps[0].Source)
+    } elseif ($nv -lt $nodeMinimum) {
+        Add-Item 'S18' $nodeLevel 'node' 'info' ('node ' + $nv + ' < ' + $nodeMinimum + (T ' (Playwright 테스트 도구가 받는 최소 버전)' ' (the lowest version the Playwright test runner accepts)')) `
+            (T '만들 것이 Node.js 를 쓴다면, 설치한 방법에 맞춰 직접 업데이트하세요' 'if what you build uses Node.js, update it yourself the same way you installed it')
+    } elseif ($npmFound.where -eq 'registry') {
+        Add-RestartItem 'S18' $nodeLevel 'npm' $npmFound.apps[0].Source $false
+    } elseif ($npmFound.where -eq 'none') {
+        Add-Item 'S18' $nodeLevel 'node' 'info' ('node ' + $nv + (T '; npm 이 없어 npx 로 시작하는 명령은 실행되지 않습니다' '; npm is missing, so a command that starts with npx does not run')) `
+            ((T 'Node.js 를 설치한 방법으로 npm 도 설치하세요: ' 'install npm the same way you installed Node.js: ') + $script:pkgs['node'].docs_url)
+    } else {
+        Add-Item 'S18' $nodeLevel 'node' 'ok' ('node ' + $nv + (T ', npm 있음' ', npm present'))
+    }
+}
+
 # S19 package table (winget-managed programs) --------------------------------------
 # Parses `winget list --id <id> -e` without relying on the (localized) header: the data line
 # is the one that holds the id; the words after it are version, [available], [source].
@@ -1593,15 +1654,14 @@ function Get-PkgMethodText([string]$key, $info, [string]$wingetSource) {
     return (T '기타' 'other')
 }
 
-if ($script:pkgs.Count -ge 5) {
+if ($pkgKeysMissing.Count -eq 0) {
     $wingetOkForList = ($wingetFound.where -eq 'session' -and $script:agreementOk)
     $noListReason = T 'winget 약관 동의가 확인되지 않아 업데이트 조회를 하지 않았습니다' 'winget agreements are not confirmed, so the update lookup was not run'
     if ($wingetFound.where -eq 'none') { $noListReason = T 'winget 이 없어 업데이트 조회를 하지 않았습니다' 'winget is missing, so the update lookup was not run' }
-    foreach ($key in @('pwsh', 'uv', 'claude', 'git')) {
+    foreach ($key in @('pwsh', 'uv', 'claude', 'git', 'node')) {
         $pkg = $script:pkgs[$key]
         $info = $script:pkgInfo[$key]
-        $lvl = 'info'
-        if ($pkg.level -eq '필수') { $lvl = 'required' } elseif ($pkg.level -eq '권장') { $lvl = 'recommended' }
+        $lvl = Get-PkgLevel $key
         $rowName = (T '패키지 ' 'package ') + $key
         if (-not $info -or $info.where -eq 'none') {
             Add-Item ('P-' + $key) $lvl $rowName 'info' ((T '설치 안 됨' 'not installed') + ' (winget ' + $pkg.winget_id + ')')
@@ -1617,7 +1677,12 @@ if ($script:pkgs.Count -ge 5) {
         $upd = $noListReason
         $wsrc = ''
         $action = ''
-        if ($wingetOkForList) {
+        if ($lvl -eq 'info') {
+            # An optional program is not gatekit's to keep current: no winget lookup, and the row
+            # is info, so a newer Node.js is never a warn in a project that may not even use it.
+            $verdict = 'info'
+            $upd = T '선택 항목이라 업데이트 조회를 하지 않았습니다' 'optional, so the update lookup was not run'
+        } elseif ($wingetOkForList) {
             $wl = Get-WingetListInfo $pkg.winget_id
             $wsrc = $wl.source
             $mismatch = ''
@@ -1651,17 +1716,6 @@ if ($script:pkgs.Count -ge 5) {
     } else {
         Add-Item 'P-failures' 'info' (T '지난 실패 기록' 'recorded failures') 'ok' (T '없음' 'none')
     }
-}
-
-# S18 node (only with a package.json) ---------------------------------------------
-if (Test-Path -LiteralPath (Join-Path $projectRoot 'package.json')) {
-    $nodeText = T '없음' 'missing'
-    $npmText = T '없음' 'missing'
-    $nodeApp = Find-App 'node' $script:sessionPath
-    $npmApp = Find-App 'npm' $script:sessionPath
-    if ($nodeApp.Count -gt 0) { $nodeText = (Invoke-Proc $nodeApp[0].Source @('--version') 15).Out.Trim() }
-    if ($npmApp.Count -gt 0) { $npmText = (Invoke-Proc $npmApp[0].Source @('--version') 20).Out.Trim() }
-    Add-Item 'S18' 'info' 'node/npm' 'info' ('node ' + $nodeText + ', npm ' + $npmText + ' (' + (T 'gatekit 자체는 Node 가 필요 없고, 사용자 프로젝트 게이트용입니다' 'gatekit itself does not need Node; it is for your project gates') + ')')
 }
 
 # S23 python stub ---------------------------------------------------------------

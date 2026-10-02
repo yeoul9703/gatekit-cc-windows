@@ -29,6 +29,9 @@ send the user to `/gatekit-tasks`.
 for this step and the next. It holds the `gatekit-criterion` fence and its
 fields, the `gatekit-budget` fence, the screenshot criterion for UI tasks,
 and the rule that every criterion is run here before it is written in.
+It also holds the order to follow when a program an `argv` starts (`npx`,
+`node`, `npm`) is not installed: tell the user, ask, install through setup,
+run it again.
 
 Fill the template's YAML frontmatter block (`title`/`date`/`status`) along
 with the rest of `spec/05-gate.md`. Write one criterion per acceptance

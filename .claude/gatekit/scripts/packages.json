@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "note": "Single source for the programs setup.ps1 manages. setup.ps1 and docs/SETUP-REFERENCE.md must agree with this file (tests check it). level: 필수 / 권장 / 선택. appx_name / appx_preview_name: the Windows package names (Get-AppxPackage -Name) of the stable and the preview product; store_url: the Microsoft Store page.",
+  "note": "Single source for the programs setup.ps1 manages. setup.ps1 and docs/SETUP-REFERENCE.md must agree with this file (tests check it). level: 필수 / 권장 / 선택. appx_name / appx_preview_name: the Windows package names (Get-AppxPackage -Name) of the stable and the preview product; store_url: the Microsoft Store page. node is not used by gatekit itself: it is for what the user builds, and its min_version is the lowest Node.js the Playwright test runner accepts (the engines field of @playwright/test).",
   "python_min": "3.14",
   "packages": [
     {
@@ -69,6 +69,20 @@
       "admin_may_be_required": true,
       "official_script_url": null,
       "docs_url": "https://git-scm.com/download/win",
+      "appx_name": null,
+      "appx_preview_name": null,
+      "store_url": null
+    },
+    {
+      "key": "node",
+      "name_ko": "Node.js (LTS)",
+      "winget_id": "OpenJS.NodeJS.LTS",
+      "level": "선택",
+      "min_version": "20.0.0",
+      "installer_type": null,
+      "admin_may_be_required": true,
+      "official_script_url": null,
+      "docs_url": "https://nodejs.org/en/download",
       "appx_name": null,
       "appx_preview_name": null,
       "store_url": null

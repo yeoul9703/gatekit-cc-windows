@@ -25,6 +25,7 @@ gatekit이 쓰는 프로그램(winget, PowerShell 7, uv, Claude Code, Git, `.ven
 | `uv` | uv (Python 관리 도구) | `astral-sh.uv` | 필수 | 0.4.27 | - | 아니오 | https://astral.sh/uv/install.ps1 | https://docs.astral.sh/uv/getting-started/installation/ |
 | `claude` | Claude Code (claude 명령) | `Anthropic.ClaudeCode` | 권장 | 2.1.277 | - | 아니오 | https://claude.ai/install.ps1 | https://code.claude.com/docs/en/setup |
 | `git` | Git for Windows | `Git.Git` | 권장 | - | - | 사용자 범위 설치가 안 될 때만 필요할 수 있음 | 없음 | https://git-scm.com/download/win |
+| `node` | Node.js (LTS) | `OpenJS.NodeJS.LTS` | 선택 | 20.0.0 | - | 사용자 범위 설치가 안 될 때만 필요할 수 있음 | 없음 | https://nodejs.org/en/download |
 
 `.venv`(프로젝트 안의 Python 환경)는 프로그램이 아니라 폴더입니다. 5번을 보세요.
 gatekit이 쓰는 Python은 **3.14 이상**이고, uv가 알아서 받습니다.
@@ -218,6 +219,39 @@ setup(`S7`)은 이렇게 판정합니다. 권장 항목이라 어느 경우에�
 - 이미 있는 Git은 setup이 업데이트하거나 다시 설치하지 않습니다(`-Update git`은 알림만, `-Reinstall git`은 거부).
   위 명령으로 직접 하세요.
 
+### 2-5. Node.js (`node`, 선택)
+
+gatekit 자체는 Node.js를 쓰지 않습니다. 만들 것이 Node.js로 돌 때만 필요합니다. 그래서
+`/gatekit-setup`은 Node.js가 없어도 설치를 묻지 않습니다. 기획에서 무엇으로 만들지 정해진 뒤,
+완료 기준을 정할 때(`/gatekit-gate`) 필요하면 물어보고 허락을 받아 설치합니다.
+
+| 하고 싶은 것 | 명령 |
+|---|---|
+| 설치 | `winget install --id OpenJS.NodeJS.LTS -e --source winget --scope user` |
+| 사용자 범위 설치가 안 될 때 | `winget install --id OpenJS.NodeJS.LTS -e --source winget` (또는 https://nodejs.org/en/download 에서 설치 파일 받기) |
+| 업데이트 | `winget upgrade --id OpenJS.NodeJS.LTS -e` |
+| 버전 확인 | `node --version` |
+
+setup(`S18`)은 이렇게 판정합니다. 선택 항목이라 어느 경우에도 종료 코드를 바꾸지 않습니다.
+
+| 상태 | 판정(`S18`) | 알려 주는 것 |
+|---|---|---|
+| `node`와 `npm`이 이 창의 PATH에 있고 20.0.0 이상 | `ok` | 없음 |
+| 없음 | `info`(선택) | `-Install node`. 설치할지는 `/gatekit-gate`가 묻습니다 |
+| 20.0.0 미만 | `info` | 설치한 방법에 맞춰 직접 업데이트 |
+| `node`는 있는데 `npm`이 없음 | `info` | Node.js를 설치한 방법으로 npm도 설치 |
+| 설치돼 있지만 이 창의 PATH에 안 보임 | `warn` | Claude Code를 완전히 닫고 다시 열기 |
+
+- 최소 버전 20.0.0은 Playwright 테스트 도구(`@playwright/test`)가 받는 가장 낮은 Node.js입니다
+  (1.63.0의 `engines` 값 `>=20`, 2026-10-02 확인). 화면이 있는 작업의 완료 기준이 `npx playwright test`로 돌기 때문입니다.
+- `-Install node`는 Git과 같은 순서로 합니다(2-4의 표). 사용자 범위로 먼저 설치하고, 안 되면
+  관리자 확인 창을 먼저 알린 뒤(`S10-node`) 범위 없이 한 번 더 설치합니다. 실패는 `S16-node`로 알립니다.
+- 이미 있는 Node.js는 setup이 업데이트하거나 다시 설치하지 않습니다(`-Update node`는 알림만, `-Reinstall node`는 거부).
+  프로그램 표의 `node` 줄도 설치된 버전만 보여 주고, 더 새 버전이 있는지는 조회하지 않습니다.
+- 프로젝트 폴더 안에 설치되는 것(`@playwright/test`, 브라우저, `npm install`로 받는 것)은 setup이 설치하지 않습니다.
+- 사용자 범위 설치가 끝난 뒤 `npm`과 `npx`까지 보이는지는 Node.js가 없는 PC에서 아직 확인하지 못했습니다.
+  winget이 `--scope user`에 압축 파일 방식(portable)의 설치 프로그램을 고르는 것까지만 확인했습니다(2026-10-02).
+
 ## 3. setup 스위치
 
 같은 일을 두 가지 방법으로 할 수 있습니다: 채팅(`/gatekit-setup`), 스크립트 직접 실행.
@@ -226,8 +260,8 @@ setup(`S7`)은 이렇게 판정합니다. 권장 항목이라 어느 경우에�
 |---|---|
 | 점검만(아무것도 설치 안 함) | (없음) |
 | 프로그램 표·실패 기록만 보기 | `-Status` |
-| 설치 | `-Install winget,pwsh,uv,claude,git,venv` |
-| 업데이트 | `-Update pwsh,uv,claude,git` |
+| 설치 | `-Install winget,pwsh,uv,claude,git,node,venv` |
+| 업데이트 | `-Update pwsh,uv,claude,git,node` |
 | 재설치 | `-Reinstall uv,pwsh,claude` |
 | 지난 실패만 다시 시도 | `-RetryFailed` |
 | JSON 출력(ASCII) | `-Json` |
@@ -261,6 +295,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .claude/gatekit/scripts/setu
 
 Git도 권장 항목이라 없거나 이 창에서 안 보여도 종료 코드가 바뀌지 않습니다. 허락받은
 `-Install git`이 실패했을 때만 그 실패의 종료 코드가 나옵니다(2-4 참고).
+
+Node.js는 선택 항목이라 없거나 버전이 낮아도 종료 코드가 바뀌지 않습니다. 허락받은
+`-Install node`가 실패했을 때만 그 실패의 종료 코드가 나옵니다(2-5 참고).
 
 종료 코드 3에서 "완전히 닫는다"는 것은 프로그램을 끝내는 것입니다. Claude 데스크톱 앱은 창의 X를 눌러도
 끝나지 않고 작업 표시줄 오른쪽 아래(트레이)에 남습니다. 남아 있는 앱은 시작할 때의 PATH를 그대로 쓰기 때문에

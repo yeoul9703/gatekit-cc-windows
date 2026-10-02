@@ -33,9 +33,27 @@ class TestPackagesFile(unittest.TestCase):
         self.assertIn('requires-python = ">=%s"' % wanted,
                       (kit / "pyproject.toml").read_text(encoding="utf-8"))
 
-    def test_the_five_managed_packages_have_every_field(self) -> None:
+    def test_the_file_holds_every_key_setup_reads_and_setup_installs_every_entry(self) -> None:
+        # Not a count: an entry may be added or taken out. What must hold is that setup.ps1 finds
+        # every key it reads, and that every entry is a name -Install accepts.
+        keys = [p["key"] for p in load()["packages"]]
+        self.assertEqual(len(keys), len(set(keys)), keys)
+        text = (SCRIPTS / "setup.ps1").read_bytes().decode("utf-8-sig")
+        needed = re.search(r"\$pkgKeysNeeded = @\(([^)]*)\)", text)
+        allowed = re.search(r"\$allowed = @\(([^)]*)\)", text)
+        assert needed is not None and allowed is not None
+        needed_keys = re.findall(r"'(\w+)'", needed.group(1))
+        self.assertTrue(needed_keys)
+        for key in needed_keys:
+            self.assertIn(key, keys, "setup.ps1 reads packages.json entry %r" % key)
+        for key in keys:
+            self.assertIn(key, re.findall(r"'(\w+)'", allowed.group(1)), key)
+        for key in re.findall(r"\$script:pkgs\['(\w+)'\]", text):
+            self.assertIn(key, needed_keys, "setup.ps1 reads %r without checking that it is there" % key)
+        self.assertNotRegex(text, r"\$script:pkgs\.Count")  # the count that broke on an added entry
+
+    def test_every_managed_package_has_every_field(self) -> None:
         packages = {p["key"]: p for p in load()["packages"]}
-        self.assertEqual(sorted(packages), ["claude", "git", "pwsh", "uv", "winget"])
         for key, pkg in packages.items():
             self.assertEqual(sorted(pkg), sorted(FIELDS), key)
             self.assertRegex(pkg["winget_id"], r"^[A-Za-z0-9]+[.-][A-Za-z0-9.-]+$")
@@ -64,6 +82,10 @@ class TestPackagesFile(unittest.TestCase):
         self.assertTrue(packages["git"]["admin_may_be_required"])  # only when the user scope fails
         self.assertEqual(packages["winget"]["level"], "권장")
         self.assertFalse(packages["winget"]["admin_may_be_required"])
+        self.assertEqual(packages["node"]["level"], "선택")  # for what the user builds, not for gatekit
+        self.assertIsNone(packages["node"]["official_script_url"])  # winget only, like git
+        self.assertTrue(packages["node"]["admin_may_be_required"])  # only when the user scope fails
+        self.assertIsNotNone(packages["node"]["min_version"])  # what the Playwright test runner accepts
 
     def test_product_names_that_tell_stable_from_preview(self) -> None:
         # The stable PowerShell 7 and the preview build are different Windows packages.
@@ -72,7 +94,7 @@ class TestPackagesFile(unittest.TestCase):
         self.assertEqual(packages["pwsh"]["appx_preview_name"], "Microsoft.PowerShellPreview")
         self.assertEqual(packages["winget"]["appx_name"], "Microsoft.DesktopAppInstaller")
         self.assertEqual(packages["winget"]["store_url"], "https://apps.microsoft.com/detail/9nblggh4nns1")
-        for key in ("uv", "claude", "git"):
+        for key in ("uv", "claude", "git", "node"):
             self.assertIsNone(packages[key]["appx_name"], key)
 
     def test_setup_ps1_hard_codes_none_of_the_ids_or_urls(self) -> None:
@@ -127,6 +149,25 @@ class TestSetupReadsPackages(SetupCase):
         self.assertEqual(code, 1, out)
         self.assertIn("packages.json", out)
 
+    def test_an_added_entry_changes_nothing_and_a_missing_one_is_named(self) -> None:
+        path = self.kit / "scripts" / "packages.json"
+        data = json.loads(path.read_text(encoding="utf-8"))
+        extra = dict(data["packages"][-1], key="extra", winget_id="Test.Extra")
+        data["packages"].append(extra)
+        path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        code, _, by_id = self.run_json("-Status", "-Lang", "en")
+        self.assertNotIn("args", by_id)  # the file was read: no "could not read packages.json"
+        self.assertNotEqual(code, 1, by_id)
+        self.assertIn("P-uv", by_id)  # and the package table is still there
+        self.assertNotIn("P-extra", by_id)
+        data["packages"] = [p for p in data["packages"] if p["key"] not in ("git", "node")]
+        path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        code, _, by_id = self.run_json("-Status", "-Lang", "en")
+        self.assertEqual(code, 1, by_id)
+        self.assertEqual(by_id["args"]["verdict"], "fail")
+        self.assertIn("missing entries: git, node", by_id["args"]["detail"])
+        self.assertIn(".claude/gatekit/scripts/packages.json", by_id["args"]["action"])
+
     def test_minimum_versions_come_from_the_file(self) -> None:
         self.edit("uv", min_version="99.0.0")
         self.fake_uv()
@@ -142,10 +183,24 @@ class TestSetupReadsPackages(SetupCase):
         self.assertEqual(by_id["S6"]["level"], "recommended")
         self.assertIn("9.0.0", by_id["S6"]["detail"])
 
+    def test_node_id_and_minimum_come_from_the_file(self) -> None:
+        self.edit("node", winget_id="Test.Node", min_version="99.0.0")
+        fakebin.make_fake(self.bin, "node", "print('v24.19.0')\n")
+        fakebin.make_fake(self.bin, "npm", "print('11.6.0')\n")
+        _, _, by_id = self.run_json("-Status", "-Lang", "en")
+        self.assertEqual(by_id["S18"]["verdict"], "info", by_id["S18"])
+        self.assertIn("24.19.0 < 99.0.0", by_id["S18"]["detail"])
+        (self.bin / "node.cmd").unlink()
+        self.fake_winget(0)
+        self.run_setup("-Install", "node", "-Lang", "en")
+        self.assertIn("--id Test.Node", self.installs()[0])
+        self.assertNotIn("OpenJS", " ".join(self.calls()))
+
     def test_the_package_row_level_comes_from_the_file(self) -> None:
         _, _, by_id = self.run_json("-Lang", "en")
         self.assertEqual(by_id["P-claude"]["level"], "recommended")
         self.assertEqual(by_id["P-uv"]["level"], "required")
+        self.assertEqual(by_id["P-node"]["level"], "info")  # 선택
         self.edit("claude", level="필수")
         _, _, by_id = self.run_json("-Lang", "en")
         self.assertEqual(by_id["P-claude"]["level"], "required")

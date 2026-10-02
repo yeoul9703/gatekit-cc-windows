@@ -18,8 +18,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .claude/gatekit/scripts/setu
 |---|---|---|---|
 | check only | (none) | — | none |
 | program table and failure record only | `-Status` | — | none; nothing changes |
-| install | `-Install` | `winget`, `pwsh`, `uv`, `claude`, `git`, `venv` | yes in the chat |
-| update | `-Update` | `pwsh`, `uv`, `claude`, `git` (`git` is only reported, never updated) | yes in the chat |
+| install | `-Install` | `winget`, `pwsh`, `uv`, `claude`, `git`, `node`, `venv` | yes in the chat |
+| update | `-Update` | `pwsh`, `uv`, `claude`, `git`, `node` (`git` and `node` are only reported, never updated) | yes in the chat |
 | reinstall | `-Reinstall` | `uv`, `pwsh`, `claude` | a separate yes |
 | retry recorded failures | `-RetryFailed` | — | a separate yes |
 
