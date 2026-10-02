@@ -99,9 +99,11 @@ task carries at least one gate — an argv list, run without a shell, that
 fails when the task is not done — and that file covers what makes one
 trustworthy (verify it runs before writing it in; a gate that always passes
 manufactures false evidence), which runners need glob patterns rather than
-directories, and the two gates added by default: the **token gate** when
-`spec/tokens.json` exists, and the **screenshot criterion** on every task
-that renders a screen.
+directories, and the one gate added by default: the **token gate** when
+`spec/tokens.json` exists. The **screenshot criterion** for a task that
+renders a screen is not a gate written here: `/gatekit-gate` derives it, and
+`task-gates.md` says what this step does to make it possible (a stable,
+unique task id).
 
 ## Step 5 — show the shape, then write spec/04-tasks.md
 

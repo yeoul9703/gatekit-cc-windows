@@ -86,10 +86,12 @@ Headings verbatim from `headings` in `heading-map.json`.
 
 Machine-readable values grouped by kind. If the file exists already (a
 prior run, or `/gatekit-design`), **merge** rather than overwrite — add
-token names and append to `source`:
+token names, append to `source`, and keep every `patterns` row already
+there. Written as version 2, where `source` is a list; an existing version 1
+file (`source` a single string) is written back in this shape:
 
 ```json
-{"version": 1, "source": "<figma url or file path>",
+{"version": 2, "source": ["<figma url or file path>"], "patterns": [],
  "color": {"primary": "#000000"}, "space": {"md": "16px"}}
 ```
 

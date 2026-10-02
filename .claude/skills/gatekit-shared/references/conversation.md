@@ -8,7 +8,10 @@ command file names the *subject* its conversation pursues; the rules for
 
 `.claude/skills/gatekit-shared/references/questioning.md` still applies in full: it holds the stop signals,
 the rule against asking what is already knowable, and the question-window
-budget, and this file does not repeat them. This file is the only place
+budget, and this file does not repeat them. That budget is
+`/gatekit-interview`'s alone and counts `AskUserQuestion` calls; "no question
+ceiling" here is about the plain-chat questions of the conversation, which
+are not calls and are not counted. This file is the only place
 that says what a free-ranging conversation looks like in practice, written
 after real trials found specific ways it goes wrong.
 
@@ -62,7 +65,8 @@ arrives, which always wins immediately regardless of how little has been
 asked.
 
 **There is no maximum and no number to aim for.** Nothing caps how long the
-conversation runs or how many distinct facts it surfaces. Any count a
+conversation runs, how many plain-chat questions it asks, or how many
+distinct facts it surfaces. Any count a
 command records afterwards is a floor for catching a rushed conversation
 after the fact, never a target to reach and stop at. If a topic keeps
 yielding new, concrete, checkable facts, keep asking about it regardless of

@@ -2,7 +2,8 @@
 
 Read by `/gatekit-tasks` Step 4. Every task in `spec/04-tasks.md` carries
 at least one gate; this file says what makes a gate trustworthy, which
-runners need glob patterns, and the two gates added by default.
+runners need glob patterns, the token gate added by default, and what this
+step does so that `/gatekit-gate` can derive the screenshot criterion.
 
 ## Step 4 — write gates
 

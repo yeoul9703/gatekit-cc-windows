@@ -20,7 +20,8 @@ Write the draft before asking anything beyond the opening probe. A draft with
 labelled assumptions is easier to correct than an empty form is to fill. People
 react well to a concrete wrong answer and badly to an interrogation.
 
-Order: one open probe → draft → at most two `AskUserQuestion` calls → confirm.
+Order: one open probe → draft → `AskUserQuestion` calls (at most two free in
+`/gatekit-interview`, see the budget below) → confirm.
 
 ## The one open probe
 
@@ -44,7 +45,12 @@ own, external constraints, and what "done" means to them.
 
 ## AskUserQuestion budget
 
-- **2** calls per interview are free. The question gate counts them.
+- **2** calls are free in `/gatekit-interview`
+  (`questions.interview_max_calls`), and only there: the question gate
+  budgets no other skill and records none of the signals below for it. How
+  many calls another skill makes is written in its own SKILL.md.
+- The budget counts `AskUserQuestion` calls. A question asked in plain chat
+  is not a call and is never counted.
 - At most **4** options per question.
 - Each option needs a label and a description in the detected output language.
 - Never list `AskUserQuestion` in a command's `allowed-tools`. Doing so
@@ -80,7 +86,8 @@ every place in the document that leans on it gets the inline marker:
 ```
 
 The inline number and the table row number must match. `spec validate` fails on
-a mismatch, in either direction.
+an inline marker with no ledger row, and warns on a ledger row with no inline
+marker.
 
 ## Stop signals
 
@@ -120,7 +127,8 @@ You are over-questioning if any of these is true. Stop and draft.
 - You have already asked about this topic in this session.
 - The question is a preference the user has no strong stake in.
 - Either possible answer leads you to write the same thing.
-- You have asked two `AskUserQuestion` calls and cannot justify a third.
+- In `/gatekit-interview`, you have asked two `AskUserQuestion` calls and
+  cannot justify a third.
 - **The question asks the user to arbitrate a choice you are better placed to
   make.** Decide, act, and show them the result to correct. "Which of these
   three implementations?" spends their attention on your judgement. The
