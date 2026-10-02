@@ -124,12 +124,16 @@ def base_env(bin_dir: pathlib.Path, local_app: pathlib.Path) -> dict:
     """A scratch environment: only the fakes on PATH, no inherited policy
     override (PSExecutionPolicyPreference is deliberately absent). The PowerShell 7
     package lookup answers "none" (an empty value would count as not set and ask this
-    machine), and without ProgramFiles the MSI folder is not looked at either."""
+    machine), and without ProgramFiles the MSI folder is not looked at either. The group
+    policy execution policy and the long-path registry value are pinned too, so a test does
+    not depend on how this machine is configured."""
     return {"SystemRoot": os.environ.get("SystemRoot", r"C:\Windows"),
             "PATH": str(bin_dir), "PATHEXT": ".EXE;.CMD",
             "LOCALAPPDATA": str(local_app),
             "GATEKIT_SETUP_KEEP_PATH": "1",
-            "GATEKIT_SETUP_PWSH_PACKAGES": "none"}
+            "GATEKIT_SETUP_PWSH_PACKAGES": "none",
+            "GATEKIT_SETUP_EXECUTION_POLICY": "MachinePolicy=Undefined;UserPolicy=Undefined",
+            "GATEKIT_SETUP_LONG_PATHS": "0"}
 
 
 #: Program and product names that may appear inside a Korean line.
@@ -705,10 +709,25 @@ class TestSetupPwshProduct(SetupCase):
             self.assertEqual(english_sentence_lines(out), [], out)
 
     def test_the_lookup_names_come_from_packages_json(self) -> None:
-        text = (SCRIPTS / "setup.ps1").read_bytes().decode("utf-8-sig")
-        self.assertIn("Get-AppxPackage -Name $slot[1]", text)
-        self.assertIn("GATEKIT_SETUP_PWSH_PACKAGES", text)
-        self.assertNotIn("Microsoft.PowerShell", text)  # appx_name / appx_preview_name
+        # The lookup lives in common.ps1 (shared with session-check.ps1); no script hard-codes a name.
+        common = (SCRIPTS / "common.ps1").read_bytes().decode("utf-8-sig")
+        self.assertIn("Get-AppxPackage -Name $slot[1]", common)
+        self.assertIn("GATEKIT_SETUP_PWSH_PACKAGES", common)
+        for name in ("common.ps1", "setup.ps1", "session-check.ps1"):
+            text = (SCRIPTS / name).read_bytes().decode("utf-8-sig")
+            self.assertNotIn("Microsoft.PowerShell", text, name)  # appx_name / appx_preview_name
+
+    def test_the_product_rule_is_defined_once_in_common_ps1(self) -> None:
+        common = (SCRIPTS / "common.ps1").read_bytes().decode("utf-8-sig")
+        for func in ("ConvertTo-Version3", "Get-PwshPackages", "Get-PwshMsi", "Get-PwshProduct",
+                     "Get-PwshFileKind"):
+            self.assertEqual(common.count("function %s(" % func) + common.count("function %s {" % func), 1, func)
+            for name in ("setup.ps1", "session-check.ps1"):
+                text = (SCRIPTS / name).read_bytes().decode("utf-8-sig")
+                self.assertNotIn("function " + func, text, "%s defines %s again" % (name, func))
+        for name in ("setup.ps1", "session-check.ps1"):
+            text = (SCRIPTS / name).read_bytes().decode("utf-8-sig")
+            self.assertIn("Get-PwshProduct ", text, name)
 
 
 #: A stand-in for the two winget install steps (GATEKIT_SETUP_WINGET_RUNNER). It logs
@@ -829,6 +848,28 @@ class TestSetupInstallWinget(SetupCase):
         self.assertEqual(self.steps(), ["wingetstep register " + self.FAMILY])
         self.assertIn("winget install", by_id["retry"]["detail"])
         self.assertEqual(self.records(), [])
+
+    def test_a_failed_winget_install_is_named_as_the_cause_of_the_pwsh_failure(self) -> None:
+        code, _, by_id = self.run_json("-Install", "winget,pwsh", "-Lang", "en", env=self.runner(""))
+        item = by_id["S16-pwsh"]
+        self.assertEqual(item["verdict"], "fail", item)
+        self.assertIn("the winget install failed, so PowerShell 7 could not be installed", item["detail"])
+        self.assertNotIn("-Install winget", item["action"])  # that is what just failed
+        self.assertIn("winget install line above", item["action"])
+        self.assertEqual(code, 2)
+        classes = {r["item"]: r["class"] for r in self.records()}
+        self.assertEqual(classes, {"winget": "store", "pwsh": "winget-failed"})
+
+    def test_pwsh_without_a_winget_attempt_still_offers_the_winget_install(self) -> None:
+        _, _, by_id = self.run_json("-Install", "pwsh", "-Lang", "en")
+        self.assertIn("winget is missing", by_id["S16-pwsh"]["detail"])
+        self.assertIn("-Install winget", by_id["S16-pwsh"]["action"])
+
+    def test_a_failed_winget_install_then_pwsh_has_no_english_sentence_in_korean(self) -> None:
+        _, out = self.run_setup("-Install", "winget,pwsh", "-Lang", "ko", env=self.runner(""))
+        self.assertIn("winget 설치가 실패해서 PowerShell 7 을(를) 설치하지 못했습니다", out)
+        self.assertNotIn("먼저 winget 설치를 허락", out)
+        self.assertEqual(english_sentence_lines(out), [], out)
 
     def test_lang_ko_has_no_english_sentence(self) -> None:
         for create_on in ("", "repair"):  # the failing run first: the second one creates winget
@@ -1024,6 +1065,338 @@ class TestSetupExecutionPolicy(SetupCase):
         code, out = self.run_setup("-Lang", "en")
         self.assertEqual(code, 2, out)
         self.assertNotIn("cannot be loaded", out)
+
+
+@unittest.skipUnless(POWERSHELL.is_file(), "Windows PowerShell 5.1 not available")
+class TestSetupRestoreAdvice(SetupCase):
+    """A missing kit file: `git checkout` only when Git is on PATH; otherwise (a zip download)
+    download the repository again and overwrite the file."""
+
+    def settings_action(self, lang: str = "en") -> str:
+        (self.root / ".claude" / "settings.json").unlink(missing_ok=True)
+        _, _, by_id = self.run_json("-Lang", lang)
+        self.assertEqual(by_id["S12-settings"]["verdict"], "fail", by_id["S12-settings"])
+        return by_id["S12-settings"]["action"]
+
+    def test_without_git_the_advice_is_to_download_again(self) -> None:
+        action = self.settings_action()
+        self.assertIn("download the repository again and overwrite that file", action)
+        self.assertIn(".claude/settings.json", action)
+        self.assertNotIn("git checkout", action)
+        self.assertIn("저장소를 다시 내려받아 그 파일을 덮어쓰세요", self.settings_action("ko"))
+
+    def test_with_git_the_advice_is_git_checkout(self) -> None:
+        fakebin.make_fake(self.bin, "git", "print('git version 2.54.0')\n")
+        action = self.settings_action()
+        self.assertIn("git checkout .claude/settings.json", action)
+        self.assertNotIn("download the repository again", action)
+
+    def test_broken_settings_and_packages_json_use_the_same_advice(self) -> None:
+        (self.root / ".claude" / "settings.json").write_text("{not json", encoding="utf-8")
+        _, _, by_id = self.run_json("-Lang", "en")
+        self.assertIn("download the repository again", by_id["S12-settings"]["action"])
+        (self.kit / "scripts" / "packages.json").write_text("{not json", encoding="utf-8")
+        code, _, by_id = self.run_json("-Lang", "en")
+        self.assertEqual(code, 1)
+        self.assertIn("download the repository again", by_id["args"]["action"])
+        self.assertIn(".claude/gatekit/scripts/packages.json", by_id["args"]["action"])
+        fakebin.make_fake(self.bin, "git", "print('git version 2.54.0')\n")
+        _, _, by_id = self.run_json("-Lang", "en")
+        self.assertIn("git checkout .claude/gatekit/scripts/packages.json", by_id["args"]["action"])
+
+    def test_unreadable_common_ps1_names_both_ways(self) -> None:
+        # No shared function exists at that point, so Git cannot be looked up: both are printed.
+        (self.kit / "scripts" / "common.ps1").unlink()
+        for lang, without in (("en", "without Git: download the repository again"),
+                              ("ko", "Git 이 없으면: 저장소를 다시 내려받아")):
+            code, out = self.run_setup("-Lang", lang)
+            self.assertEqual(code, 1, out)
+            self.assertIn("git checkout .claude/gatekit/scripts/common.ps1", out)
+            self.assertIn(without, out)
+        code, out = self.run_setup("-Json", "-Lang", "ko")
+        out.encode("ascii")
+        data = json.loads(out)
+        self.assertEqual((code, data["exit_code"]), (1, 1))
+        self.assertEqual(len(data["items"][0]["hints"]), 2)
+
+    def test_korean_lines_have_no_english_sentence(self) -> None:
+        (self.root / ".claude" / "settings.json").unlink()
+        _, out = self.run_setup("-Lang", "ko")
+        self.assertEqual(english_sentence_lines(out), [], out)
+
+
+@unittest.skipUnless(POWERSHELL.is_file(), "Windows PowerShell 5.1 not available")
+class TestSetupPathLength(SetupCase):
+    """S17: project folder + the longest relative path inside it against the 259 character limit."""
+
+    def constants(self) -> tuple:
+        text = (SCRIPTS / "setup.ps1").read_bytes().decode("utf-8-sig")
+        found = []
+        for name in ("longestTrackedPath", "longestVenvPath", "pathLimit"):
+            match = re.search(r"^\$%s = (\d+)\s*$" % name, text, re.M)
+            assert match is not None, name
+            found.append(int(match.group(1)))
+        return tuple(found)
+
+    def use_root(self, root: pathlib.Path) -> None:
+        """Move the scratch kit under *root*; later runs start setup.ps1 from there."""
+        shutil.copytree(self.root / ".claude", root / ".claude")
+        self.kit = root / ".claude" / "gatekit"
+
+    def long_root(self, total: int) -> pathlib.Path:
+        """A folder under the scratch root whose full path is exactly *total* characters."""
+        base = self.root / "deep"
+        pad = total - len(str(base)) - 1
+        self.assertGreater(pad, 0, "the temp folder itself is too long for this test")
+        root = base / ("p" * pad)
+        root.mkdir(parents=True)
+        self.assertEqual(len(str(root)), total)
+        return root
+
+    def s17(self, root: pathlib.Path, **env) -> dict:
+        self.use_root(root)
+        _, _, by_id = self.run_json("-Lang", "en", env=env)
+        return by_id["S17"]
+
+    def test_the_limit_is_259_characters(self) -> None:
+        tracked, venv, limit = self.constants()
+        self.assertEqual(limit, 259)  # MAX_PATH is 260 including the closing NUL
+        self.assertGreaterEqual(min(tracked, venv), 50)
+
+    def test_short_root_is_ok_and_shows_the_sum(self) -> None:
+        tracked, venv, limit = self.constants()
+        root = self.root / "short"
+        item = self.s17(root)
+        self.assertEqual(item["verdict"], "ok", item)
+        total = len(str(root)) + 1 + max(tracked, venv)
+        self.assertIn("%d characters to the longest file, limit %d" % (total, limit), item["detail"])
+
+    def test_root_far_below_200_characters_already_warns(self) -> None:
+        # The old rule only warned above 200 characters. The first root that does not fit:
+        tracked, venv, limit = self.constants()
+        first_bad = limit - max(tracked, venv)  # root + 1 + longest = limit + 1
+        self.assertLess(first_bad, 200)
+        item = self.s17(self.long_root(first_bad))
+        self.assertEqual(item["verdict"], "warn", item)
+        self.assertIn("is %d characters" % (limit + 1), item["detail"])
+        self.assertIn("shorter folder", item["action"])
+
+    def test_the_longest_root_that_fits_is_ok(self) -> None:
+        tracked, venv, limit = self.constants()
+        item = self.s17(self.long_root(limit - max(tracked, venv) - 1))
+        self.assertEqual(item["verdict"], "ok", item)
+
+    def test_long_paths_enabled_means_no_warning(self) -> None:
+        tracked, venv, limit = self.constants()
+        item = self.s17(self.long_root(limit - max(tracked, venv)), GATEKIT_SETUP_LONG_PATHS="1")
+        self.assertEqual(item["verdict"], "ok", item)
+        self.assertIn("LongPathsEnabled = 1", item["detail"])
+
+    def test_the_script_only_reads_and_never_unblocks(self) -> None:
+        text = (SCRIPTS / "setup.ps1").read_bytes().decode("utf-8-sig")
+        self.assertIn("-Name 'LongPathsEnabled'", text)
+        for line in text.splitlines():
+            if line.lstrip().startswith("#"):
+                continue
+            for writer in ("Set-ItemProperty", "New-ItemProperty", "Set-ExecutionPolicy", "reg add"):
+                self.assertNotIn(writer, line)
+            if "Unblock-File" in line:  # only as text printed for the user, never as a command
+                self.assertIn(r"'Get-ChildItem .claude\gatekit\scripts\*.ps1 | Unblock-File'", line)
+
+    def test_no_tracked_file_is_longer_than_the_constant(self) -> None:
+        git = shutil.which("git")
+        if not git or not (PROJECT / ".git").exists():
+            self.skipTest("needs git and a checkout")
+        listed = subprocess.run([git, "-C", str(PROJECT), "ls-files"], capture_output=True, timeout=60)
+        longest = max(len(line) for line in listed.stdout.decode("utf-8", "replace").splitlines())
+        self.assertLessEqual(longest, self.constants()[0],
+                             "a tracked path grew: measure again and raise $longestTrackedPath in setup.ps1")
+
+    def test_korean_lines_have_no_english_sentence(self) -> None:
+        tracked, venv, limit = self.constants()
+        self.use_root(self.long_root(limit - max(tracked, venv)))
+        out = ""
+        for long_paths in ("0", "1"):
+            _, out = self.run_setup("-Lang", "ko", env={"GATEKIT_SETUP_LONG_PATHS": long_paths})
+            self.assertEqual(english_sentence_lines(out), [], out)
+        self.assertIn("LongPathsEnabled = 1", out)
+
+
+@unittest.skipUnless(POWERSHELL.is_file(), "Windows PowerShell 5.1 not available")
+class TestSetupGroupPolicyExecutionPolicy(SetupCase):
+    """S20: a group policy that pins the execution policy beats the hooks' -ExecutionPolicy Bypass."""
+
+    def s20(self, value: str):
+        code, _, by_id = self.run_json("-Lang", "en", env={"GATEKIT_SETUP_EXECUTION_POLICY": value})
+        return code, by_id["S20"]
+
+    def test_all_signed_or_restricted_is_a_policy_block_exit_4(self) -> None:
+        for value, scope in (("MachinePolicy=AllSigned", "MachinePolicy"),
+                             ("MachinePolicy=Restricted;UserPolicy=Undefined", "MachinePolicy"),
+                             ("UserPolicy=AllSigned", "UserPolicy"),
+                             ("MachinePolicy=Undefined;UserPolicy=Restricted", "UserPolicy")):
+            with self.subTest(value=value):
+                code, item = self.s20(value)
+                self.assertEqual(item["verdict"], "fail", item)
+                self.assertEqual(item["level"], "required")
+                self.assertEqual(code, 4)  # beats the exit 2 of the missing uv
+                self.assertIn("-ExecutionPolicy Bypass", item["detail"])
+                self.assertIn("Do not work around the policy", item["action"])
+                self.assertEqual(len(item["hints"]), 1)
+                self.assertIn("Message for your IT contact", item["hints"][0])
+                self.assertIn("(%s)" % scope, item["hints"][0])
+
+    def test_machine_policy_wins_over_user_policy(self) -> None:
+        code, item = self.s20("MachinePolicy=RemoteSigned;UserPolicy=AllSigned")
+        self.assertEqual(item["verdict"], "ok", item)
+        self.assertIn("RemoteSigned", item["detail"])
+        self.assertEqual(code, 2)
+
+    def test_no_group_policy_is_ok(self) -> None:
+        for value in ("MachinePolicy=Undefined;UserPolicy=Undefined", "MachinePolicy=Unrestricted",
+                      "UserPolicy=Bypass"):
+            with self.subTest(value=value):
+                code, item = self.s20(value)
+                self.assertEqual(item["verdict"], "ok", item)
+                self.assertEqual(code, 2)
+
+    def test_without_the_hook_the_real_policy_of_this_pc_is_read(self) -> None:
+        # An empty value counts as not set: Get-ExecutionPolicy -List answers (read-only).
+        _, item = self.s20("")
+        self.assertIn(item["verdict"], ("ok", "fail"), item)
+        self.assertIn("MachinePolicy=", item["detail"])
+        self.assertIn("Get-ExecutionPolicy -List",
+                      (SCRIPTS / "setup.ps1").read_bytes().decode("utf-8-sig"))
+
+    def test_korean_lines_have_no_english_sentence(self) -> None:
+        for value in ("MachinePolicy=AllSigned", "UserPolicy=RemoteSigned", "UserPolicy=Undefined"):
+            _, out = self.run_setup("-Lang", "ko", env={"GATEKIT_SETUP_EXECUTION_POLICY": value})
+            self.assertEqual(english_sentence_lines(out), [], out)
+
+
+@unittest.skipUnless(POWERSHELL.is_file(), "Windows PowerShell 5.1 not available")
+class TestSetupInternetMark(SetupCase):
+    """S8 looks at every scripts/*.ps1, names the marked files and prints the Unblock-File line."""
+
+    UNBLOCK = r"Get-ChildItem .claude\gatekit\scripts\*.ps1 | Unblock-File"
+
+    def setUp(self) -> None:
+        super().setUp()
+        for name in ("session-check.ps1", "verify.ps1"):
+            shutil.copy(SCRIPTS / name, self.kit / "scripts" / name)
+
+    def mark(self, name: str) -> str:
+        stream = str(self.kit / "scripts" / name) + ":Zone.Identifier"
+        try:
+            with open(stream, "w", encoding="ascii") as handle:
+                handle.write("[ZoneTransfer]\nZoneId=3\n")
+        except OSError:
+            self.skipTest("this file system has no alternate data streams")
+        return stream
+
+    def test_no_mark_is_ok_and_counts_all_four_scripts(self) -> None:
+        _, _, by_id = self.run_json("-Lang", "en")
+        self.assertEqual(by_id["S8"]["verdict"], "ok", by_id["S8"])
+        self.assertIn("4 .ps1 files", by_id["S8"]["detail"])
+        self.assertEqual(by_id["S8"]["hints"], [])
+
+    def test_a_mark_on_another_script_is_named_with_the_unblock_command(self) -> None:
+        for name in ("session-check.ps1", "common.ps1", "verify.ps1"):
+            self.mark(name)
+        _, _, by_id = self.run_json("-Lang", "en")
+        item = by_id["S8"]
+        self.assertEqual(item["verdict"], "info", item)  # Bypass still runs them
+        self.assertIn("common.ps1, session-check.ps1, verify.ps1", item["detail"])
+        self.assertNotIn("setup.ps1", item["detail"])
+        self.assertEqual(len(item["hints"]), 2)
+        self.assertEqual(item["hints"][1], self.UNBLOCK)
+
+    def test_the_mark_is_never_removed_by_the_script(self) -> None:
+        stream = self.mark("setup.ps1")
+        self.run_setup("-Lang", "en")
+        self.run_setup("-Install", "uv,venv", "-Lang", "en", env={
+            "GATEKIT_SETUP_OFFICIAL_RUNNER": self.fake_official_runner(1)})
+        with open(stream, encoding="ascii") as handle:
+            self.assertIn("ZoneId=3", handle.read())
+
+    def test_remote_signed_group_policy_makes_the_mark_a_warning(self) -> None:
+        self.mark("session-check.ps1")
+        _, _, by_id = self.run_json("-Lang", "en", env={
+            "GATEKIT_SETUP_EXECUTION_POLICY": "MachinePolicy=RemoteSigned"})
+        self.assertEqual(by_id["S8"]["verdict"], "warn", by_id["S8"])
+        self.assertIn("do not run", by_id["S8"]["detail"])
+        self.assertIn(self.UNBLOCK, by_id["S8"]["hints"])
+
+    def test_korean_lines_have_no_english_sentence(self) -> None:
+        self.mark("common.ps1")
+        for policy in ("MachinePolicy=Undefined", "MachinePolicy=RemoteSigned"):
+            _, out = self.run_setup("-Lang", "ko", env={"GATEKIT_SETUP_EXECUTION_POLICY": policy})
+            self.assertEqual(english_sentence_lines(out), [], out)
+            self.assertIn(self.UNBLOCK, out)
+
+
+@unittest.skipUnless(POWERSHELL.is_file(), "Windows PowerShell 5.1 not available")
+class TestSetupExecDenied(SetupCase):
+    """A program that exists but that Windows refuses to start because of a policy (error 1260 /
+    4551) is a policy block (exit 4), not "reinstall it". GATEKIT_SETUP_EXEC_DENIED stands in for
+    the refusal; a start failure of another kind keeps the older handling."""
+
+    def test_denied_uv_is_exit_4_without_a_reinstall_offer(self) -> None:
+        self.fake_uv()
+        code, _, by_id = self.run_json("-Lang", "en", env={"GATEKIT_SETUP_EXEC_DENIED": "uv"})
+        item = by_id["S4"]
+        self.assertEqual(item["verdict"], "fail", item)
+        self.assertIn("policy blocks uv from running (Windows error 1260)", item["detail"])
+        self.assertNotIn("-Install", item["action"])
+        self.assertNotIn("-Update", item["action"])
+        self.assertIn("a reinstall does not fix this", item["action"])
+        self.assertIn("Message for your IT contact", item["hints"][0])
+        self.assertEqual(code, 4)
+        self.assertEqual(by_id["S5"]["verdict"], "unverified")
+        self.assertEqual(self.calls(), [])  # uv was never started
+
+    def test_a_uv_that_is_not_a_program_keeps_the_reinstall_offer(self) -> None:
+        # A real start failure of another kind (Windows error 193): it cannot be told apart from
+        # a damaged file, so the older advice stays.
+        (self.bin / "uv.exe").write_bytes(b"not a program")
+        code, _, by_id = self.run_json("-Lang", "en")
+        self.assertEqual(by_id["S4"]["verdict"], "fail", by_id["S4"])
+        self.assertIn("-Install uv", by_id["S4"]["action"])
+        self.assertEqual(code, 2)
+
+    def test_start_errors_are_read_from_the_win32_exception(self) -> None:
+        text = (SCRIPTS / "setup.ps1").read_bytes().decode("utf-8-sig")
+        self.assertIn("[System.ComponentModel.Win32Exception]", text)
+        self.assertIn("$r.StartError -eq 1260 -or $r.StartError -eq 4551", text)
+
+    def test_denied_venv_python_is_exit_4_and_the_venv_is_never_deleted(self) -> None:
+        self.fake_uv("build")
+        self.run_setup("-Install", "venv", "-Lang", "en")  # builds a working .venv
+        marker = self.kit / ".venv" / "marker.txt"
+        marker.write_text("x", encoding="utf-8")
+        self.log.unlink()
+        for extra in ((), ("-Install", "venv")):
+            with self.subTest(extra=extra):
+                code, _, by_id = self.run_json(*extra, "-Lang", "en",
+                                               env={"GATEKIT_SETUP_EXEC_DENIED": "python"})
+                item = by_id["S5"]
+                self.assertEqual(item["verdict"], "fail", item)
+                self.assertIn("Windows error 1260", item["detail"])
+                self.assertIn("hooks are off", item["detail"])
+                self.assertNotIn("-Install venv", item["action"])
+                self.assertIn("Message for your IT contact", item["hints"][0])
+                self.assertEqual(code, 4)
+                self.assertTrue(marker.exists())  # not deleted, not rebuilt
+                self.assertEqual(self.sync_calls(), [])
+                self.assertNotIn("S5-delete", by_id)
+
+    def test_korean_lines_have_no_english_sentence(self) -> None:
+        self.fake_uv("build")
+        self.run_setup("-Install", "venv", "-Lang", "en")
+        for denied in ("uv", "python"):
+            _, out = self.run_setup("-Lang", "ko", env={"GATEKIT_SETUP_EXEC_DENIED": denied})
+            self.assertEqual(english_sentence_lines(out), [], out)
+            self.assertIn("IT 담당자에게 보낼 문의문", out)
 
 
 if __name__ == "__main__":

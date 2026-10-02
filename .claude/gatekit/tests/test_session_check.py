@@ -44,8 +44,11 @@ class TestSessionCheck(unittest.TestCase):
         py.write_bytes(b"MZ")  # a non-empty file: a 0 byte python.exe is a damaged venv
 
     def run_check(self, **extra_env):
+        # The PowerShell 7 package lookup answers "none" unless a test says otherwise, so the
+        # result does not depend on what this machine has installed.
         env = {"SystemRoot": os.environ.get("SystemRoot", r"C:\Windows"),
-               "PATH": str(self.bin), "PATHEXT": ".EXE;.CMD"}
+               "PATH": str(self.bin), "PATHEXT": ".EXE;.CMD",
+               "GATEKIT_SETUP_PWSH_PACKAGES": "none"}
         env.update(extra_env)
         return subprocess.run(
             [str(POWERSHELL), "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
@@ -152,6 +155,78 @@ class TestSessionCheck(unittest.TestCase):
         message = json.loads(proc.stdout.decode("ascii"))["systemMessage"]
         self.assertIn("PowerShell 7 (pwsh): not found", message)
         self.assertIn("/gatekit-setup", message)
+
+    # ---- PowerShell 7: the stable product, not just a pwsh on PATH (same rule as setup.ps1) ----
+    STABLE = "Microsoft.PowerShell=7.6.6.0"
+    PREVIEW = "Microsoft.PowerShellPreview=7.7.5.0"
+    PREVIEW_ONLY = "PowerShell 7: only a preview build is installed"
+
+    def ready(self) -> None:
+        """Everything else is fine, and packages.json (the package names) is in place."""
+        self.fake("uv")
+        self.fake("claude")
+        self.venv()
+        shutil.copy(KIT / "scripts" / "packages.json", self.scripts / "packages.json")
+
+    def test_preview_package_alone_is_reported(self) -> None:
+        self.ready()
+        proc = self.run_check(GATEKIT_SETUP_PWSH_PACKAGES=self.PREVIEW)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        data = json.loads(proc.stdout.decode("ascii"))
+        self.assertIn(self.PREVIEW_ONLY, data["systemMessage"])
+        self.assertIn("안정판이 없습니다", data["systemMessage"])
+        self.assertIn("/gatekit-setup", data["hookSpecificOutput"]["additionalContext"])
+
+    def test_stable_package_is_silent_even_next_to_a_preview(self) -> None:
+        self.ready()
+        for packages in (self.STABLE, self.STABLE + ";" + self.PREVIEW):
+            self.assertEqual(self.run_check(GATEKIT_SETUP_PWSH_PACKAGES=packages).stdout.strip(), b"")
+
+    def test_preview_folder_on_path_is_reported_without_a_package(self) -> None:
+        self.ready()
+        (self.bin / "pwsh.exe").unlink()
+        preview = self.root / "PowerShell" / "7-preview"
+        preview.mkdir(parents=True)
+        (preview / "pwsh.exe").write_bytes(b"")
+        proc = self.run_check(PATH="%s;%s" % (self.bin, preview))
+        self.assertIn(self.PREVIEW_ONLY, json.loads(proc.stdout.decode("ascii"))["systemMessage"])
+
+    def test_stable_msi_folder_is_silent_next_to_a_preview_package(self) -> None:
+        self.ready()
+        stable = self.root / "Program Files" / "PowerShell" / "7"
+        stable.mkdir(parents=True)
+        (stable / "pwsh.exe").write_bytes(b"")
+        proc = self.run_check(GATEKIT_SETUP_PWSH_PACKAGES=self.PREVIEW,
+                              ProgramFiles=str(self.root / "Program Files"))
+        self.assertEqual(proc.stdout.strip(), b"")
+
+    def test_a_pwsh_of_unknown_kind_is_not_reported(self) -> None:
+        # No package, no MSI folder, a pwsh.exe without version text: nothing can tell, so silent.
+        self.ready()
+        self.assertEqual(self.run_check().stdout.strip(), b"")
+
+    def test_without_packages_json_the_package_lookup_is_skipped(self) -> None:
+        self.fake("uv")
+        self.fake("claude")
+        self.venv()
+        self.assertEqual(self.run_check(GATEKIT_SETUP_PWSH_PACKAGES=self.PREVIEW).stdout.strip(), b"")
+
+    def test_the_real_package_lookup_stays_inside_the_time_budget(self) -> None:
+        # An empty value counts as not set: Get-AppxPackage really runs (read-only, no network).
+        import time
+        self.ready()
+        started = time.monotonic()
+        proc = self.run_check(GATEKIT_SETUP_PWSH_PACKAGES="")
+        self.assertLess(time.monotonic() - started, 10)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+
+    def test_no_process_is_started_and_the_rule_comes_from_common_ps1(self) -> None:
+        text = SCRIPT.read_text(encoding="utf-8-sig")
+        code = "\n".join(line for line in text.splitlines() if not line.lstrip().startswith("#"))
+        for banned in ("Start-Process", "Invoke-Proc", "Process]::Start", "Invoke-Expression", "& $"):
+            self.assertNotIn(banned, code)
+        self.assertIn("Get-PwshProduct $pwshStableName $pwshPreviewName", code)
+        self.assertNotIn("Get-AppxPackage", code)  # only inside common.ps1
 
     def test_program_visible_only_in_the_registry_path_says_restart_not_missing(self) -> None:
         # Same rule as setup.ps1: judged by this session's PATH; the registry only

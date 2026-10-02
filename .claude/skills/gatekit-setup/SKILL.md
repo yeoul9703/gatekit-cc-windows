@@ -36,7 +36,7 @@ These hold in every step and in every reference file this skill reads.
 |---|---|
 | `.claude/skills/gatekit-setup/references/install-programs.md` | Step 3, before writing the install question |
 | `.claude/skills/gatekit-setup/references/settings.md` | the `S12-settings` item is `fail` |
-| `.claude/skills/gatekit-setup/references/rare-paths.md` | the user asks for a reinstall, the `P-failures` item is `warn`, a winget error code appears, or the gatekit CLI cannot start |
+| `.claude/skills/gatekit-setup/references/rare-paths.md` | the user asks for a reinstall, the `P-failures` item is `warn`, a winget error code appears, the gatekit CLI cannot start, the exit code is 4, or one of `S8`, `S17`, `S20` is not `ok` |
 
 ## Step 0 — load policy and language
 
@@ -125,7 +125,10 @@ the exit code:
   Stop.
 - `4` — blocked by policy or network. Show the "what you can do now" lines
   and the message for the IT contact from the `hints`, so the user can
-  forward it. Do not retry in a loop.
+  forward it. Do not retry in a loop. This also covers `S20` (a group
+  policy pins the execution policy) and an `S4` or `S5` whose detail says a
+  policy blocks the program from running: never offer a reinstall or
+  `-Install venv` for those; the reference file `rare-paths.md` says why.
 - `2` — something still needs the user (a declined item, or administrator
   rights): say exactly which and what to do.
 - `1` — a step failed for another reason: show the lines the script printed

@@ -60,6 +60,14 @@ repair; then it stops with exit code 2 and the Microsoft Store link for the
 user to open. A policy or network block is exit code 4. `winget` is not
 accepted by `-Update` or `-Reinstall`.
 
+If `-Install winget,pwsh` was allowed and the winget part fails, the `pwsh`
+line (`S16-pwsh`) names the failed winget install as its cause. Resolve the
+`S16-winget` line first; `pwsh` cannot be installed before that.
+
+The session-start check applies the same stable-product rule without
+starting `pwsh`: a PC with only a preview build gets the message "only a
+preview build is installed", which leads here to `-Install pwsh`.
+
 ## uv by hand
 
 For reference, these are the commands the script runs for uv. Do not run them

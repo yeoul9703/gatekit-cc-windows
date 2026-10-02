@@ -67,6 +67,9 @@ Repair-WinGetPackageManager
 - PowerShell 7도 없을 때는 점검 결과가 `-Install winget,pwsh`를 알려 줍니다. 순서를 어떻게 적어도
   winget을 먼저 설치합니다.
 - uv와 Claude Code는 winget 없이도(공식 스크립트로) 설치됩니다.
+- `-Install winget,pwsh`에서 winget 설치가 실패하면 PowerShell 7 줄(`S16-pwsh`)은
+  "winget 설치가 실패해서 PowerShell 7 을(를) 설치하지 못했습니다"라고 원인을 알려 줍니다.
+  먼저 winget 줄(`S16-winget`)의 안내를 해결하세요.
 
 ### 2-1. PowerShell 7 (`pwsh`, 필수)
 
@@ -110,6 +113,11 @@ Windows PowerShell 5.1에서 됩니다.
 | 안정판이 설치돼 있지만 이 창의 PATH에 `pwsh`가 없음 | `warn`, 종료 코드 3 | Claude Code를 완전히 닫고 다시 열기 |
 
 더 새 안정판이 나왔는지는 패키지 표의 `pwsh` 줄이 winget 조회로 알려 줍니다(경고).
+
+세션을 시작할 때 도는 짧은 점검(`session-check.ps1`)도 같은 규칙을 씁니다(판정 함수는
+`common.ps1` 한 곳에 있습니다). 다만 `pwsh`를 실행해 보지는 않고 Windows 패키지, MSI 설치 폴더,
+PATH에 있는 `pwsh.exe` 파일에 적힌 버전만 봅니다. preview만 있으면 "미리보기(preview) 버전만
+있고 안정판이 없습니다"라고 알려 주고, 어느 쪽인지 알 수 없으면 아무 말도 하지 않습니다.
 
 ### 2-2. uv (필수)
 
@@ -196,7 +204,7 @@ CLI는 위 스크립트를 그대로 부르고, 출력과 종료 코드도 그�
 | 1 | 실패(허락으로 해결 안 되는 것: 잘못된 스위치, `.venv`를 못 만듦, 알 수 없는 설치 실패) | 출력의 마지막 줄을 읽고 원인을 고친 뒤 다시 실행 |
 | 2 | 사용자의 허락·조치가 필요(필수 프로그램 없음, Python 받아야 함, 관리자 권한 필요 등) | 출력이 알려 주는 스위치를 허락하거나 직접 실행 |
 | 3 | 설치는 됐지만 이 창에서는 안 보임(PATH), 또는 PC 재시작 필요 | Claude Code(데스크톱 앱, VS Code 창, 또는 실행 중인 터미널)를 완전히 닫고 다시 열기 |
-| 4 | 회사·학교 정책이나 네트워크가 막음 | 아래 문의문을 IT 담당자에게 전달. 우회 금지 |
+| 4 | 회사·학교 정책이나 네트워크가 막음(winget 정책, 네트워크, 그룹 정책이 고정한 실행 정책, 프로그램 실행 차단) | 아래 문의문을 IT 담당자에게 전달. 우회 금지 |
 
 여러 문제가 섞이면 1 > 4 > 3 > 2 > 0 순서로 먼저 해당하는 코드가 나옵니다.
 
@@ -252,6 +260,17 @@ setup 이 막힘을 알릴 때 같은 내용을 자동으로 만들어 줍니다
 > 조직 정책(AppLocker/Intune)이나 프록시·방화벽이 winget, astral.sh, claude.ai 접속을
 > 막고 있는지 확인하고, 사용자 권한으로 허용해 주실 수 있나요?
 
+실행 정책이 고정돼 있을 때(`S20`):
+
+> IT 담당자님, 제 PC(Windows)의 그룹 정책이 PowerShell 실행 정책을 AllSigned 로 고정해 두어(MachinePolicy),
+> 서명되지 않은 gatekit 스크립트(프로젝트의 .claude/gatekit/scripts 폴더에 있는 .ps1 파일)가 실행되지 않습니다.
+> 이 폴더의 스크립트를 실행할 수 있게 허용해 주실 수 있나요?
+
+프로그램 실행이 차단될 때(`S4`, `S5`):
+
+> IT 담당자님, 제 PC(Windows)에서 (프로그램 경로) 실행이 조직 정책으로 차단됩니다(Windows 오류 1260).
+> AppLocker 나 앱 제어 정책에서 이 프로그램을 사용자 권한으로 실행할 수 있게 허용해 주실 수 있나요?
+
 ## 9. CLI가 안 될 때: 스크립트를 직접 실행
 
 CLI(`gatekit.py`)는 uv 와 `.venv` 가 있어야 시작됩니다. uv 가 깨졌거나 `.venv` 가 없을 때는
@@ -264,4 +283,79 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .claude/gatekit/scripts/setu
 powershell -NoProfile -ExecutionPolicy Bypass -File .claude/gatekit/scripts/setup.ps1 -Install venv -Lang ko
 ```
 
-이 스크립트도 안 돌면(파일이 없음 등) 저장소에서 복원하세요: `git checkout .claude/gatekit/scripts`.
+이 스크립트도 안 돌면(파일이 없음 등) 파일을 되돌려야 합니다.
+
+- Git이 있으면: `git checkout .claude/gatekit/scripts`
+- Git이 없으면(압축 파일로 받은 경우): 저장소를 다시 내려받아 `.claude/gatekit/scripts` 폴더의 파일을 덮어쓰세요.
+
+setup도 같은 식으로 안내합니다. 이 창의 PATH에 Git이 있으면 `git checkout ...` 명령을, 없으면
+"저장소를 다시 내려받아 그 파일을 덮어쓰세요"를 보여 줍니다(`packages.json`, `.claude/settings.json`).
+`common.ps1`을 읽지 못할 때는 Git이 있는지 확인할 방법이 없어서 두 가지를 함께 보여 줍니다.
+
+## 10. 환경 점검 항목 (경로 길이, 실행 정책, 인터넷 표시, 실행 차단)
+
+점검은 아무것도 바꾸지 않습니다. 레지스트리와 정책은 읽기만 하고, 표시 해제도 명령만 알려 줍니다.
+
+| id | 보는 것 | 판정 | 할 일 |
+|---|---|---|---|
+| `S17` | 프로젝트 폴더 경로 길이 + 그 안에서 가장 긴 파일 경로 | 합이 259자를 넘으면 `warn`. 레지스트리의 `LongPathsEnabled`가 1이면 넘어도 `ok` | 더 짧은 폴더(예: `C:\dev`)로 옮기기 |
+| `S20` | 그룹 정책이 고정한 실행 정책(`Get-ExecutionPolicy -List`의 `MachinePolicy`, `UserPolicy`) | `AllSigned`나 `Restricted`면 `fail`, 종료 코드 4 | IT 담당자에게 문의(8번의 문의문). 우회 금지 |
+| `S8` | `scripts` 폴더의 `.ps1` 파일 전부에 "인터넷에서 받음" 표시가 있는지 | 있으면 파일 이름과 함께 `info`. 그룹 정책이 `RemoteSigned`면 `warn`, 종료 코드 2 | 아래 한 줄을 직접 실행 |
+| `S4`, `S5` | `uv.exe`나 `.venv`의 `python.exe`가 있는데 Windows가 실행을 거부하는지 | 정책 때문이면(Windows 오류 1260, 4551) `fail`, 종료 코드 4 | IT 담당자에게 문의. 다시 설치해도 해결되지 않음 |
+
+### 경로 길이 (`S17`)
+
+Windows는 기본으로 260자 이상인 경로를 열지 못합니다(쓸 수 있는 길이는 259자). 프로젝트 폴더가
+짧아 보여도 그 안의 긴 파일 경로를 더하면 넘을 수 있어서, setup은 둘을 더해 봅니다.
+
+| 무엇 | 길이 |
+|---|---|
+| 저장소 파일 중 가장 긴 상대 경로 | 75자 |
+| 일반 사용자의 `.venv`에서 가장 긴 상대 경로(만든 직후 55자, Python이 한 번 실행된 뒤 79자) | 79자 |
+| setup이 쓰는 값(둘 중 큰 값) | 79자 |
+
+그래서 프로젝트 폴더 경로가 **179자**를 넘으면 경고가 나옵니다(179 + 1 + 79 = 259).
+개발용 도구(pyright, ruff)를 넣은 개발자의 `.venv`는 169자까지 가지만 일반 사용자에게는 생기지
+않아 계산에 넣지 않았습니다. 개발자는 폴더 경로가 89자를 넘지 않게 하세요.
+
+### 실행 정책 (`S20`)
+
+gatekit의 훅과 스크립트는 `-ExecutionPolicy Bypass`를 붙여 실행합니다. 그런데 회사·학교가 그룹
+정책으로 실행 정책을 `AllSigned`나 `Restricted`로 고정하면 이 옵션이 통하지 않아, 서명이 없는
+gatekit 스크립트가 아예 실행되지 않습니다. 사용자가 허락해서 풀 수 있는 것이 아니므로 종료 코드 4입니다.
+
+이런 PC에서는 보통 setup 스크립트 자체도 시작되지 않고 "이 시스템에서 스크립트를 실행할 수
+없으므로 ... 파일을 로드할 수 없습니다"(영어: "... cannot be loaded because running scripts is
+disabled on this system") 같은 오류가 먼저 나옵니다. 그 오류를 보면 직접 확인해 보세요.
+
+```
+Get-ExecutionPolicy -List
+```
+
+`MachinePolicy`나 `UserPolicy` 줄이 `AllSigned` 또는 `Restricted`이면 IT 담당자에게 문의하세요.
+`Set-ExecutionPolicy`로 바꾸려 하지 마세요(그룹 정책이 우선이라 바뀌지 않습니다).
+
+### "인터넷에서 받음" 표시 (`S8`)
+
+브라우저로 받은 압축 파일을 풀면 안의 파일마다 이 표시가 붙습니다. gatekit은
+`-ExecutionPolicy Bypass`로 실행하므로 보통은 표시가 있어도 그대로 동작합니다. 표시를 지우고
+싶거나, 그룹 정책이 `RemoteSigned`라서 표시가 있는 파일이 실행되지 않을 때는 프로젝트 폴더에서
+아래 한 줄을 직접 실행하세요. setup은 이 명령을 자동으로 실행하지 않습니다.
+
+```
+Get-ChildItem .claude\gatekit\scripts\*.ps1 | Unblock-File
+```
+
+### 실행 차단 (`S4`, `S5`)
+
+`uv.exe`나 `.claude/gatekit/.venv/Scripts/python.exe`가 있는데도 Windows가 실행을 거부하면
+(AppLocker 같은 정책, Windows 오류 1260 또는 4551) 다시 설치해도 같은 파일이 다시 막힙니다.
+그래서 setup은 재설치를 권하지 않고 종료 코드 4와 문의문을 보여 줍니다. `.venv`도 지우거나 다시
+만들지 않습니다. `python.exe`가 막히면 gatekit 훅도 동작하지 않습니다.
+
+그 밖의 이유로 실행되지 않을 때(파일 손상, 접근 거부 등)는 정책 때문인지 구분할 수 없어서
+전처럼 "실행해서 버전을 읽지 못했습니다"로 알리고 재설치를 안내합니다.
+
+테스트용 환경 변수: `GATEKIT_SETUP_EXECUTION_POLICY`(예: `MachinePolicy=AllSigned;UserPolicy=Undefined`),
+`GATEKIT_SETUP_LONG_PATHS`(`0` 또는 `1`), `GATEKIT_SETUP_EXEC_DENIED`(예: `uv;python`),
+`GATEKIT_SETUP_PWSH_PACKAGES`. 실제 PC의 값을 바꾸지 않고 점검 결과만 바꿉니다.

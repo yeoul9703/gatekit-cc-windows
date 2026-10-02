@@ -54,7 +54,9 @@
 # Exit codes (when several problems mix, the FIRST matching row wins):
 #   1  something failed that a permission cannot fix (bad switch, .venv or config
 #      could not be built, doctor failed, an install failed for an unknown reason)
-#   4  blocked by policy or network (winget policy block, no network, TLS)
+#   4  blocked by policy or network (winget policy block, no network, TLS, a group policy that
+#      pins the execution policy to AllSigned / Restricted, or Windows refusing to start uv.exe
+#      or the .venv python.exe because of an application control policy)
 #   3  a program is installed but not visible in this session (PATH), or a reboot is
 #      needed: close Claude Code completely and open it again
 #   2  the user must allow or do something (a required program is missing or too
@@ -68,10 +70,16 @@
 #   the 30 second `winget list` limit of the package table; GATEKIT_SETUP_OFFICIAL_RUNNER is an
 #   executable run instead of the official installer script (it receives the script URL);
 #   GATEKIT_SETUP_PWSH_PACKAGES replaces the Get-AppxPackage lookup of PowerShell 7: "none", or
-#   "<package name>=<version>" pairs separated by ";" (an empty value counts as not set);
+#   "<package name>=<version>" pairs separated by ";" (an empty value counts as not set; read by
+#   common.ps1, so session-check.ps1 honors it too);
 #   GATEKIT_SETUP_WINGET_RUNNER is an executable run instead of the two winget install steps (it
 #   receives "register" or "repair" and the package family name). The MSI folder is looked up
 #   under the ProgramFiles environment variable, so a test can point it at a scratch folder.
+#   GATEKIT_SETUP_EXECUTION_POLICY replaces Get-ExecutionPolicy -List: "<scope>=<policy>" pairs
+#   separated by ";" (MachinePolicy, UserPolicy; a scope left out counts as Undefined);
+#   GATEKIT_SETUP_LONG_PATHS (0 or 1) replaces the registry value LongPathsEnabled;
+#   GATEKIT_SETUP_EXEC_DENIED lists program names (file name without extension, separated by
+#   ";" or ",") that are not started and answer like a policy refusal (Windows error 1260).
 
 param(
     [string[]]$Install = @(),
@@ -98,9 +106,28 @@ $allowedReinstall = @('uv', 'pwsh', 'claude')
 
 # The PATH rule and the ASCII-only JSON live in common.ps1 (shared with session-check.ps1).
 # Nothing below can run without it.
+# If it cannot be read, no shared function exists yet (no PATH lookup, no language helper), so the
+# advice names both ways: with Git, and without it (a zip download has no Git to restore from).
 try { . "$PSScriptRoot\common.ps1" } catch {
-    Write-Host ('[fail] scripts/common.ps1: ' + $_.Exception.Message)
-    Write-Host '       git checkout .claude/gatekit/scripts/common.ps1'
+    $commonRel = '.claude/gatekit/scripts/common.ps1'
+    $commonWhy = [regex]::Replace("$($_.Exception.Message)", '[^\x20-\x7E]', '?')
+    $commonKo = ($Lang -eq 'ko')
+    if (-not $Lang) { try { $commonKo = ((Get-UICulture).TwoLetterISOLanguageName -eq 'ko') } catch { } }
+    if ($Json) {
+        $commonItem = [ordered]@{ id = 'common'; level = 'required'; name = 'scripts/common.ps1'; verdict = 'fail'
+            detail = ('could not be read: ' + $commonWhy)
+            action = 'restore the file'
+            hints = @(('with Git: git checkout ' + $commonRel), ('without Git: download the repository again and overwrite ' + $commonRel)) }
+        Write-Output (ConvertTo-Json -InputObject ([ordered]@{ exit_code = 1; exit_meaning = 'failed'; items = @($commonItem) }) -Depth 4)
+    } elseif ($commonKo) {
+        Write-Host ('[fail] scripts/common.ps1: ' + $commonWhy)
+        Write-Host ('       Git 이 있으면: git checkout ' + $commonRel)
+        Write-Host ('       Git 이 없으면: 저장소를 다시 내려받아 이 파일을 덮어쓰세요 (' + $commonRel + ')')
+    } else {
+        Write-Host ('[fail] scripts/common.ps1: ' + $commonWhy)
+        Write-Host ('       with Git: git checkout ' + $commonRel)
+        Write-Host ('       without Git: download the repository again and overwrite this file (' + $commonRel + ')')
+    }
     exit 1
 }
 
@@ -136,6 +163,8 @@ $script:failedActions = New-Object System.Collections.ArrayList
 $script:langMode = 'en'
 $script:lastScriptFail = $null
 $script:lastWingetFail = $null
+$script:wingetInstall = ''                          # '' / failed / restart: how -Install winget ended in this run
+$script:venvDenied = 0                              # Windows error number when the .venv python.exe was refused by policy
 $script:showSummary = $true
 $script:currentAction = ''
 $script:agreementOk = $false
@@ -168,6 +197,15 @@ function Say([string]$verdict, [string]$id, [string]$name, [string]$detail) {
 }
 
 function Set-Flag([string]$name) { $script:flags[$name] = $true }
+
+# How to get a missing or damaged kit file back. Git on the PATH of this session: the git command.
+# No Git (the project came as a zip file): download the repository again and overwrite the file.
+function Get-RestoreAdvice([string]$rel) {
+    if ((Find-App 'git' $script:sessionPath).Count -gt 0) {
+        return (T ('저장소에서 복원하세요(git checkout ' + $rel + ')') ('restore it from the repository (git checkout ' + $rel + ')'))
+    }
+    return (T ('Git 이 없으므로 저장소를 다시 내려받아 그 파일을 덮어쓰세요(' + $rel + ')') ('Git is not installed, so download the repository again and overwrite that file (' + $rel + ')'))
+}
 
 function Get-ExitCode {
     if ($script:flags.fail) { return 1 }
@@ -304,7 +342,7 @@ if ($RetryFailed -and -not $Status) {
 }
 if ($script:pkgs.Count -lt 5) {
     $argsBad = $true
-    Add-Item 'args' 'required' 'packages.json' 'fail' (T ('scripts/packages.json 을 읽지 못했습니다: ' + $script:pkgLoadError) ('could not read scripts/packages.json: ' + $script:pkgLoadError)) (T '저장소에서 복원하세요(git checkout .claude/gatekit/scripts/packages.json)' 'restore it from the repository (git checkout .claude/gatekit/scripts/packages.json)')
+    Add-Item 'args' 'required' 'packages.json' 'fail' (T ('scripts/packages.json 을 읽지 못했습니다: ' + $script:pkgLoadError) ('could not read scripts/packages.json: ' + $script:pkgLoadError)) (Get-RestoreAdvice '.claude/gatekit/scripts/packages.json')
 }
 foreach ($n in (@($installList) + @($updateList))) {
     if ($allowed -notcontains $n) {
@@ -355,9 +393,19 @@ function Stop-ProcTree($p) {
 }
 
 # Runs a program without a shell: stdin closed (nothing can prompt), stdout+stderr
-# captured, whole process tree killed after $timeoutSec. Returns Started / TimedOut / Code / Out.
+# captured, whole process tree killed after $timeoutSec. Returns Started / TimedOut / Code / Out /
+# StartError. StartError is the Windows error number when the program could not be started at all
+# (Started stays $false): 2 = file not found, 193 = not a program, 5 = access denied,
+# 1260 = blocked by a group policy (AppLocker, software restriction), 4551 = blocked by an
+# application control policy. 0 = it started, or the failure carried no Windows error number.
+$script:execDenied = @("$env:GATEKIT_SETUP_EXEC_DENIED".ToLower() -split '[,;\s]+' | Where-Object { $_ })
 function Invoke-Proc([string]$file, [string[]]$argList, [int]$timeoutSec = 20) {
-    $res = [pscustomobject]@{ Started = $false; TimedOut = $false; Code = -1; Out = '' }
+    $res = [pscustomobject]@{ Started = $false; TimedOut = $false; Code = -1; Out = ''; StartError = 0 }
+    if ($script:execDenied.Count -gt 0 -and $script:execDenied -contains [System.IO.Path]::GetFileNameWithoutExtension($file).ToLower()) {
+        $res.StartError = 1260
+        $res.Out = 'This program is blocked by group policy.'
+        return $res
+    }
     try {
         $psi = New-Object System.Diagnostics.ProcessStartInfo
         $psi.FileName = $file
@@ -387,8 +435,25 @@ function Invoke-Proc([string]$file, [string[]]$argList, [int]$timeoutSec = 20) {
         if ($se.IsCompleted) { $res.Out += $se.Result }
     } catch {
         $res.Out = "$_"
+        $inner = $_.Exception
+        while ($inner) {
+            if ($inner -is [System.ComponentModel.Win32Exception]) { $res.StartError = [int]$inner.NativeErrorCode; break }
+            $inner = $inner.InnerException
+        }
     }
     return $res
+}
+
+# Windows refused to START the program because of a policy. Only these two error numbers say so
+# without doubt; every other start failure (5 access denied, 193 damaged file, ...) keeps the
+# older "could not run it" handling, because a reinstall may well fix those.
+function Test-ExecDenied($r) {
+    return (-not $r.Started -and ($r.StartError -eq 1260 -or $r.StartError -eq 4551))
+}
+
+function New-ExecDeniedInquiry([string]$what, [int]$code) {
+    return (T ('IT 담당자님, 제 PC(Windows)에서 ' + $what + ' 실행이 조직 정책으로 차단됩니다(Windows 오류 ' + $code + '). AppLocker 나 앱 제어 정책에서 이 프로그램을 사용자 권한으로 실행할 수 있게 허용해 주실 수 있나요?') `
+             ('Hi IT team, on my Windows PC running ' + $what + ' is blocked by an organisation policy (Windows error ' + $code + '). Could you allow this program to run at user level in AppLocker or the application control policy?'))
 }
 
 function Get-VersionFrom([string]$text) {
@@ -478,10 +543,25 @@ function Invoke-WingetAction([string]$verb, [string]$id, [string]$name, [string]
     $winget = Find-App 'winget' $script:sessionPath
     if ($winget.Count -eq 0) {
         [void]$script:failedActions.Add($name)
-        Add-FailureRecord $name $script:currentAction 'winget-missing' '' (T 'winget 이 없어 자동 설치를 할 수 없습니다.' 'winget is missing, so it cannot install automatically.')
+        $label = $name
+        if ($name -eq 'pwsh') { $label = 'PowerShell 7' }
+        $cls = 'winget-missing'
+        $msg = T 'winget 이 없어 자동 설치를 할 수 없습니다.' 'winget is missing, so it cannot install automatically.'
+        $act = T '먼저 winget 설치를 허락하거나(-Install winget), Microsoft Store 에서 "앱 설치 관리자(App Installer)"를 설치한 뒤 다시 실행하세요.' 'allow the winget install first (-Install winget), or install "App Installer" from the Microsoft Store, then run again.'
+        # -Install winget,<name>: the winget install of THIS run did not work, so "allow -Install
+        # winget first" would send the user in a circle. Point at the cause instead.
+        if ($script:wingetInstall -eq 'failed') {
+            $cls = 'winget-failed'
+            $msg = T ('winget 설치가 실패해서 ' + $label + ' 을(를) 설치하지 못했습니다.') ('the winget install failed, so ' + $label + ' could not be installed.')
+            $act = T '위의 winget 설치 줄에 나온 안내를 먼저 해결한 뒤 다시 실행하세요.' 'resolve what the winget install line above says first, then run again.'
+        } elseif ($script:wingetInstall -eq 'restart') {
+            $cls = 'winget-restart'
+            $msg = T ('winget 은 설치됐지만 이 창에서 아직 보이지 않아 ' + $label + ' 을(를) 설치하지 못했습니다.') ('winget was installed but is not visible in this session yet, so ' + $label + ' could not be installed.')
+            $act = T 'Claude Code(데스크톱 앱, VS Code 창, 또는 실행 중인 터미널)를 완전히 닫고 다시 연 뒤 다시 실행하세요.' 'close Claude Code completely (the desktop app, the VS Code window, or the terminal it runs in), open it again, then run again.'
+        }
+        Add-FailureRecord $name $script:currentAction $cls '' $msg
         Set-Flag 'needs'
-        Add-Item ('S16-' + $name) 'required' ($name + ' ' + (T '설치' 'install')) 'fail' (T 'winget 이 없어 자동 설치를 할 수 없습니다.' 'winget is missing, so it cannot install automatically.') `
-            (T '먼저 winget 설치를 허락하거나(-Install winget), Microsoft Store 에서 "앱 설치 관리자(App Installer)"를 설치한 뒤 다시 실행하세요.' 'allow the winget install first (-Install winget), or install "App Installer" from the Microsoft Store, then run again.')
+        Add-Item ('S16-' + $name) 'required' ($name + ' ' + (T '설치' 'install')) 'fail' $msg $act
         return $false
     }
     Say 'info' ('A-' + $name) $name (T ('winget ' + $verb + ' ' + $id + ' 실행 중...') ('running winget ' + $verb + ' ' + $id + ' ...'))
@@ -596,59 +676,10 @@ function Confirm-Reinstalled([string]$name, [string]$path, [string]$known = '') 
 }
 
 # ---- PowerShell 7: the installed stable PRODUCT decides, not the PATH order --------------------
-# Order: (1) the Windows package (Get-AppxPackage -Name <appx_name>; the preview build is another
-# package, <appx_preview_name>; both names come from packages.json), (2) the MSI folder
-# <Program Files>\PowerShell\7 (the preview lives in 7-preview), (3) the version text of each pwsh
-# on the session PATH (a "-preview" style suffix means preview).
-function ConvertTo-Version3([string]$text) {
-    if ($text -match '(\d+)\.(\d+)\.(\d+)') { return ($Matches[1] + '.' + $Matches[2] + '.' + $Matches[3]) }
-    return ''
-}
-
-# Package versions as text ('' = not installed). GATEKIT_SETUP_PWSH_PACKAGES replaces the lookup.
-function Get-PwshPackages {
-    $res = @{ stable = ''; preview = '' }
-    $stableName = "$($script:pkgs['pwsh'].appx_name)"
-    $previewName = "$($script:pkgs['pwsh'].appx_preview_name)"
-    if ($env:GATEKIT_SETUP_PWSH_PACKAGES) {
-        foreach ($pair in ($env:GATEKIT_SETUP_PWSH_PACKAGES -split ';')) {
-            $kv = @($pair -split '=', 2)
-            if ($kv.Count -ne 2) { continue }
-            $pkgName = $kv[0].Trim()
-            if ($stableName -and $pkgName -eq $stableName) { $res.stable = $kv[1].Trim() }
-            elseif ($previewName -and $pkgName -eq $previewName) { $res.preview = $kv[1].Trim() }
-        }
-        return $res
-    }
-    foreach ($slot in @(@('stable', $stableName), @('preview', $previewName))) {
-        if (-not $slot[1]) { continue }
-        try {
-            $found = @(Get-AppxPackage -Name $slot[1] -ErrorAction Stop | Sort-Object { [version]$_.Version } -Descending)
-            if ($found.Count -gt 0) { $res[$slot[0]] = "$($found[0].Version)" }
-        } catch { }
-    }
-    return $res
-}
-
-# The MSI install: stable = its version text ('' = not there, '?' = there but unreadable).
-function Get-PwshMsi {
-    $res = @{ stable = ''; stablePath = ''; preview = $false }
-    $pf = $env:ProgramW6432
-    if (-not $pf) { $pf = $env:ProgramFiles }
-    if (-not $pf) { return $res }
-    $root = Join-Path $pf 'PowerShell'
-    $exe = Join-Path $root '7\pwsh.exe'
-    if (Test-Path -LiteralPath $exe) {
-        $res.stablePath = $exe
-        $vt = ''
-        try { $vt = ConvertTo-Version3 "$((Get-Item -LiteralPath $exe).VersionInfo.ProductVersion)" } catch { }
-        if (-not $vt) { $vt = '?' }
-        $res.stable = $vt
-    }
-    if (Test-Path -LiteralPath (Join-Path $root '7-preview\pwsh.exe')) { $res.preview = $true }
-    return $res
-}
-
+# Order: (1) the Windows package and (2) the MSI folder <Program Files>\PowerShell: both are
+# Get-PwshProduct in common.ps1, the rule session-check.ps1 uses too (the package names come from
+# packages.json); (3) the version text of each pwsh on the session PATH (a "-preview" style
+# suffix means preview), which needs a process and is therefore only done here.
 # The first three pwsh on the session PATH: path, version text ('?' = unreadable), kind.
 function Get-PwshOnPath {
     $list = @()
@@ -670,17 +701,9 @@ function Get-PwshOnPath {
 # where: session / registry / none for the name pwsh. With $probePath = $false the PATH is only
 # probed when neither the package nor the MSI folder shows a stable product.
 function Get-PwshState([bool]$probePath = $true) {
-    $st = @{ stable = $false; version = ''; source = ''; path = ''; preview = $false; onPath = @()
-             where = (Get-App 'pwsh' $script:sessionPath).where }
-    $pk = Get-PwshPackages
-    $msi = Get-PwshMsi
-    if ($pk.preview -or $msi.preview) { $st.preview = $true }
-    if ($pk.stable) {
-        $st.stable = $true; $st.source = 'package'; $st.version = ConvertTo-Version3 $pk.stable
-        if (-not $st.version) { $st.version = '?' }
-    } elseif ($msi.stable) {
-        $st.stable = $true; $st.source = 'msi'; $st.version = $msi.stable; $st.path = $msi.stablePath
-    }
+    $st = Get-PwshProduct "$($script:pkgs['pwsh'].appx_name)" "$($script:pkgs['pwsh'].appx_preview_name)"
+    $st.onPath = @()
+    $st.where = (Get-App 'pwsh' $script:sessionPath).where
     if ($probePath -or -not $st.stable) {
         $st.onPath = Get-PwshOnPath
         foreach ($o in $st.onPath) {
@@ -741,7 +764,9 @@ function Install-Winget {
         return
     }
     [void]$script:failedActions.Add('winget')
+    $script:wingetInstall = 'failed'
     if ($after.where -eq 'registry') {
+        $script:wingetInstall = 'restart'
         Add-FailureRecord 'winget' 'install' 'restart' '' (T '설치했지만 PATH 를 다시 읽어도 보이지 않습니다.' 'installed, but still not visible after re-reading PATH.')
         Add-RestartItem 'S9-winget' 'recommended' 'winget' $after.apps[0].Source
         return
@@ -948,19 +973,113 @@ if ($arch -eq 'ARM64') {
 }
 
 # S17 path ---------------------------------------------------------------------
+# Windows refuses a full path of 260 characters or more (MAX_PATH is 260 including the closing
+# NUL, so 259 usable) unless long paths are enabled. What counts is the project folder plus "\"
+# plus the longest relative path below it, not the folder alone. Measured on 2026-10-02:
+#    75  longest tracked file (git ls-files):
+#        .claude/gatekit/tests/fixtures/spec/<case>/spec/03-architecture.md
+#    55  longest file of a fresh user .venv (uv sync --frozen --no-dev, 17 files):
+#        .claude/gatekit/.venv/Lib/site-packages/_virtualenv.pth
+#    79  the same .venv after its Python ran once (the hooks do that):
+#        .claude/gatekit/.venv/Lib/site-packages/__pycache__/_virtualenv.cpython-314.pyc
+#    68  longest bytecode file Python writes next to the kernel:
+#        .claude/gatekit/gatekit/gates/__pycache__/_bootstrap.cpython-314.pyc
+#   169  a developer .venv WITH the dev group (pyright, ruff and their node files). verify.ps1
+#        asks for that group; a user's --no-dev .venv never has it, so it is not counted here.
+# The larger of the tracked files and the user .venv decides. Measure again when either grows.
+# LongPathsEnabled = 1 in the registry lifts the limit (read only; GATEKIT_SETUP_LONG_PATHS
+# replaces the value in tests).
+$longestTrackedPath = 75
+$longestVenvPath = 79
+$pathLimit = 259
+$longestInside = [Math]::Max($longestTrackedPath, $longestVenvPath)
+$pathTotal = $projectRoot.Length + 1 + $longestInside
+$longPathsOn = $false
+if ($env:GATEKIT_SETUP_LONG_PATHS -eq '1') { $longPathsOn = $true }
+elseif ($env:GATEKIT_SETUP_LONG_PATHS -ne '0') {
+    try {
+        $lp = Get-ItemProperty -LiteralPath 'HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem' -Name 'LongPathsEnabled' -ErrorAction Stop
+        if ([int]$lp.LongPathsEnabled -eq 1) { $longPathsOn = $true }
+    } catch { }
+}
 if ($projectRoot -match '(?i)OneDrive') {
     Add-Item 'S17' 'info' (T '경로' 'path') 'warn' (T 'OneDrive 폴더 안입니다(동기화가 .venv 를 방해할 수 있음)' 'the project is inside OneDrive (sync can disturb .venv)') (T 'OneDrive 밖(예: C:\dev)으로 옮기는 것을 권장합니다' 'moving it outside OneDrive (for example C:\dev) is recommended')
-} elseif ($projectRoot.Length -gt 200) {
-    Add-Item 'S17' 'info' (T '경로' 'path') 'warn' (T ('경로가 200자를 넘습니다(' + $projectRoot.Length + ')') ('the path is longer than 200 characters (' + $projectRoot.Length + ')')) (T '더 짧은 폴더로 옮기세요' 'move it to a shorter folder')
+} elseif ($pathTotal -gt $pathLimit -and -not $longPathsOn) {
+    Add-Item 'S17' 'info' (T '경로' 'path') 'warn' (T ('경로가 너무 깁니다: 프로젝트 폴더 ' + $projectRoot.Length + '자에 그 안의 가장 긴 파일 경로 ' + $longestInside + '자를 더하면 ' + $pathTotal + '자로, Windows 기본 한도 ' + $pathLimit + '자를 넘습니다') ('the path is too long: the project folder (' + $projectRoot.Length + ' characters) plus the longest file path inside it (' + $longestInside + ') is ' + $pathTotal + ' characters, over the Windows default limit of ' + $pathLimit)) (T '더 짧은 폴더(예: C:\dev)로 옮기세요' 'move it to a shorter folder (for example C:\dev)')
+} elseif ($pathTotal -gt $pathLimit) {
+    Add-Item 'S17' 'info' (T '경로' 'path') 'ok' (T ('가장 긴 파일까지 ' + $pathTotal + '자로 기본 한도 ' + $pathLimit + '자를 넘지만, 이 PC 는 긴 경로를 허용합니다(LongPathsEnabled = 1)') ('' + $pathTotal + ' characters to the longest file, over the default limit of ' + $pathLimit + ', but this PC allows long paths (LongPathsEnabled = 1)'))
 } else {
-    Add-Item 'S17' 'info' (T '경로' 'path') 'ok' (T '경로 문제 없음' 'no path problem')
+    Add-Item 'S17' 'info' (T '경로' 'path') 'ok' (T ('경로 문제 없음(가장 긴 파일까지 ' + $pathTotal + '자, 한도 ' + $pathLimit + '자)') ('no path problem (' + $pathTotal + ' characters to the longest file, limit ' + $pathLimit + ')'))
 }
 
-# S8 script mark ----------------------------------------------------------------
-$mark = $null
-try { $mark = Get-Item -LiteralPath $PSCommandPath -Stream Zone.Identifier -ErrorAction SilentlyContinue } catch { }
-if ($mark) {
-    Add-Item 'S8' 'required' (T '스크립트' 'scripts') 'info' (T '이 파일에 "인터넷에서 받음" 표시가 있습니다. 자동으로 해제하지 않습니다.' 'this file carries a "downloaded from the internet" mark. It is not unblocked automatically.') (T '항상 powershell -NoProfile -ExecutionPolicy Bypass -File 로 실행하세요' 'always run it with powershell -NoProfile -ExecutionPolicy Bypass -File')
+# S20 execution policy set by group policy ------------------------------------------
+# Every hook and this script start with -ExecutionPolicy Bypass. That flag sets the Process
+# scope, and the two group policy scopes win over it (MachinePolicy first, then UserPolicy).
+# AllSigned / Restricted there: the unsigned gatekit scripts do not run at all, and nothing the
+# user may allow changes that, so it is a policy block (exit code 4). In practice such a policy
+# usually keeps this script from starting too ("... cannot be loaded ..."); the item is shown
+# when the script does run (for example it was started another way than the hooks are).
+# RemoteSigned there: only files that carry the internet mark are refused (see S8 below).
+$policy = @{ MachinePolicy = 'Undefined'; UserPolicy = 'Undefined' }
+$policyRead = $false
+if ($env:GATEKIT_SETUP_EXECUTION_POLICY) {
+    foreach ($pair in ($env:GATEKIT_SETUP_EXECUTION_POLICY -split ';')) {
+        $kv = @($pair -split '=', 2)
+        if ($kv.Count -eq 2 -and $policy.ContainsKey($kv[0].Trim())) { $policy[$kv[0].Trim()] = $kv[1].Trim() }
+    }
+    $policyRead = $true
+} else {
+    try {
+        foreach ($row in @(Get-ExecutionPolicy -List -ErrorAction Stop)) {
+            if ($policy.ContainsKey("$($row.Scope)")) { $policy["$($row.Scope)"] = "$($row.ExecutionPolicy)" }
+        }
+        $policyRead = $true
+    } catch { }
+}
+$policyScope = 'MachinePolicy'
+if ($policy.MachinePolicy -eq 'Undefined') { $policyScope = 'UserPolicy' }
+$policyValue = $policy[$policyScope]                # the group policy value that is in effect
+$policyText = 'MachinePolicy=' + $policy.MachinePolicy + ', UserPolicy=' + $policy.UserPolicy
+$policyName = T '실행 정책' 'execution policy'
+if (-not $policyRead) {
+    $policyValue = 'Undefined'
+    Add-Item 'S20' 'required' $policyName 'unverified' (T '그룹 정책의 실행 정책을 읽지 못했습니다' 'the execution policy set by group policy could not be read')
+} elseif ($policyValue -eq 'AllSigned' -or $policyValue -eq 'Restricted') {
+    Set-Flag 'blocked'
+    Add-Item 'S20' 'required' $policyName 'fail' (T ('그룹 정책이 실행 정책을 ' + $policyValue + ' 로 고정했습니다(' + $policyText + '). 훅의 -ExecutionPolicy Bypass 가 통하지 않아 gatekit 스크립트와 훅이 실행되지 않습니다.') ('group policy pins the execution policy to ' + $policyValue + ' (' + $policyText + '). The -ExecutionPolicy Bypass of the hooks has no effect, so the gatekit scripts and hooks do not run.')) `
+        (T 'IT 담당자에게 문의하세요. 정책을 우회하지 마세요.' 'ask your IT contact. Do not work around the policy.') `
+        @((T 'IT 담당자에게 보낼 문의문: ' 'Message for your IT contact: ') + (T ('IT 담당자님, 제 PC(Windows)의 그룹 정책이 PowerShell 실행 정책을 ' + $policyValue + ' 로 고정해 두어(' + $policyScope + '), 서명되지 않은 gatekit 스크립트(프로젝트의 .claude/gatekit/scripts 폴더에 있는 .ps1 파일)가 실행되지 않습니다. 이 폴더의 스크립트를 실행할 수 있게 허용해 주실 수 있나요?') `
+            ('Hi IT team, group policy on my Windows PC pins the PowerShell execution policy to ' + $policyValue + ' (' + $policyScope + '), so the unsigned gatekit scripts (the .ps1 files in the project folder .claude/gatekit/scripts) do not run. Could you allow the scripts in that folder to run?')))
+} elseif ($policyValue -eq 'Undefined') {
+    Add-Item 'S20' 'required' $policyName 'ok' (T ('그룹 정책이 실행 정책을 고정하지 않습니다(' + $policyText + ')') ('group policy does not pin the execution policy (' + $policyText + ')'))
+} else {
+    Add-Item 'S20' 'required' $policyName 'ok' (T ('그룹 정책의 실행 정책은 ' + $policyValue + ' 입니다(' + $policyText + '). gatekit 스크립트는 실행됩니다.') ('the execution policy set by group policy is ' + $policyValue + ' (' + $policyText + '). The gatekit scripts run.'))
+}
+
+# S8 internet mark on the scripts -------------------------------------------------
+# A zip downloaded with a browser leaves the mark (the Zone.Identifier stream) on every file it
+# held. All of scripts/*.ps1 is looked at: the hook runs session-check.ps1 and both scripts load
+# common.ps1, so a mark on any of them matters as much as one on this file. Nothing is unblocked
+# here; the command is printed for the user.
+$scriptFiles = @(Get-ChildItem -LiteralPath $PSScriptRoot -Filter '*.ps1' -ErrorAction SilentlyContinue | Sort-Object Name)
+$marked = @()
+foreach ($sf in $scriptFiles) {
+    $mark = $null
+    try { $mark = Get-Item -LiteralPath $sf.FullName -Stream Zone.Identifier -ErrorAction SilentlyContinue } catch { }
+    if ($mark) { $marked += $sf.Name }
+}
+$scriptsName = T '스크립트' 'scripts'
+$unblockHints = @((T '해제하려면 프로젝트 폴더에서 아래 한 줄을 직접 실행하세요(자동으로 실행하지 않습니다):' 'to remove the mark, run this one line yourself in the project folder (it is never run automatically):'),
+                  'Get-ChildItem .claude\gatekit\scripts\*.ps1 | Unblock-File')
+if ($marked.Count -eq 0) {
+    Add-Item 'S8' 'required' $scriptsName 'ok' (T ('"인터넷에서 받음" 표시가 없습니다(.ps1 파일 ' + $scriptFiles.Count + '개)') ('no "downloaded from the internet" mark (' + $scriptFiles.Count + ' .ps1 files)'))
+} elseif ($policyValue -eq 'RemoteSigned') {
+    Set-Flag 'needs'
+    Add-Item 'S8' 'required' $scriptsName 'warn' (T ('"인터넷에서 받음" 표시가 있는 파일: ' + ($marked -join ', ') + '. 그룹 정책의 실행 정책이 RemoteSigned 라서 이 파일들은 실행되지 않습니다.') ('files that carry the "downloaded from the internet" mark: ' + ($marked -join ', ') + '. Group policy sets the execution policy to RemoteSigned, so these files do not run.')) `
+        (T '표시를 직접 해제하세요' 'remove the mark yourself') $unblockHints
+} else {
+    Add-Item 'S8' 'required' $scriptsName 'info' (T ('"인터넷에서 받음" 표시가 있는 파일: ' + ($marked -join ', ') + '. 자동으로 해제하지 않습니다.') ('files that carry the "downloaded from the internet" mark: ' + ($marked -join ', ') + '. It is not unblocked automatically.')) `
+        (T '항상 powershell -NoProfile -ExecutionPolicy Bypass -File 로 실행하면 그대로 동작합니다' 'it works as it is when always run with powershell -NoProfile -ExecutionPolicy Bypass -File') $unblockHints
 }
 
 # S3 winget ---------------------------------------------------------------------
@@ -1082,7 +1201,14 @@ if ($uvFound.where -eq 'none') {
     $uvVer = Get-VersionFrom $uvProbe.Out
     $m = Get-UvMethod $uvPath
     $script:pkgInfo['uv'] = @{ where = 'session'; path = $uvPath; version = $(if ($uvVer) { $uvVer.ToString() } else { '' }); method = $m.method }
-    if (-not $uvVer) {
+    if (Test-ExecDenied $uvProbe) {
+        # Present but Windows refuses to start it: a reinstall puts the same file back and is
+        # refused again, so it is a policy block, not "reinstall it".
+        Set-Flag 'blocked'
+        Add-Item 'S4' 'required' 'uv' 'fail' (T ('조직 정책이 uv 실행을 막고 있습니다(Windows 오류 ' + $uvProbe.StartError + '): ' + $uvPath) ('an organisation policy blocks uv from running (Windows error ' + $uvProbe.StartError + '): ' + $uvPath)) `
+            (T '다시 설치해도 해결되지 않습니다. IT 담당자에게 문의하세요. 정책을 우회하지 마세요.' 'a reinstall does not fix this. Ask your IT contact. Do not work around the policy.') `
+            @((T 'IT 담당자에게 보낼 문의문: ' 'Message for your IT contact: ') + (New-ExecDeniedInquiry $uvPath $uvProbe.StartError))
+    } elseif (-not $uvVer) {
         Set-Flag 'needs'
         Add-Item 'S4' 'required' 'uv' 'fail' ((T '실행해서 버전을 읽지 못했습니다: ' 'could not run it to read the version: ') + $uvPath) (T '허락하면 다시 설치합니다 (-Install uv 또는 -Update uv)' 'reinstalled if you allow it (-Install uv or -Update uv)')
     } elseif ($uvVer -lt $uvMinimum) {
@@ -1099,9 +1225,12 @@ if ($uvFound.where -eq 'none') {
 
 # S5 .venv ----------------------------------------------------------------------
 # state: ok (python runs) / missing (nothing there) / broken (python.exe 0 bytes, its Python
-# home is gone, or it does not start).
+# home is gone, or it does not start) / old (below the minimum) / denied (python.exe is there but
+# Windows refuses to start it because of a policy: never deleted, never rebuilt).
 function Get-PythonVersion {
     $pv = Invoke-Proc $venvPy @('-c', "import sys;print('%d.%d.%d' % sys.version_info[:3])") 20
+    $script:venvDenied = 0
+    if (Test-ExecDenied $pv) { $script:venvDenied = $pv.StartError }
     if ($pv.Code -eq 0 -and -not $pv.TimedOut -and $pv.Out.Trim()) { return $pv.Out.Trim() }
     return ''
 }
@@ -1125,12 +1254,22 @@ function Test-VenvHealth {
         }
     }
     $v = Get-PythonVersion
+    if (-not $v -and $script:venvDenied) { return @{ state = 'denied'; reason = ''; version = '' } }
     if (-not $v) { return @{ state = 'broken'; reason = (T 'python.exe 가 실행되지 않습니다' 'python.exe does not start'); version = '' } }
     $pv = Get-VersionFrom $v
     if ($pv -and $pv -lt $pythonMinimum) {
         return @{ state = 'old'; reason = (T ('python ' + $v + ' 은(는) 필요한 ' + $pythonMinimum.Major + '.' + $pythonMinimum.Minor + ' 보다 낮습니다') ('python ' + $v + ' is older than the required ' + $pythonMinimum.Major + '.' + $pythonMinimum.Minor)); version = $v }
     }
     return @{ state = 'ok'; reason = ''; version = $v }
+}
+
+# The .venv python.exe exists but a policy keeps it from starting. The hooks start the same file,
+# so they are off too. Rebuilding the folder would put the same file back: nothing is deleted.
+function Add-VenvDeniedItem {
+    Set-Flag 'blocked'
+    Add-Item 'S5' 'required' '.venv' 'fail' (T ('조직 정책이 .venv 의 python.exe 실행을 막고 있습니다(Windows 오류 ' + $script:venvDenied + '). gatekit 훅도 같은 이유로 동작하지 않습니다: ' + $venvPy) ('an organisation policy blocks the .venv python.exe from running (Windows error ' + $script:venvDenied + '). The gatekit hooks are off for the same reason: ' + $venvPy)) `
+        (T '.venv 를 다시 만들어도 해결되지 않습니다. IT 담당자에게 문의하세요. 정책을 우회하지 마세요.' 'rebuilding the .venv does not fix this. Ask your IT contact. Do not work around the policy.') `
+        @((T 'IT 담당자에게 보낼 문의문: ' 'Message for your IT contact: ') + (New-ExecDeniedInquiry $venvPy $script:venvDenied))
 }
 
 $venvReady = $false
@@ -1148,6 +1287,8 @@ if ($Status) {
         if ($wantVenv) { $msg = (T '이미 준비되어 있어 건너뜁니다: ' 'already ready, skipped: ') + $msg }
         Add-Item 'S5' 'required' '.venv' 'ok' $msg
         $venvReady = $true
+    } elseif ($health.state -eq 'denied') {
+        Add-VenvDeniedItem
     } elseif (($health.state -eq 'broken' -or $health.state -eq 'old') -and -not $wantVenv) {
         Set-Flag 'needs'
         $damageVerdict = 'fail'
@@ -1178,6 +1319,8 @@ if ($Status) {
             if ($v) {
                 Add-Item 'S5' 'required' '.venv' 'ok' (T ('uv sync --frozen --no-dev: python ' + $v + ' 준비됨') ('uv sync --frozen --no-dev: python ' + $v + ' ready'))
                 $venvReady = $true
+            } elseif ($script:venvDenied) {
+                Add-VenvDeniedItem
             } else {
                 Set-Flag 'fail'
                 Add-Item 'S5' 'required' '.venv' 'fail' (T 'uv sync 는 끝났지만 .venv 의 python.exe 가 실행되지 않습니다' 'uv sync finished but the .venv python.exe does not start') '' $hints
@@ -1202,6 +1345,7 @@ if ($wantVenv -and -not $Status) {
     elseif ($uvOk) {
         $venvCls = 'unknown'
         if ($script:flags.blocked) { $venvCls = 'network' }
+        if ($script:venvDenied) { $venvCls = 'policy' }
         Add-FailureRecord 'venv' 'install' $venvCls '' (T '.venv 를 만들지 못했습니다' 'the .venv could not be built')
     }
 }
@@ -1247,13 +1391,13 @@ function Get-HooksMissingPsFlags($settings) {
 $settingsFile = Join-Path $projectRoot '.claude\settings.json'
 if (-not (Test-Path -LiteralPath $settingsFile)) {
     Set-Flag 'fail'
-    Add-Item 'S12-settings' 'required' '.claude/settings.json' 'fail' (T '없습니다: 훅이 등록되지 않았습니다' 'missing: hooks are not registered') (T '저장소에서 복원하세요(git checkout .claude/settings.json)' 'restore it from the repository (git checkout .claude/settings.json)')
+    Add-Item 'S12-settings' 'required' '.claude/settings.json' 'fail' (T '없습니다: 훅이 등록되지 않았습니다' 'missing: hooks are not registered') (Get-RestoreAdvice '.claude/settings.json')
 } else {
     $settings = $null
     try { $settings = (Get-Content -LiteralPath $settingsFile -Raw -Encoding UTF8 | ConvertFrom-Json) } catch { }
     if (-not $settings -or -not $settings.hooks) {
         Set-Flag 'fail'
-        Add-Item 'S12-settings' 'required' '.claude/settings.json' 'fail' (T 'JSON 이 깨졌거나 hooks 가 없습니다' 'invalid JSON or no hooks') (T '저장소에서 복원하세요' 'restore it from the repository')
+        Add-Item 'S12-settings' 'required' '.claude/settings.json' 'fail' (T 'JSON 이 깨졌거나 hooks 가 없습니다' 'invalid JSON or no hooks') (Get-RestoreAdvice '.claude/settings.json')
     } else {
         $rawSettings = Get-Content -LiteralPath $settingsFile -Raw -Encoding UTF8
         $hasStart = ($settings.hooks.SessionStart -and $rawSettings -match 'session-check\.ps1')
@@ -1264,10 +1408,10 @@ if (-not (Test-Path -LiteralPath $settingsFile)) {
         $psShell = ([string]$settings.defaultShell -eq 'powershell')
         if (-not ($hasStart -and $hasGate)) {
             Set-Flag 'fail'
-            Add-Item 'S12-settings' 'required' '.claude/settings.json' 'fail' (T 'gatekit 훅 등록이 빠져 있습니다' 'gatekit hook registrations are missing') (T '저장소에서 복원하세요' 'restore it from the repository')
+            Add-Item 'S12-settings' 'required' '.claude/settings.json' 'fail' (T 'gatekit 훅 등록이 빠져 있습니다' 'gatekit hook registrations are missing') (Get-RestoreAdvice '.claude/settings.json')
         } elseif ($noFlags.Count -gt 0) {
             Set-Flag 'fail'
-            Add-Item 'S12-settings' 'required' '.claude/settings.json' 'fail' (T ('PowerShell 훅에 -NoProfile -ExecutionPolicy Bypass 가 없습니다: ' + ($noFlags -join ', ')) ('PowerShell hook without -NoProfile -ExecutionPolicy Bypass: ' + ($noFlags -join ', '))) (T '저장소에서 복원하세요' 'restore it from the repository')
+            Add-Item 'S12-settings' 'required' '.claude/settings.json' 'fail' (T ('PowerShell 훅에 -NoProfile -ExecutionPolicy Bypass 가 없습니다: ' + ($noFlags -join ', ')) ('PowerShell hook without -NoProfile -ExecutionPolicy Bypass: ' + ($noFlags -join ', '))) (Get-RestoreAdvice '.claude/settings.json')
         } elseif (-not ($psTool -and $psShell)) {
             Set-Flag 'needs'
             $missing = @()

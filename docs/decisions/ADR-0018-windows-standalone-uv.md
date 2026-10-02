@@ -96,8 +96,11 @@ written the new way here (`/gatekit-setup`; the skills replaced the commands).
    noted). Stable but older: `fail`, `-Update pwsh`. Preview only, or nothing:
    `fail`, `-Install pwsh`. Installed but no `pwsh` on this session's PATH:
    `warn`, exit 3. The package names live in `packages.json`
-   (`appx_name`, `appx_preview_name`). `session-check.ps1` still only looks at
-   PATH: it may not start a process or load a module at session start.
+   (`appx_name`, `appx_preview_name`). `session-check.ps1` applies the same rule lightly
+   (the functions live in `common.ps1`): the package lookup, the MSI folder and
+   the version written in the `pwsh.exe` file. It starts no process and uses no
+   network; the package lookup loads the Appx module (about half a second), and
+   a machine with only a preview is named at session start.
 3. **The dev group is not installed by default.** `uv run --frozen` (the form
    every skill uses) installed `pyright[nodejs]` and `ruff` on a user's machine
    because uv syncs the `dev` group by default. `[tool.uv] default-groups = []`

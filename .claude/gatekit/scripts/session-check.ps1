@@ -8,6 +8,12 @@
 # if it is on the PATH of THIS session. If it is visible only after merging the registry PATH
 # (Machine + User) the message says "installed but not visible: close Claude Code completely and open it again" instead
 # of "not found". (GATEKIT_SETUP_REGISTRY_PATH replaces the registry value; used by tests.)
+# PowerShell 7 follows the same product rule as setup.ps1 (Get-PwshProduct in common.ps1): a pwsh on
+# PATH is not enough when only a preview build is installed. Here the rule is the light part only:
+# the Windows package lookup (Get-AppxPackage, about half a second, no network), the MSI folder and
+# the version text stored inside the pwsh.exe files on PATH. No pwsh is started. When none of
+# these can tell (an unknown kind of install), nothing is reported.
+# (GATEKIT_SETUP_PWSH_PACKAGES replaces the package lookup; used by tests.)
 # Non-ASCII text is emitted as \uXXXX (ConvertTo-AsciiJson) so the output does not depend on the
 # console code page.
 $ErrorActionPreference = 'Stop'
@@ -28,9 +34,17 @@ try {
     # Minimum .venv Python: scripts/packages.json python_min (the single source), 3.14 if unreadable.
     $pyMinMajor = 3
     $pyMinMinor = 14
+    # The package names of the stable and the preview PowerShell 7 come from the same file
+    # (appx_name / appx_preview_name); unreadable: no package lookup.
+    $pwshStableName = ''
+    $pwshPreviewName = ''
     try {
-        $pm = [string](Get-Content -LiteralPath (Join-Path $PSScriptRoot 'packages.json') -Raw -Encoding UTF8 | ConvertFrom-Json).python_min
+        $pkgData = (Get-Content -LiteralPath (Join-Path $PSScriptRoot 'packages.json') -Raw -Encoding UTF8 | ConvertFrom-Json)
+        $pm = [string]$pkgData.python_min
         if ($pm -match '^(\d+)\.(\d+)$') { $pyMinMajor = [int]$Matches[1]; $pyMinMinor = [int]$Matches[2] }
+        foreach ($pk in @($pkgData.packages)) {
+            if ("$($pk.key)" -eq 'pwsh') { $pwshStableName = "$($pk.appx_name)"; $pwshPreviewName = "$($pk.appx_preview_name)" }
+        }
     } catch { }
     $pyMinText = "$pyMinMajor.$pyMinMinor"
 
@@ -68,11 +82,27 @@ try {
         }
     }
     if (Test-Budget) {
-        $where = (Get-App 'pwsh').where
+        $pwshFound = Get-App 'pwsh'
+        $where = $pwshFound.where
         if ($where -eq 'registry') {
             $problems += 'PowerShell 7: installed but not visible in this session - close Claude Code completely (the desktop app, the VS Code window, or the terminal it runs in) and open it again / 설치돼 있지만 이 창에서는 보이지 않습니다 - Claude Code(데스크톱 앱, VS Code 창, 또는 실행 중인 터미널)를 완전히 닫고 다시 여세요'
         } elseif ($where -eq 'none') {
             $problems += 'PowerShell 7 (pwsh): not found / PowerShell 7 을 찾을 수 없습니다'
+        } else {
+            # pwsh is on PATH: is a STABLE product installed, or only a preview build?
+            $product = Get-PwshProduct $pwshStableName $pwshPreviewName
+            if (-not $product.stable) {
+                $stableOnPath = $false
+                $previewSeen = $product.preview
+                foreach ($app in (@($pwshFound.apps) | Select-Object -First 3)) {
+                    $kind = Get-PwshFileKind $app.Source $pwshPreviewName
+                    if ($kind -eq 'stable') { $stableOnPath = $true }
+                    if ($kind -eq 'preview') { $previewSeen = $true }
+                }
+                if ($previewSeen -and -not $stableOnPath) {
+                    $problems += 'PowerShell 7: only a preview build is installed, the stable one is missing / 미리보기(preview) 버전만 있고 안정판이 없습니다'
+                }
+            }
         }
     }
     if (Test-Budget) {
