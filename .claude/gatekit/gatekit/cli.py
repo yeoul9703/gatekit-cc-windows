@@ -19,7 +19,6 @@ SUBCOMMANDS = {
     "workers":  ("gatekit.workers",  "Worker backends: list / check / set-default."),
     "ledger":   ("gatekit.ledger",   "Session ledger: show / init / set-pipeline / release-scopes."),
     "lang":     ("gatekit.lang",     "Print the output language: always ko. Kept for the skills that still call it."),
-    "setup":    ("gatekit.setup",    "Run scripts/setup.ps1: --install/--update/--reinstall X,Y, --retry-failed, --status, --json, --lang ko|en."),
 }
 
 #: Gate modules that `_gate <name>` may dispatch to. This is how

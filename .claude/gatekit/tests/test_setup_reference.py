@@ -8,8 +8,6 @@ import pathlib
 import re
 import unittest
 
-from gatekit import setup as setup_cli
-
 KIT = pathlib.Path(__file__).resolve().parents[1]
 PROJECT = KIT.parents[1]
 DOC = PROJECT / "docs" / "SETUP-REFERENCE.md"
@@ -158,24 +156,11 @@ class TestSwitchTables(unittest.TestCase):
         for name in names:
             self.assertIn("`-%s" % name, text, name)
 
-    def test_every_cli_flag_is_documented(self) -> None:
-        text = doc_text()
-        flags = [a for a in setup_cli._parser()._option_string_actions if a.startswith("--") and a != "--help"]
-        self.assertGreaterEqual(len(flags), 7)
-        for flag in flags:
-            self.assertIn("`%s" % flag, text, flag)
-
-    def test_cli_and_script_forms_correspond_row_by_row(self) -> None:
-        pairs = {"-Install": "--install", "-Update": "--update", "-Reinstall": "--reinstall",
-                 "-RetryFailed": "--retry-failed", "-Status": "--status", "-Json": "--json", "-Lang": "--lang"}
-        rows = table_rows("## 3. setup 스위치와 CLI 대응표", doc_text())
-        for script_flag, cli_flag in pairs.items():
-            hit = [r for r in rows if r[1].startswith("`" + script_flag)]
-            self.assertEqual(len(hit), 1, script_flag)
-            self.assertTrue(hit[0][2].startswith("`" + cli_flag), (script_flag, hit[0]))
-        built = setup_cli.build_command("PS", pathlib.Path("S"), setup_cli._parser().parse_args(
-            ["--retry-failed", "--status", "--json", "--lang", "ko"]))
-        self.assertEqual(built[6:], ["-RetryFailed", "-Status", "-Json", "-Lang", "ko"])
+    def test_every_script_switch_has_one_row_in_the_table(self) -> None:
+        rows = table_rows("## 3. setup 스위치", doc_text())
+        for switch in ("-Install", "-Update", "-Reinstall", "-RetryFailed", "-Status", "-Json", "-Lang"):
+            hit = [r for r in rows if r[1].startswith("`" + switch)]
+            self.assertEqual(len(hit), 1, switch)
 
 
 class TestExitCodesAndWinget(unittest.TestCase):

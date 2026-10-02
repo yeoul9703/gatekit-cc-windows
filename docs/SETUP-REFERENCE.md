@@ -218,20 +218,20 @@ setup(`S7`)은 이렇게 판정합니다. 권장 항목이라 어느 경우에�
 - 이미 있는 Git은 setup이 업데이트하거나 다시 설치하지 않습니다(`-Update git`은 알림만, `-Reinstall git`은 거부).
   위 명령으로 직접 하세요.
 
-## 3. setup 스위치와 CLI 대응표
+## 3. setup 스위치
 
-같은 일을 세 가지 방법으로 할 수 있습니다: 채팅(`/gatekit-setup`), 스크립트 직접 실행, CLI.
+같은 일을 두 가지 방법으로 할 수 있습니다: 채팅(`/gatekit-setup`), 스크립트 직접 실행.
 
-| 하고 싶은 것 | setup.ps1 스위치 | CLI (`gatekit.py setup ...`) |
-|---|---|---|
-| 점검만(아무것도 설치 안 함) | (없음) | (없음) |
-| 프로그램 표·실패 기록만 보기 | `-Status` | `--status` |
-| 설치 | `-Install winget,pwsh,uv,claude,git,venv` | `--install X,Y` |
-| 업데이트 | `-Update pwsh,uv,claude,git` | `--update X` |
-| 재설치 | `-Reinstall uv,pwsh,claude` | `--reinstall X` |
-| 지난 실패만 다시 시도 | `-RetryFailed` | `--retry-failed` |
-| JSON 출력(ASCII) | `-Json` | `--json` |
-| 출력 언어 | `-Lang ko` / `-Lang en` | `--lang ko` / `--lang en` |
+| 하고 싶은 것 | setup.ps1 스위치 |
+|---|---|
+| 점검만(아무것도 설치 안 함) | (없음) |
+| 프로그램 표·실패 기록만 보기 | `-Status` |
+| 설치 | `-Install winget,pwsh,uv,claude,git,venv` |
+| 업데이트 | `-Update pwsh,uv,claude,git` |
+| 재설치 | `-Reinstall uv,pwsh,claude` |
+| 지난 실패만 다시 시도 | `-RetryFailed` |
+| JSON 출력(ASCII) | `-Json` |
+| 출력 언어 | `-Lang ko` / `-Lang en` |
 
 - `venv` 는 `-Install venv` 로만 만듭니다(`-Update`, `-Reinstall` 에는 쓸 수 없음).
 - `winget` 도 `-Install winget` 만 됩니다(2-0). `-Install` 목록에 있으면 항상 가장 먼저 처리합니다.
@@ -242,14 +242,6 @@ setup(`S7`)은 이렇게 판정합니다. 권장 항목이라 어느 경우에�
 ```
 powershell -NoProfile -ExecutionPolicy Bypass -File .claude/gatekit/scripts/setup.ps1 -Reinstall uv -Lang ko
 ```
-
-CLI 형태(프로젝트 폴더에서):
-
-```
-uv run --project .claude/gatekit --frozen python .claude/gatekit/bin/gatekit.py setup --reinstall uv --lang ko
-```
-
-CLI는 위 스크립트를 그대로 부르고, 출력과 종료 코드도 그대로 돌려줍니다.
 
 ## 4. 종료 코드
 
