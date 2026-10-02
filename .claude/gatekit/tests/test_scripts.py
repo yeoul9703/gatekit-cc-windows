@@ -81,7 +81,7 @@ class TestScriptFiles(unittest.TestCase):
         self.assertIn("*.ps1 text eol=crlf", text.splitlines())
 
     def test_setup_command_asks_with_one_question_and_does_not_auto_approve_it(self) -> None:
-        text = (PROJECT / ".claude" / "commands" / "gatekit" / "setup.md").read_text(encoding="utf-8")
+        text = (PROJECT / ".claude" / "skills" / "gatekit-setup" / "SKILL.md").read_text(encoding="utf-8")
         front = text.split("---")[1]
         allowed = [line for line in front.splitlines() if line.startswith("allowed-tools:")]
         self.assertEqual(len(allowed), 1)
@@ -93,10 +93,13 @@ class TestScriptFiles(unittest.TestCase):
 
 
 class TestSetupCommandText(unittest.TestCase):
-    """S27: the command text covers warn candidates, -Update, -Install venv and -Lang."""
+    """S27: the setup skill covers warn candidates, -Update, -Install venv and -Lang."""
 
     def setUp(self) -> None:
-        self.text = (PROJECT / ".claude" / "commands" / "gatekit" / "setup.md").read_text(encoding="utf-8")
+        # The skill as a whole: SKILL.md plus the reference files its steps read.
+        skill = PROJECT / ".claude" / "skills" / "gatekit-setup"
+        files = [skill / "SKILL.md"] + sorted((skill / "references").glob("*.md"))
+        self.text = "\n".join(path.read_text(encoding="utf-8") for path in files)
 
     def test_candidates_include_warn_items_and_update_flow(self) -> None:
         self.assertIn("`fail` **or `warn`**", self.text)
@@ -119,11 +122,14 @@ class TestSetupCommandText(unittest.TestCase):
 
 def base_env(bin_dir: pathlib.Path, local_app: pathlib.Path) -> dict:
     """A scratch environment: only the fakes on PATH, no inherited policy
-    override (PSExecutionPolicyPreference is deliberately absent)."""
+    override (PSExecutionPolicyPreference is deliberately absent). The PowerShell 7
+    package lookup answers "none" (an empty value would count as not set and ask this
+    machine), and without ProgramFiles the MSI folder is not looked at either."""
     return {"SystemRoot": os.environ.get("SystemRoot", r"C:\Windows"),
             "PATH": str(bin_dir), "PATHEXT": ".EXE;.CMD",
             "LOCALAPPDATA": str(local_app),
-            "GATEKIT_SETUP_KEEP_PATH": "1"}
+            "GATEKIT_SETUP_KEEP_PATH": "1",
+            "GATEKIT_SETUP_PWSH_PACKAGES": "none"}
 
 
 #: Program and product names that may appear inside a Korean line.
@@ -250,7 +256,7 @@ class SetupCase(unittest.TestCase):
     def copy_kit_sources(self) -> None:
         """A scratch kit that can really run doctor: the package, launcher and scripts."""
         ignore = shutil.ignore_patterns("__pycache__", ".venv", "tests", "*.pyc")
-        for name in ("gatekit", "bin", "policy"):
+        for name in ("gatekit", "bin"):
             shutil.copytree(KIT / name, self.kit / name, ignore=ignore, dirs_exist_ok=True)
         for name in ("pyproject.toml", "uv.lock"):
             shutil.copy(KIT / name, self.kit / name)
@@ -395,7 +401,7 @@ class TestSetupWithoutUv(SetupCase):
         _, _, by_id = self.run_json("-Lang", "en")
         self.assertEqual(by_id["S2"]["level"], "required")
         self.assertEqual(by_id["S2"]["verdict"], "fail", by_id["S2"])
-        self.assertIn("-Install pwsh", by_id["S2"]["action"])
+        self.assertIn("-Install winget,pwsh", by_id["S2"]["action"])  # no winget here either
 
     def test_real_settings_hook_flags_are_accepted(self) -> None:
         _, _, by_id = self.run_json("-Lang", "en")
@@ -544,12 +550,14 @@ class TestSetupInstallPaths(SetupCase):
         self.assertEqual(code, 4, out)
         self.assertNotIn("official https://astral.sh/uv/install.ps1", self.calls())
 
-    def test_preview_pwsh_points_to_update_not_install(self) -> None:
+    def test_preview_pwsh_alone_is_a_fail_that_offers_the_stable_install(self) -> None:
+        # A preview build is another product: the stable one still has to be installed.
+        self.fake_winget(0)
         self.fake_pwsh("7.7.0-preview.1")
         _, _, by_id = self.run_json("-Lang", "en")
-        self.assertEqual(by_id["S2"]["verdict"], "warn")
-        self.assertIn("-Update pwsh", by_id["S2"]["action"])
-        self.assertNotIn("-Install pwsh", by_id["S2"]["action"])
+        self.assertEqual(by_id["S2"]["verdict"], "fail")
+        self.assertIn("-Install pwsh", by_id["S2"]["action"])
+        self.assertNotIn("-Update pwsh", by_id["S2"]["action"])
 
     def test_same_pwsh_version_on_two_paths_is_shown_once(self) -> None:
         other = self.root / "fakebin2"
@@ -565,6 +573,269 @@ class TestSetupInstallPaths(SetupCase):
         self.fake_winget(0x8A150107)
         _, out = self.run_setup("-Install", "uv", "-Lang", "ko")
         self.assertEqual(english_sentence_lines(out), [], out)
+
+
+#: GATEKIT_SETUP_PWSH_PACKAGES values: what Get-AppxPackage would answer.
+STABLE_PKG = "Microsoft.PowerShell=%s"
+PREVIEW_PKG = "Microsoft.PowerShellPreview=7.7.5.0"
+
+
+@unittest.skipUnless(POWERSHELL.is_file(), "Windows PowerShell 5.1 not available")
+class TestSetupPwshProduct(SetupCase):
+    """S2 follows the installed stable PRODUCT (package, then MSI folder, then the PATH
+    version text), not the PATH order."""
+
+    def s2(self, packages: str = "none", **env):
+        environment = {"GATEKIT_SETUP_PWSH_PACKAGES": packages}
+        environment.update(env)
+        code, _, by_id = self.run_json("-Lang", "en", env=environment)
+        return code, by_id["S2"], by_id
+
+    def test_stable_package_is_ok_even_when_a_preview_comes_first_on_path(self) -> None:
+        self.fake_pwsh("7.7.0-preview.5")
+        _, item, by_id = self.s2(STABLE_PKG % "7.6.6.0" + ";" + PREVIEW_PKG)
+        self.assertEqual(item["verdict"], "ok", item)
+        self.assertEqual(item["level"], "required")
+        self.assertIn("stable 7.6.6", item["detail"])
+        self.assertIn("package Microsoft.PowerShell", item["detail"])
+        self.assertIn("a preview build comes first on PATH", item["detail"])
+        self.assertEqual(item["action"], "")
+        self.assertIn("installed 7.6.6", by_id["P-pwsh"]["detail"])
+
+    def test_stable_package_without_a_preview_has_no_preview_note(self) -> None:
+        self.fake_pwsh("7.6.6")
+        _, item, _ = self.s2(STABLE_PKG % "7.6.6.0")
+        self.assertEqual(item["verdict"], "ok", item)
+        self.assertNotIn("preview", item["detail"])
+
+    def test_stable_package_below_the_minimum_fails_and_offers_the_update(self) -> None:
+        self.fake_pwsh("7.5.1")
+        code, item, _ = self.s2(STABLE_PKG % "7.5.1.0")
+        self.assertEqual(item["verdict"], "fail", item)
+        self.assertIn("-Update pwsh", item["action"])
+        self.assertNotIn("-Install", item["action"])
+        self.assertEqual(code, 2)
+
+    def test_old_stable_on_path_only_fails_and_offers_the_update(self) -> None:
+        self.fake_pwsh("7.5.0")
+        _, item, _ = self.s2()
+        self.assertEqual(item["verdict"], "fail", item)
+        self.assertIn("-Update pwsh", item["action"])
+
+    def test_preview_package_only_fails_and_offers_the_install(self) -> None:
+        self.fake_winget(0)
+        code, item, _ = self.s2(PREVIEW_PKG)
+        self.assertEqual(item["verdict"], "fail", item)
+        self.assertIn("preview", item["detail"])
+        self.assertIn("-Install pwsh", item["action"])
+        self.assertNotIn("-Update", item["action"])
+        self.assertEqual(code, 2)
+
+    def test_preview_on_path_only_fails_and_offers_the_install(self) -> None:
+        self.fake_winget(0)
+        self.fake_pwsh("7.7.0-preview.1")
+        _, item, _ = self.s2()
+        self.assertEqual(item["verdict"], "fail", item)
+        self.assertIn("-Install pwsh", item["action"])
+        self.assertNotIn("-Update pwsh", item["action"])
+
+    def test_install_pwsh_is_not_skipped_when_only_a_preview_is_installed(self) -> None:
+        self.fake_winget(0)
+        self.fake_pwsh("7.7.0-preview.1")
+        self.run_setup("-Install", "pwsh", "-Lang", "en")
+        installs = [c for c in self.calls() if c.startswith("winget install")]
+        self.assertEqual(len(installs), 1, self.calls())
+        self.assertIn("--id Microsoft.PowerShell -e", installs[0])
+
+    def test_install_pwsh_is_skipped_when_the_stable_package_is_there(self) -> None:
+        self.fake_winget(0)
+        self.fake_pwsh("7.7.0-preview.1")
+        self.run_setup("-Install", "pwsh", "-Lang", "en",
+                       env={"GATEKIT_SETUP_PWSH_PACKAGES": STABLE_PKG % "7.6.6.0"})
+        self.assertEqual([c for c in self.calls() if c.startswith("winget install")], [])
+
+    def test_stable_package_that_is_not_on_the_session_path_is_warn_and_exit_3(self) -> None:
+        code, item, _ = self.s2(STABLE_PKG % "7.6.6.0")
+        self.assertEqual(item["verdict"], "warn", item)
+        self.assertIn("not visible", item["detail"])
+        self.assertIn("close Claude Code completely (the desktop app, the VS Code window, "
+                      "or the terminal it runs in) and open it again", item["action"])
+        self.assertEqual(code, 3)
+
+    def test_nothing_installed_offers_winget_and_pwsh_together_when_winget_is_missing(self) -> None:
+        _, item, by_id = self.s2()
+        self.assertEqual(item["verdict"], "fail", item)
+        self.assertIn("-Install winget,pwsh", item["action"])
+        self.assertEqual(by_id["S3"]["verdict"], "warn")
+        self.assertEqual(by_id["S3"]["level"], "recommended")
+        self.assertIn("-Install winget", by_id["S3"]["action"])
+
+    def test_nothing_installed_offers_only_pwsh_when_winget_is_there(self) -> None:
+        self.fake_winget(0)
+        _, item, _ = self.s2()
+        self.assertEqual(item["verdict"], "fail", item)
+        self.assertIn("-Install pwsh", item["action"])
+        self.assertNotIn("winget,pwsh", item["action"])
+
+    def test_msi_folder_is_the_second_source(self) -> None:
+        program_files = self.root / "Program Files"
+        preview = program_files / "PowerShell" / "7-preview"
+        preview.mkdir(parents=True)
+        (preview / "pwsh.exe").write_bytes(b"")
+        _, item, _ = self.s2(ProgramFiles=str(program_files))
+        self.assertEqual(item["verdict"], "fail", item)  # a preview alone does not count
+        self.assertIn("-Install", item["action"])
+        stable = program_files / "PowerShell" / "7"
+        stable.mkdir()
+        (stable / "pwsh.exe").write_bytes(b"")  # found, but a fake file has no version
+        _, item, _ = self.s2(ProgramFiles=str(program_files))
+        self.assertEqual(item["verdict"], "unverified", item)
+        self.assertIn("MSI", item["detail"])
+
+    def test_package_wins_over_the_msi_folder_and_the_path(self) -> None:
+        self.fake_pwsh("7.5.0")
+        _, item, _ = self.s2(STABLE_PKG % "7.6.6.0")
+        self.assertEqual(item["verdict"], "ok", item)
+        self.assertIn("stable 7.6.6", item["detail"])
+
+    def test_korean_lines_have_no_english_sentence(self) -> None:
+        self.fake_pwsh("7.7.0-preview.5")
+        for packages in (STABLE_PKG % "7.6.6.0", STABLE_PKG % "7.5.0.0", PREVIEW_PKG, "none"):
+            _, out = self.run_setup("-Lang", "ko", env={"GATEKIT_SETUP_PWSH_PACKAGES": packages})
+            self.assertEqual(english_sentence_lines(out), [], out)
+
+    def test_the_lookup_names_come_from_packages_json(self) -> None:
+        text = (SCRIPTS / "setup.ps1").read_bytes().decode("utf-8-sig")
+        self.assertIn("Get-AppxPackage -Name $slot[1]", text)
+        self.assertIn("GATEKIT_SETUP_PWSH_PACKAGES", text)
+        self.assertNotIn("Microsoft.PowerShell", text)  # appx_name / appx_preview_name
+
+
+#: A stand-in for the two winget install steps (GATEKIT_SETUP_WINGET_RUNNER). It logs
+#: "wingetstep <step> <family>", prints TEXT and exits CODE. When the step is CREATE_ON it
+#: creates a working fake winget on PATH (which logs its own calls).
+FAKE_WINGET_RUNNER = r"""
+import sys
+step = sys.argv[1]
+open(LOG, 'a').write('wingetstep ' + ' '.join(sys.argv[1:]) + chr(10))
+if TEXT:
+    print(TEXT)
+if step == CREATE_ON:
+    src = ("import sys" + chr(10)
+           + "open(%r, 'a').write('winget ' + ' '.join(sys.argv[1:]) + chr(10))" % LOG + chr(10)
+           + "if sys.argv[1] == '--version':" + chr(10) + "    print('v1.29.380')" + chr(10)
+           + "sys.exit(0)" + chr(10))
+    open(BIN + '/winget.fake.py', 'w').write(src)
+    open(BIN + '/winget.cmd', 'w').write('@echo off' + chr(13) + chr(10)
+                                         + '"%s" "%s" %%*' % (sys.executable, BIN + '/winget.fake.py')
+                                         + chr(13) + chr(10))
+sys.exit(CODE)
+"""
+
+
+@unittest.skipUnless(POWERSHELL.is_file(), "Windows PowerShell 5.1 not available")
+class TestSetupInstallWinget(SetupCase):
+    """-Install winget: register first (nothing downloaded), then the module repair, then the
+    Microsoft Store link. Nothing real is installed: both steps go to a fake runner."""
+
+    FAMILY = "Microsoft.DesktopAppInstaller_8wekyb3d8bbwe"
+    STORE = "https://apps.microsoft.com/detail/9nblggh4nns1"
+
+    def runner(self, create_on: str = "", text: str = "", code: int = 0) -> dict:
+        src = ("LOG = %r\nBIN = %r\nCREATE_ON = %r\nTEXT = %r\nCODE = %d\n"
+               % (str(self.log), str(self.bin), create_on, text, code)) + FAKE_WINGET_RUNNER
+        return {"GATEKIT_SETUP_WINGET_RUNNER": str(fakebin.make_fake(self.bin, "winget-runner", src))}
+
+    def steps(self) -> list:
+        return [c for c in self.calls() if c.startswith("wingetstep")]
+
+    def records(self) -> list:
+        path = self.root / ".gatekit" / "runs" / "setup-last.json"
+        return json.loads(path.read_text(encoding="utf-8"))["failures"]
+
+    def test_registering_is_tried_first_and_is_enough(self) -> None:
+        _, _, by_id = self.run_json("-Install", "winget", "-Lang", "en", env=self.runner("register"))
+        self.assertEqual(self.steps(), ["wingetstep register " + self.FAMILY])
+        self.assertEqual(by_id["A-winget"]["verdict"], "ok", by_id["A-winget"])
+        self.assertEqual(by_id["S3"]["verdict"], "ok", by_id["S3"])
+        self.assertNotIn("S16-winget", by_id)
+
+    def test_repair_runs_only_when_registering_was_not_enough(self) -> None:
+        _, _, by_id = self.run_json("-Install", "winget", "-Lang", "en", env=self.runner("repair"))
+        self.assertEqual(self.steps(), ["wingetstep register " + self.FAMILY,
+                                        "wingetstep repair " + self.FAMILY])
+        self.assertEqual(by_id["S3"]["verdict"], "ok", by_id["S3"])
+
+    def test_still_missing_points_to_the_store_and_exits_2(self) -> None:
+        code, _, by_id = self.run_json("-Install", "winget", "-Lang", "en", env=self.runner(""))
+        item = by_id["S16-winget"]
+        self.assertEqual(item["verdict"], "fail", item)
+        self.assertEqual(item["level"], "recommended")
+        self.assertIn("Microsoft Store", item["action"])
+        self.assertIn(self.STORE, item["hints"])
+        self.assertEqual(len(self.steps()), 2)
+        self.assertEqual(code, 2)
+        self.assertEqual([(r["item"], r["action"], r["class"]) for r in self.records()],
+                         [("winget", "install", "store")])
+
+    def test_policy_and_network_blocks_exit_4(self) -> None:
+        cases = (("Add-AppxPackage : Deployment failed: blocked by group policy (0x80073D19)", "policy"),
+                 ("Install-Module : Unable to download from URI: could not resolve host", "network"))
+        for text, cls in cases:
+            with self.subTest(cls=cls):
+                code, _, by_id = self.run_json("-Install", "winget", "-Lang", "en",
+                                               env=self.runner("", text=text, code=1))
+                self.assertEqual(code, 4, by_id["S16-winget"])
+                self.assertEqual(self.records()[0]["class"], cls)
+
+    def test_the_real_commands_stay_in_user_scope(self) -> None:
+        text = (SCRIPTS / "setup.ps1").read_bytes().decode("utf-8-sig")
+        self.assertIn("Add-AppxPackage -RegisterByFamilyName -MainPackage ", text)
+        self.assertIn("Install-PackageProvider -Name NuGet -Scope CurrentUser -Force", text)
+        self.assertIn("Install-Module -Name Microsoft.WinGet.Client -Scope CurrentUser -Force -Repository PSGallery", text)
+        code_lines = [line for line in text.splitlines() if not line.lstrip().startswith("#")]
+        self.assertTrue(any("Repair-WinGetPackageManager'" in line for line in code_lines))
+        self.assertFalse(any("-AllUsers" in line or "Scope AllUsers" in line for line in code_lines))
+
+    def test_winget_already_there_is_skipped(self) -> None:
+        self.fake_winget(0)
+        _, _, by_id = self.run_json("-Install", "winget", "-Lang", "en", env=self.runner("register"))
+        self.assertEqual(self.steps(), [])
+        self.assertIn("skipped", by_id["A-winget"]["detail"])
+
+    def test_winget_is_installed_before_the_programs_that_need_it(self) -> None:
+        self.run_setup("-Install", "pwsh,winget", "-Lang", "en", env=self.runner("register"))
+        calls = self.calls()
+        first_step = calls.index("wingetstep register " + self.FAMILY)
+        installs = [i for i, c in enumerate(calls) if c.startswith("winget install --id Microsoft.PowerShell")]
+        self.assertEqual(len(installs), 1, calls)
+        self.assertLess(first_step, installs[0])
+
+    def test_check_only_never_runs_a_winget_step(self) -> None:
+        self.run_setup("-Lang", "en", env=self.runner("register"))
+        self.assertEqual(self.steps(), [])
+
+    def test_update_and_reinstall_of_winget_are_refused(self) -> None:
+        for switch in ("-Update", "-Reinstall"):
+            code, out = self.run_setup(switch, "winget", "-Lang", "en", env=self.runner("register"))
+            self.assertEqual(code, 1, out)
+            self.assertIn("refused", out)
+        self.assertEqual(self.steps(), [])
+
+    def test_retry_failed_retries_the_winget_install(self) -> None:
+        self.run_setup("-Install", "winget", "-Lang", "en", env=self.runner(""))
+        self.log.unlink()
+        _, _, by_id = self.run_json("-RetryFailed", "-Lang", "en", env=self.runner("register"))
+        self.assertEqual(self.steps(), ["wingetstep register " + self.FAMILY])
+        self.assertIn("winget install", by_id["retry"]["detail"])
+        self.assertEqual(self.records(), [])
+
+    def test_lang_ko_has_no_english_sentence(self) -> None:
+        for create_on in ("", "repair"):  # the failing run first: the second one creates winget
+            _, out = self.run_setup("-Install", "winget", "-Lang", "ko", env=self.runner(create_on))
+            self.assertEqual(english_sentence_lines(out), [], out)
+            if not create_on:
+                self.assertIn(self.STORE, out)
 
 
 @unittest.skipUnless(POWERSHELL.is_file(), "Windows PowerShell 5.1 not available")

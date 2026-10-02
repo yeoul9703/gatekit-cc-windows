@@ -51,12 +51,16 @@ class DoctorTestCase(unittest.TestCase):
 
     # -- helpers ---------------------------------------------------------
 
-    def write_project_settings(self, hooks) -> None:
+    def write_project_settings(self, hooks, drop=()) -> None:
+        """settings.json with *hooks* and the two PowerShell settings, minus the
+        top-level keys named in *drop*."""
         directory = self.root / ".claude"
         directory.mkdir(parents=True, exist_ok=True)
-        (directory / "settings.json").write_text(
-            json.dumps({"hooks": hooks}), encoding="utf-8"
-        )
+        settings = {"env": {"CLAUDE_CODE_USE_POWERSHELL_TOOL": "1"},
+                    "defaultShell": "powershell", "hooks": hooks}
+        for key in drop:
+            del settings[key]
+        (directory / "settings.json").write_text(json.dumps(settings), encoding="utf-8")
 
     def standalone_hooks(self) -> dict:
         """A minimal hooks object shaped like the real .claude/settings.json,
@@ -188,6 +192,32 @@ class TestAxisHooksRegistered(DoctorTestCase):
     def test_full_registration_is_ok(self) -> None:
         self.write_project_settings(self.standalone_hooks())
         self.assertEqual(doctor.axis_hooks_registered(self.root)["verdict"], verdict.OK)
+
+    def test_missing_powershell_setting_fails_and_points_to_setup(self) -> None:
+        for drop, named in (("env", "CLAUDE_CODE_USE_POWERSHELL_TOOL"), ("defaultShell", "defaultShell")):
+            with self.subTest(drop=drop):
+                self.write_project_settings(self.standalone_hooks(), drop=(drop,))
+                result = doctor.axis_hooks_registered(self.root)
+                self.assertEqual(result["verdict"], verdict.FAIL, result)
+                self.assertIn(named, result["detail"])
+                self.assertIn("/gatekit-setup", result["fix"])
+
+    def test_wrong_powershell_setting_values_fail(self) -> None:
+        directory = self.root / ".claude"
+        directory.mkdir(parents=True, exist_ok=True)
+        (directory / "settings.json").write_text(json.dumps({
+            "env": {"CLAUDE_CODE_USE_POWERSHELL_TOOL": "0"}, "defaultShell": "bash",
+            "hooks": self.standalone_hooks()}), encoding="utf-8")
+        result = doctor.axis_hooks_registered(self.root)
+        self.assertEqual(result["verdict"], verdict.FAIL)
+        self.assertIn("CLAUDE_CODE_USE_POWERSHELL_TOOL", result["detail"])
+        self.assertIn("defaultShell", result["detail"])
+
+    def test_a_hook_problem_is_reported_before_the_powershell_settings(self) -> None:
+        hooks = self.standalone_hooks()
+        del hooks["Stop"]
+        self.write_project_settings(hooks, drop=("env",))
+        self.assertIn("Stop", doctor.axis_hooks_registered(self.root)["detail"])
 
     def test_missing_event_fails(self) -> None:
         hooks = self.standalone_hooks()
@@ -417,7 +447,7 @@ class TestAxisPython(DoctorTestCase):
         result = self.run_axis(kit)
         self.assertEqual(result["verdict"], verdict.FAIL)
         self.assertIn("silently inactive", result["detail"])
-        self.assertIn("/gatekit:setup", result["fix"])
+        self.assertIn("/gatekit-setup", result["fix"])
 
     def test_uv_style_cfg_at_the_floor_is_ok(self) -> None:
         kit = self.venv_tree("home = x\nversion_info = 3.14.0\n")

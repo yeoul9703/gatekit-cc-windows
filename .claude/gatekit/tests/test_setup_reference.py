@@ -1,5 +1,6 @@
 """docs/SETUP-REFERENCE.md must agree with scripts/packages.json and scripts/setup.ps1,
-and the setup command, USAGE and README must point to it."""
+and USAGE and README must point to it. (What the setup skill itself says is checked in
+test_command_docs.py.)"""
 from __future__ import annotations
 
 import json
@@ -76,6 +77,28 @@ class TestPackagesTable(unittest.TestCase):
         self.assertEqual(sorted(names), ["claude", "pwsh", "uv"])
         self.assertIn("`-Reinstall uv,pwsh,claude`", doc_text())
 
+    def test_install_names_match_the_script(self) -> None:
+        match = re.search(r"\$allowed = @\(([^)]*)\)", ps1_text())
+        assert match is not None
+        names = re.findall(r"'(\w+)'", match.group(1))
+        self.assertEqual(names, ["winget", "pwsh", "uv", "claude", "git", "venv"])
+        self.assertIn("`-Install %s`" % ",".join(names), doc_text())
+
+    def test_winget_install_section_names_both_steps_and_the_store(self) -> None:
+        text = doc_text()
+        winget = next(p for p in PACKAGES if p["key"] == "winget")
+        self.assertIn("Add-AppxPackage -RegisterByFamilyName -MainPackage %s_8wekyb3d8bbwe"
+                      % winget["appx_name"], text)
+        self.assertIn("Install-Module -Name Microsoft.WinGet.Client -Scope CurrentUser", text)
+        self.assertIn("Repair-WinGetPackageManager", text)
+        self.assertIn(winget["store_url"], text)
+
+    def test_stable_and_preview_product_names_are_documented(self) -> None:
+        text = doc_text()
+        pwsh = next(p for p in PACKAGES if p["key"] == "pwsh")
+        self.assertIn("`%s`" % pwsh["appx_name"], text)
+        self.assertIn("`%s`" % pwsh["appx_preview_name"], text)
+
 
 class TestSwitchTables(unittest.TestCase):
     def test_every_script_switch_is_documented(self) -> None:
@@ -146,11 +169,6 @@ class TestExitCodesAndWinget(unittest.TestCase):
 
 class TestLinks(unittest.TestCase):
     def test_pointers_to_the_reference(self) -> None:
-        setup_md = (PROJECT / ".claude" / "commands" / "gatekit" / "setup.md").read_text(encoding="utf-8")
-        self.assertIn("docs/SETUP-REFERENCE.md", setup_md)
-        self.assertIn("## Reference", setup_md)
-        for token in ("-Reinstall", "-RetryFailed", "ask **again**", "-Status"):
-            self.assertIn(token, setup_md)
         self.assertIn("SETUP-REFERENCE.md", (PROJECT / "docs" / "USAGE.md").read_text(encoding="utf-8"))
         self.assertIn("docs/SETUP-REFERENCE.md", (PROJECT / "README.md").read_text(encoding="utf-8"))
 

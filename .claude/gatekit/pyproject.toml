@@ -9,6 +9,10 @@ dependencies = []
 # Not an installable package: bin/gatekit.py is run with the project venv's
 # python. No build backend, no entry-point script.
 package = false
+# No group is installed by default: `uv run --frozen` (what every command uses)
+# must not download pyright and ruff on a user's machine. scripts/verify.ps1
+# asks for them with `--group dev`.
+default-groups = []
 
 [dependency-groups]
 dev = [

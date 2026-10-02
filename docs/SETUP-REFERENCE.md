@@ -1,14 +1,14 @@
 # 설치·업데이트·재설치 참조
 
-gatekit이 쓰는 프로그램(PowerShell 7, uv, Claude Code, Git, `.venv`)을 **사람이 직접
+gatekit이 쓰는 프로그램(winget, PowerShell 7, uv, Claude Code, Git, `.venv`)을 **사람이 직접
 복사해서 실행**할 수 있게 모아 둔 문서입니다.
 
 먼저 알아 둘 것:
 
-- 보통은 채팅에 `/gatekit:setup`을 입력하면 됩니다. 점검만 하고, 설치는 채팅에서
+- 보통은 채팅에 `/gatekit-setup`을 입력하면 됩니다. 점검만 하고, 설치는 채팅에서
   **허락한 항목만** 합니다. 이 문서는 그게 안 될 때, 또는 직접 하고 싶을 때 보세요.
-- 아래 명령은 PowerShell(또는 터미널)에 붙여 넣어 실행합니다. 설치 뒤에는 Claude 앱
-  (VS Code 창)을 **완전히 닫았다가 다시** 열어야 새 프로그램이 보입니다.
+- 아래 명령은 PowerShell(또는 터미널)에 붙여 넣어 실행합니다. 설치 뒤에는 Claude Code
+  (데스크톱 앱, VS Code 창, 또는 실행 중인 터미널)를 **완전히 닫았다가 다시** 열어야 새 프로그램이 보입니다.
 - 관리자 권한이 필요할 수 있는 것은 표에 적어 두었습니다. 회사 PC에서 막히면 아래
   "IT 담당자에게 보낼 문의문"을 쓰세요. 정책을 우회하지 마세요.
 
@@ -19,6 +19,7 @@ gatekit이 쓰는 프로그램(PowerShell 7, uv, Claude Code, Git, `.venv`)을 *
 
 | key | 이름 | winget ID | 수준 | 최소 버전 | 설치 형식 | 관리자 | 공식 스크립트 | 문서 |
 |---|---|---|---|---|---|---|---|---|
+| `winget` | winget (앱 설치 관리자) | `Microsoft.AppInstaller` | 권장 | - | - | 아니오 | 없음 | https://learn.microsoft.com/windows/package-manager/winget/ |
 | `pwsh` | PowerShell 7 | `Microsoft.PowerShell` | 필수 | 7.6.0 | msix | 예전 MSI 설치본이면 필요할 수 있음 | 없음 | https://learn.microsoft.com/powershell/scripting/install/installing-powershell-on-windows |
 | `uv` | uv (Python 관리 도구) | `astral-sh.uv` | 필수 | 0.4.27 | - | 아니오 | https://astral.sh/uv/install.ps1 | https://docs.astral.sh/uv/getting-started/installation/ |
 | `claude` | Claude Code (claude 명령) | `Anthropic.ClaudeCode` | 필수 | 2.1.277 | - | 아니오 | https://claude.ai/install.ps1 | https://code.claude.com/docs/en/setup |
@@ -27,9 +28,45 @@ gatekit이 쓰는 프로그램(PowerShell 7, uv, Claude Code, Git, `.venv`)을 *
 `.venv`(프로젝트 안의 Python 환경)는 프로그램이 아니라 폴더입니다. 5번을 보세요.
 gatekit이 쓰는 Python은 **3.14 이상**이고, uv가 알아서 받습니다.
 
+`packages.json`에는 표에 없는 값이 세 가지 더 있습니다. `appx_name`·`appx_preview_name`은
+Windows 패키지 이름(안정판과 preview를 구분할 때 씀), `store_url`은 Microsoft Store 주소입니다.
+
 ## 2. 도구별 명령
 
 각 블록에서 **한 방법만** 고르면 됩니다. winget이 막혀 있으면 공식 스크립트를 쓰세요.
+
+### 2-0. winget (권장)
+
+winget은 Windows의 "앱 설치 관리자(App Installer)"에 들어 있고 Microsoft Store가 배포합니다.
+Windows 11에는 보통 이미 있습니다. 없을 때 `-Install winget`이 하는 일은 아래 순서입니다.
+앞 단계에서 winget이 보이면 거기서 멈춥니다.
+
+| 순서 | 하는 일 | 직접 하려면 | 내려받기 | 관리자 |
+|---|---|---|---|---|
+| 1 | PC에 이미 있는 앱 설치 관리자를 Windows에 등록해 달라고 요청 | `Add-AppxPackage -RegisterByFamilyName -MainPackage Microsoft.DesktopAppInstaller_8wekyb3d8bbwe` | 없음 | 아니오 |
+| 2 | PowerShell Gallery에서 `Microsoft.WinGet.Client` 모듈을 사용자 폴더에 받아 winget을 복구 | 아래 세 줄 | 있음(모듈과 앱 설치 관리자) | 아니오 |
+| 3 | 그래도 없으면 Microsoft Store 주소를 알려 주고 종료 코드 2 | https://apps.microsoft.com/detail/9nblggh4nns1 에서 "앱 설치 관리자" 설치 | - | - |
+
+2단계를 직접 할 때(Windows PowerShell에서):
+
+```
+Install-PackageProvider -Name NuGet -Scope CurrentUser -Force
+Install-Module -Name Microsoft.WinGet.Client -Scope CurrentUser -Force -Repository PSGallery
+Repair-WinGetPackageManager
+```
+
+| 하고 싶은 것 | 명령 |
+|---|---|
+| 업데이트 | `winget upgrade --id Microsoft.AppInstaller -e` (보통은 Microsoft Store가 알아서 업데이트합니다) |
+| 버전 확인 | `winget --version` |
+
+- 관리자 권한은 필요 없습니다. 두 명령 모두 `-Scope CurrentUser`로 사용자 폴더에만 설치하고,
+  `Repair-WinGetPackageManager`는 `-AllUsers`를 붙일 때만 관리자 권한이 필요합니다(gatekit은 붙이지 않습니다).
+- 회사·학교 정책이나 네트워크가 막으면 종료 코드 4가 나옵니다. IT 담당자에게 문의하세요.
+- `-Update winget`, `-Reinstall winget`은 없습니다(거부, 종료 코드 1).
+- PowerShell 7도 없을 때는 점검 결과가 `-Install winget,pwsh`를 알려 줍니다. 순서를 어떻게 적어도
+  winget을 먼저 설치합니다.
+- uv와 Claude Code는 winget 없이도(공식 스크립트로) 설치됩니다.
 
 ### 2-1. PowerShell 7 (`pwsh`, 필수)
 
@@ -45,7 +82,34 @@ gatekit이 쓰는 Python은 **3.14 이상**이고, uv가 알아서 받습니다.
   Windows 관리자 확인 창(UAC)이 뜰 수 있습니다. 창이 뜨면 허용하거나 IT 담당자에게 문의하세요.
 - 필수입니다. Claude Code가 명령을 실행할 때 쓰는 PowerShell 도구와 입력창의 `!` 명령이 PowerShell 7로 돌아갑니다
   (`.claude/settings.json`의 `env.CLAUDE_CODE_USE_POWERSHELL_TOOL = "1"`, `defaultShell = "powershell"`).
-- winget이 없거나 막혀 있으면 Microsoft Store에서 "PowerShell"을 설치하세요. 둘 다 안 되면 IT 담당자에게 문의하세요.
+  이 두 값이 빠지면 setup(`S12-settings`)과 doctor(훅 등록 축)가 둘 다 실패로 알려 줍니다.
+- winget이 없으면 `-Install winget,pwsh`로 함께 설치합니다(2-0). winget이 막혀 있으면 Microsoft Store에서
+  "PowerShell"을 설치하세요. 둘 다 안 되면 IT 담당자에게 문의하세요.
+
+#### 안정판인지 판정하는 방법
+
+setup은 PATH에서 어느 `pwsh`가 먼저 잡히는지가 아니라 **안정판 제품이 설치돼 있는지**를 봅니다.
+preview는 안정판과 다른 제품이라 preview만 있으면 설치된 것으로 치지 않습니다.
+
+| | 안정판 | preview |
+|---|---|---|
+| winget ID | `Microsoft.PowerShell` | `Microsoft.PowerShell.Preview` |
+| Windows 패키지 이름 (`Get-AppxPackage -Name`) | `Microsoft.PowerShell` | `Microsoft.PowerShellPreview` |
+| MSI 설치 폴더 | `Program Files\PowerShell\7\` | `Program Files\PowerShell\7-preview\` |
+
+찾는 순서는 Windows 패키지 → MSI 설치 폴더 → PATH에 있는 `pwsh`의 버전 문자열(`-preview` 같은
+접미사가 없으면 안정판)입니다. 패키지 조회는 winget 없이, Windows에 기본으로 있는
+Windows PowerShell 5.1에서 됩니다.
+
+| 상태 | 판정(`S2`) | 알려 주는 것 |
+|---|---|---|
+| 안정판이 있고 7.6.0 이상 | `ok`. PATH에서 preview가 먼저 잡히면 그 사실만 덧붙임 | 없음 |
+| 안정판이 있지만 7.6.0 미만 | `fail` | `-Update pwsh` |
+| preview만 있음 | `fail` | `-Install pwsh` |
+| 아무것도 없음 | `fail` | `-Install pwsh` (winget도 없으면 `-Install winget,pwsh`) |
+| 안정판이 설치돼 있지만 이 창의 PATH에 `pwsh`가 없음 | `warn`, 종료 코드 3 | Claude Code를 완전히 닫고 다시 열기 |
+
+더 새 안정판이 나왔는지는 패키지 표의 `pwsh` 줄이 winget 조회로 알려 줍니다(경고).
 
 ### 2-2. uv (필수)
 
@@ -59,7 +123,7 @@ gatekit이 쓰는 Python은 **3.14 이상**이고, uv가 알아서 받습니다.
 - 관리자 권한은 필요 없습니다(사용자 폴더에 설치).
 - **`uv self update`가 실패하면**(`uv-receipt.json` 이 깨진 경우) 공식 스크립트 설치 명령을
   다시 실행하면 복구됩니다. setup은 이 경우 `-Update uv` 나 `-Reinstall uv` 로 같은 일을 합니다.
-- 어떤 방법으로 설치했는지 모르겠으면 `/gatekit:setup` 표의 "설치 방법" 칸을 보세요.
+- 어떤 방법으로 설치했는지 모르겠으면 `/gatekit-setup` 표의 "설치 방법" 칸을 보세요.
   scoop이나 pip로 설치한 uv는 그 도구의 명령으로 바꾸세요(`scoop update uv`, `python -m pip install -U uv`).
 
 ### 2-3. Claude Code (`claude`, 필수)
@@ -93,13 +157,13 @@ claude 는 공식 스크립트를 씁니다. 끝나면 버전을 다시 읽어 �
 
 ## 3. setup 스위치와 CLI 대응표
 
-같은 일을 세 가지 방법으로 할 수 있습니다: 채팅(`/gatekit:setup`), 스크립트 직접 실행, CLI.
+같은 일을 세 가지 방법으로 할 수 있습니다: 채팅(`/gatekit-setup`), 스크립트 직접 실행, CLI.
 
 | 하고 싶은 것 | setup.ps1 스위치 | CLI (`gatekit.py setup ...`) |
 |---|---|---|
 | 점검만(아무것도 설치 안 함) | (없음) | (없음) |
 | 프로그램 표·실패 기록만 보기 | `-Status` | `--status` |
-| 설치 | `-Install pwsh,uv,claude,git,venv` | `--install X,Y` |
+| 설치 | `-Install winget,pwsh,uv,claude,git,venv` | `--install X,Y` |
 | 업데이트 | `-Update pwsh,uv,claude,git` | `--update X` |
 | 재설치 | `-Reinstall uv,pwsh,claude` | `--reinstall X` |
 | 지난 실패만 다시 시도 | `-RetryFailed` | `--retry-failed` |
@@ -107,6 +171,7 @@ claude 는 공식 스크립트를 씁니다. 끝나면 버전을 다시 읽어 �
 | 출력 언어 | `-Lang ko` / `-Lang en` | `--lang ko` / `--lang en` |
 
 - `venv` 는 `-Install venv` 로만 만듭니다(`-Update`, `-Reinstall` 에는 쓸 수 없음).
+- `winget` 도 `-Install winget` 만 됩니다(2-0). `-Install` 목록에 있으면 항상 가장 먼저 처리합니다.
 - 허용 목록 밖의 이름은 거부하고 종료 코드 1을 냅니다.
 
 스크립트 직접 실행 형태(항상 이 플래그를 붙이세요):
@@ -130,7 +195,7 @@ CLI는 위 스크립트를 그대로 부르고, 출력과 종료 코드도 그�
 | 0 | 준비됨 | 없음 |
 | 1 | 실패(허락으로 해결 안 되는 것: 잘못된 스위치, `.venv`를 못 만듦, 알 수 없는 설치 실패) | 출력의 마지막 줄을 읽고 원인을 고친 뒤 다시 실행 |
 | 2 | 사용자의 허락·조치가 필요(필수 프로그램 없음, Python 받아야 함, 관리자 권한 필요 등) | 출력이 알려 주는 스위치를 허락하거나 직접 실행 |
-| 3 | 설치는 됐지만 이 창에서는 안 보임(PATH), 또는 PC 재시작 필요 | Claude 앱(VS Code 창)을 완전히 닫고 다시 열기 |
+| 3 | 설치는 됐지만 이 창에서는 안 보임(PATH), 또는 PC 재시작 필요 | Claude Code(데스크톱 앱, VS Code 창, 또는 실행 중인 터미널)를 완전히 닫고 다시 열기 |
 | 4 | 회사·학교 정책이나 네트워크가 막음 | 아래 문의문을 IT 담당자에게 전달. 우회 금지 |
 
 여러 문제가 섞이면 1 > 4 > 3 > 2 > 0 순서로 먼저 해당하는 코드가 나옵니다.
@@ -148,6 +213,9 @@ CLI는 위 스크립트를 그대로 부르고, 출력과 종료 코드도 그�
   (프로젝트 안 폴더라 다시 만들 수 있습니다). 점검만 할 때는 아무것도 지우지 않습니다.
 - 회사 프록시·인증서 환경이면 `UV_SYSTEM_CERTS=1`, `SSL_CERT_FILE`, `HTTPS_PROXY`,
   `UV_PYTHON_INSTALL_MIRROR` 를 확인하세요.
+- `.venv` 에는 개발용 도구(pyright, ruff)를 넣지 않습니다. `pyproject.toml` 의 `[tool.uv]` 에
+  `default-groups = []` 가 있어서 `uv run --frozen ...` 으로 명령을 실행해도 받지 않습니다.
+  개발자가 `scripts/verify.ps1` 을 돌릴 때만 `--group dev` 로 받습니다.
 
 ## 6. 자주 나오는 winget 오류 코드
 

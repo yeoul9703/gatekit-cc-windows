@@ -1,8 +1,22 @@
 {
   "schema": 1,
-  "note": "Single source for the programs setup.ps1 manages. setup.ps1 and docs/SETUP-REFERENCE.md must agree with this file (tests check it). level: 필수 / 권장 / 선택.",
+  "note": "Single source for the programs setup.ps1 manages. setup.ps1 and docs/SETUP-REFERENCE.md must agree with this file (tests check it). level: 필수 / 권장 / 선택. appx_name / appx_preview_name: the Windows package names (Get-AppxPackage -Name) of the stable and the preview product; store_url: the Microsoft Store page.",
   "python_min": "3.14",
   "packages": [
+    {
+      "key": "winget",
+      "name_ko": "winget (앱 설치 관리자)",
+      "winget_id": "Microsoft.AppInstaller",
+      "level": "권장",
+      "min_version": null,
+      "installer_type": null,
+      "admin_may_be_required": false,
+      "official_script_url": null,
+      "docs_url": "https://learn.microsoft.com/windows/package-manager/winget/",
+      "appx_name": "Microsoft.DesktopAppInstaller",
+      "appx_preview_name": null,
+      "store_url": "https://apps.microsoft.com/detail/9nblggh4nns1"
+    },
     {
       "key": "pwsh",
       "name_ko": "PowerShell 7",
@@ -12,7 +26,10 @@
       "installer_type": "msix",
       "admin_may_be_required": true,
       "official_script_url": null,
-      "docs_url": "https://learn.microsoft.com/powershell/scripting/install/installing-powershell-on-windows"
+      "docs_url": "https://learn.microsoft.com/powershell/scripting/install/installing-powershell-on-windows",
+      "appx_name": "Microsoft.PowerShell",
+      "appx_preview_name": "Microsoft.PowerShellPreview",
+      "store_url": null
     },
     {
       "key": "uv",
@@ -23,7 +40,10 @@
       "installer_type": null,
       "admin_may_be_required": false,
       "official_script_url": "https://astral.sh/uv/install.ps1",
-      "docs_url": "https://docs.astral.sh/uv/getting-started/installation/"
+      "docs_url": "https://docs.astral.sh/uv/getting-started/installation/",
+      "appx_name": null,
+      "appx_preview_name": null,
+      "store_url": null
     },
     {
       "key": "claude",
@@ -34,7 +54,10 @@
       "installer_type": null,
       "admin_may_be_required": false,
       "official_script_url": "https://claude.ai/install.ps1",
-      "docs_url": "https://code.claude.com/docs/en/setup"
+      "docs_url": "https://code.claude.com/docs/en/setup",
+      "appx_name": null,
+      "appx_preview_name": null,
+      "store_url": null
     },
     {
       "key": "git",
@@ -45,7 +68,10 @@
       "installer_type": null,
       "admin_may_be_required": true,
       "official_script_url": null,
-      "docs_url": "https://git-scm.com/download/win"
+      "docs_url": "https://git-scm.com/download/win",
+      "appx_name": null,
+      "appx_preview_name": null,
+      "store_url": null
     }
   ]
 }

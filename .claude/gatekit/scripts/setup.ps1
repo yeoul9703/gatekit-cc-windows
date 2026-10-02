@@ -6,10 +6,15 @@
 #                     project's own .venv: if it is missing, ONE `uv sync --frozen --no-dev
 #                     --no-python-downloads` is tried (it never downloads Python and never
 #                     deletes anything). Everything else needs a name in -Install / -Update.
-#   -Install <list>   install the listed items. Allowed names: pwsh, uv, claude, git, venv.
+#   -Install <list>   install the listed items. Allowed names: winget, pwsh, uv, claude, git, venv.
+#                     "winget" is always done first: it asks Windows to register the App Installer
+#                     that is already on the PC and, only if that is not enough, downloads the
+#                     Microsoft.WinGet.Client module into the user's folders and runs
+#                     Repair-WinGetPackageManager (no administrator rights). Still missing: the
+#                     Microsoft Store link and exit 2 (exit 4 when policy or the network blocks it).
 #                     "venv" builds .claude/gatekit/.venv WITH downloads (Python and packages,
 #                     tens of MB) and deletes and rebuilds a broken .venv. Only this switch may.
-#   -Update <list>    update the listed programs (pwsh, uv, claude, git; not venv).
+#   -Update <list>    update the listed programs (pwsh, uv, claude, git; not venv, not winget).
 #   -Reinstall <list> reinstall the listed programs. Allowed names: uv, pwsh, claude only (git is
 #                     never reinstalled here; venv is rebuilt with -Install venv). uv: winget
 #                     --force when uv came from winget, otherwise the official installer script
@@ -39,15 +44,19 @@
 #
 # The check looks at the PATH of THIS session only (the same rule as session-check.ps1: both use
 # Get-App from common.ps1). A program that is visible only after merging the registry PATH
-# (Machine + User) is reported as warn and exit 3: close the Claude app (VS Code window)
-# completely and open it again.
+# (Machine + User) is reported as warn and exit 3: close Claude Code completely (the desktop app,
+# the VS Code window, or the terminal it runs in) and open it again.
+#
+# PowerShell 7 is judged by the installed stable PRODUCT, not by the PATH order: the Windows package
+# (Get-AppxPackage, names from packages.json), then the MSI folder <Program Files>\PowerShell\7, then
+# the version text of the pwsh on PATH (no "-preview" suffix). A preview build alone does not count.
 #
 # Exit codes (when several problems mix, the FIRST matching row wins):
 #   1  something failed that a permission cannot fix (bad switch, .venv or config
 #      could not be built, doctor failed, an install failed for an unknown reason)
 #   4  blocked by policy or network (winget policy block, no network, TLS)
 #   3  a program is installed but not visible in this session (PATH), or a reboot is
-#      needed: close the Claude app (VS Code window) completely and open it again
+#      needed: close Claude Code completely and open it again
 #   2  the user must allow or do something (a required program is missing or too
 #      old, Python must be downloaded, .venv is broken, or a program needs administrator rights)
 #   0  ready
@@ -57,7 +66,12 @@
 #   (seconds) replaces the 300 second uv sync limit; GATEKIT_SETUP_MIN_PYTHON (major.minor)
 #   replaces the required 3.14 for the .venv Python; GATEKIT_SETUP_LIST_TIMEOUT (seconds) replaces
 #   the 30 second `winget list` limit of the package table; GATEKIT_SETUP_OFFICIAL_RUNNER is an
-#   executable run instead of the official installer script (it receives the script URL).
+#   executable run instead of the official installer script (it receives the script URL);
+#   GATEKIT_SETUP_PWSH_PACKAGES replaces the Get-AppxPackage lookup of PowerShell 7: "none", or
+#   "<package name>=<version>" pairs separated by ";" (an empty value counts as not set);
+#   GATEKIT_SETUP_WINGET_RUNNER is an executable run instead of the two winget install steps (it
+#   receives "register" or "repair" and the package family name). The MSI folder is looked up
+#   under the ProgramFiles environment variable, so a test can point it at a scratch folder.
 
 param(
     [string[]]$Install = @(),
@@ -79,7 +93,7 @@ $venvDir = Join-Path $kit '.venv'
 $venvPy = Join-Path $venvDir 'Scripts\python.exe'
 $launcher = Join-Path $kit 'bin\gatekit.py'
 $dash = [string][char]0x2014
-$allowed = @('pwsh', 'uv', 'claude', 'git', 'venv')
+$allowed = @('winget', 'pwsh', 'uv', 'claude', 'git', 'venv')
 $allowedReinstall = @('uv', 'pwsh', 'claude')
 
 # The PATH rule and the ASCII-only JSON live in common.ps1 (shared with session-check.ps1).
@@ -185,7 +199,7 @@ function Complete-Run {
         0 = (T '준비됨' 'ready')
         1 = (T '실패' 'failed')
         2 = (T '사용자 허락·조치 필요' 'needs the user to allow or do something')
-        3 = (T '재시작 필요: Claude 앱(VS Code 창)을 완전히 닫고 다시 여세요' 'restart needed: close the Claude app (VS Code window) completely and open it again')
+        3 = (T '재시작 필요: Claude Code(데스크톱 앱, VS Code 창, 또는 실행 중인 터미널)를 완전히 닫고 다시 여세요' 'restart needed: close Claude Code completely (the desktop app, the VS Code window, or the terminal it runs in) and open it again')
         4 = (T '정책·네트워크로 불가' 'blocked by policy or network')
     }
     if ($Json) {
@@ -273,7 +287,7 @@ if ($RetryFailed -and -not $Status) {
         if ($a -eq 'install' -and $allowed -contains $n) {
             if ($installList -notcontains $n) { $installList += $n }
             $retried += ($n + ' ' + (T '설치' 'install'))
-        } elseif ($a -eq 'update' -and $allowed -contains $n -and $n -ne 'venv') {
+        } elseif ($a -eq 'update' -and $allowed -contains $n -and $n -ne 'venv' -and $n -ne 'winget') {
             if ($updateList -notcontains $n) { $updateList += $n }
             $retried += ($n + ' ' + (T '업데이트' 'update'))
         } elseif ($a -eq 'reinstall' -and $allowedReinstall -contains $n) {
@@ -288,7 +302,7 @@ if ($RetryFailed -and -not $Status) {
         Say 'info' 'retry' '-RetryFailed' (T ('기록된 실패 항목만 같은 동작으로 다시 시도합니다: ' + $rt) ('retrying only the recorded failures with the same action: ' + $rt))
     }
 }
-if ($script:pkgs.Count -lt 4) {
+if ($script:pkgs.Count -lt 5) {
     $argsBad = $true
     Add-Item 'args' 'required' 'packages.json' 'fail' (T ('scripts/packages.json 을 읽지 못했습니다: ' + $script:pkgLoadError) ('could not read scripts/packages.json: ' + $script:pkgLoadError)) (T '저장소에서 복원하세요(git checkout .claude/gatekit/scripts/packages.json)' 'restore it from the repository (git checkout .claude/gatekit/scripts/packages.json)')
 }
@@ -316,7 +330,13 @@ if ($updateList -contains 'venv') {
     $argsBad = $true
     Add-Item 'args' 'required' (T '스위치' 'switch') 'fail' (T '거부됨: venv 는 -Update 가 아니라 -Install venv 로만 만듭니다' 'refused: venv is built only with -Install venv, not -Update') ''
 }
+if ($updateList -contains 'winget') {
+    $argsBad = $true
+    Add-Item 'args' 'required' (T '스위치' 'switch') 'fail' (T '거부됨: winget 은 Microsoft Store 가 업데이트하므로 -Update 로는 하지 않습니다' 'refused: winget is updated by the Microsoft Store, not by -Update') (T '없을 때만 -Install winget 을 쓰세요' 'use -Install winget only when it is missing')
+}
 if ($argsBad) { $script:showSummary = $false; Set-Flag 'fail'; Complete-Run }
+# winget goes first: the other installs may need it (-Install winget,pwsh).
+if ($installList -contains 'winget') { $installList = @('winget') + @($installList | Where-Object { $_ -ne 'winget' }) }
 
 # ---- process and version helpers (the PATH rule, Find-App and Get-App, is in common.ps1) ----
 function Quote-Arg([string]$a) {
@@ -379,7 +399,7 @@ function Get-VersionFrom([string]$text) {
 function Add-RestartItem([string]$id, [string]$level, [string]$name, [string]$found) {
     Set-Flag 'restart'
     Add-Item $id $level $name 'warn' (T ('설치되어 있지만(' + $found + ') 지금 창의 PATH 에는 보이지 않습니다.') ('installed (' + $found + ') but not visible on the PATH of this session.')) `
-        (T 'Claude 앱(VS Code 창)을 완전히 닫고 다시 연 뒤 /gatekit:setup 을 다시 실행하세요' 'close the Claude app (VS Code window) completely, open it again, then run /gatekit:setup again')
+        (T 'Claude Code(데스크톱 앱, VS Code 창, 또는 실행 중인 터미널)를 완전히 닫고 다시 여세요. 그런 다음 /gatekit-setup 을 다시 실행하세요' 'close Claude Code completely (the desktop app, the VS Code window, or the terminal it runs in) and open it again, then run /gatekit-setup again')
 }
 
 $winPs = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
@@ -410,7 +430,7 @@ function Get-WingetFailure([int]$code) {
         '8A15001C' { return (New-PolicyFailure $hex) }
         '8A150109' { return @{ cls = 'reboot'; hex = $hex
             ko = '설치는 끝났지만 PC 를 다시 시작해야 합니다.'; en = 'the install finished but the PC must be restarted.'
-            can = (T 'PC 를 다시 시작한 뒤 /gatekit:setup 을 다시 실행하세요.' 'restart the PC, then run /gatekit:setup again.'); it = $false } }
+            can = (T 'PC 를 다시 시작한 뒤 /gatekit-setup 을 다시 실행하세요.' 'restart the PC, then run /gatekit-setup again.'); it = $false } }
         '8A150107' { return @{ cls = 'network'; hex = $hex
             ko = '설치 서버에 연결하지 못했습니다(네트워크).'; en = 'could not reach the install source (network).'
             can = (T '인터넷·VPN·프록시 연결을 확인하고 잠시 뒤 다시 시도하세요.' 'check the internet, VPN and proxy, then try again in a moment.'); it = $true } }
@@ -461,7 +481,7 @@ function Invoke-WingetAction([string]$verb, [string]$id, [string]$name, [string]
         Add-FailureRecord $name $script:currentAction 'winget-missing' '' (T 'winget 이 없어 자동 설치를 할 수 없습니다.' 'winget is missing, so it cannot install automatically.')
         Set-Flag 'needs'
         Add-Item ('S16-' + $name) 'required' ($name + ' ' + (T '설치' 'install')) 'fail' (T 'winget 이 없어 자동 설치를 할 수 없습니다.' 'winget is missing, so it cannot install automatically.') `
-            (T 'Microsoft Store에서 "앱 설치 관리자(App Installer)"를 설치·업데이트한 뒤 다시 실행하세요.' 'install or update "App Installer" from the Microsoft Store, then run again.')
+            (T '먼저 winget 설치를 허락하거나(-Install winget), Microsoft Store 에서 "앱 설치 관리자(App Installer)"를 설치한 뒤 다시 실행하세요.' 'allow the winget install first (-Install winget), or install "App Installer" from the Microsoft Store, then run again.')
         return $false
     }
     Say 'info' ('A-' + $name) $name (T ('winget ' + $verb + ' ' + $id + ' 실행 중...') ('running winget ' + $verb + ' ' + $id + ' ...'))
@@ -547,7 +567,13 @@ function Test-PwshMsiPath([string]$path) {
 }
 
 # After a reinstall: read the version again and (for uv) check the receipt.
-function Confirm-Reinstalled([string]$name, [string]$path) {
+function Confirm-Reinstalled([string]$name, [string]$path, [string]$known = '') {
+    if (-not $path) {
+        # A package install with no pwsh on this session PATH: the package version is all there is.
+        if ($known -and $known -ne '?') { Say 'ok' ('A-' + $name + '-version') $name ((T '재설치 후 버전 확인: ' 'version after the reinstall: ') + $known) }
+        else { Say 'unverified' ('A-' + $name + '-version') $name (T '재설치했지만 버전을 다시 읽지 못했습니다.' 'reinstalled, but the version could not be read again.') }
+        return
+    }
     if ($name -eq 'pwsh') {
         $r = Invoke-Proc $path @('-NoProfile', '-NoLogo', '-Command', '$PSVersionTable.PSVersion.ToString()') 20
     } else {
@@ -569,12 +595,188 @@ function Confirm-Reinstalled([string]$name, [string]$path) {
     }
 }
 
+# ---- PowerShell 7: the installed stable PRODUCT decides, not the PATH order --------------------
+# Order: (1) the Windows package (Get-AppxPackage -Name <appx_name>; the preview build is another
+# package, <appx_preview_name>; both names come from packages.json), (2) the MSI folder
+# <Program Files>\PowerShell\7 (the preview lives in 7-preview), (3) the version text of each pwsh
+# on the session PATH (a "-preview" style suffix means preview).
+function ConvertTo-Version3([string]$text) {
+    if ($text -match '(\d+)\.(\d+)\.(\d+)') { return ($Matches[1] + '.' + $Matches[2] + '.' + $Matches[3]) }
+    return ''
+}
+
+# Package versions as text ('' = not installed). GATEKIT_SETUP_PWSH_PACKAGES replaces the lookup.
+function Get-PwshPackages {
+    $res = @{ stable = ''; preview = '' }
+    $stableName = "$($script:pkgs['pwsh'].appx_name)"
+    $previewName = "$($script:pkgs['pwsh'].appx_preview_name)"
+    if ($env:GATEKIT_SETUP_PWSH_PACKAGES) {
+        foreach ($pair in ($env:GATEKIT_SETUP_PWSH_PACKAGES -split ';')) {
+            $kv = @($pair -split '=', 2)
+            if ($kv.Count -ne 2) { continue }
+            $pkgName = $kv[0].Trim()
+            if ($stableName -and $pkgName -eq $stableName) { $res.stable = $kv[1].Trim() }
+            elseif ($previewName -and $pkgName -eq $previewName) { $res.preview = $kv[1].Trim() }
+        }
+        return $res
+    }
+    foreach ($slot in @(@('stable', $stableName), @('preview', $previewName))) {
+        if (-not $slot[1]) { continue }
+        try {
+            $found = @(Get-AppxPackage -Name $slot[1] -ErrorAction Stop | Sort-Object { [version]$_.Version } -Descending)
+            if ($found.Count -gt 0) { $res[$slot[0]] = "$($found[0].Version)" }
+        } catch { }
+    }
+    return $res
+}
+
+# The MSI install: stable = its version text ('' = not there, '?' = there but unreadable).
+function Get-PwshMsi {
+    $res = @{ stable = ''; stablePath = ''; preview = $false }
+    $pf = $env:ProgramW6432
+    if (-not $pf) { $pf = $env:ProgramFiles }
+    if (-not $pf) { return $res }
+    $root = Join-Path $pf 'PowerShell'
+    $exe = Join-Path $root '7\pwsh.exe'
+    if (Test-Path -LiteralPath $exe) {
+        $res.stablePath = $exe
+        $vt = ''
+        try { $vt = ConvertTo-Version3 "$((Get-Item -LiteralPath $exe).VersionInfo.ProductVersion)" } catch { }
+        if (-not $vt) { $vt = '?' }
+        $res.stable = $vt
+    }
+    if (Test-Path -LiteralPath (Join-Path $root '7-preview\pwsh.exe')) { $res.preview = $true }
+    return $res
+}
+
+# The first three pwsh on the session PATH: path, version text ('?' = unreadable), kind.
+function Get-PwshOnPath {
+    $list = @()
+    foreach ($a in (@(Find-App 'pwsh' $script:sessionPath) | Select-Object -First 3)) {
+        $r = Invoke-Proc $a.Source @('-NoProfile', '-NoLogo', '-Command', '$PSVersionTable.PSVersion.ToString()') 20
+        $vt = ($r.Out.Trim() -split "`r?`n")[0]
+        $kind = 'unknown'
+        if ($vt -match '^(\d+)\.(\d+)\.(\d+)(-\S+)?$') {
+            $kind = 'stable'
+            if ($Matches[4]) { $kind = 'preview' }
+        } else { $vt = '?' }
+        $list += [pscustomobject]@{ path = $a.Source; text = $vt; kind = $kind }
+    }
+    return , $list
+}
+
+# stable: a stable product is installed. source: package / msi / path. version: its text ('?' if
+# unreadable). preview: a preview build was seen. onPath: Get-PwshOnPath (empty unless probed).
+# where: session / registry / none for the name pwsh. With $probePath = $false the PATH is only
+# probed when neither the package nor the MSI folder shows a stable product.
+function Get-PwshState([bool]$probePath = $true) {
+    $st = @{ stable = $false; version = ''; source = ''; path = ''; preview = $false; onPath = @()
+             where = (Get-App 'pwsh' $script:sessionPath).where }
+    $pk = Get-PwshPackages
+    $msi = Get-PwshMsi
+    if ($pk.preview -or $msi.preview) { $st.preview = $true }
+    if ($pk.stable) {
+        $st.stable = $true; $st.source = 'package'; $st.version = ConvertTo-Version3 $pk.stable
+        if (-not $st.version) { $st.version = '?' }
+    } elseif ($msi.stable) {
+        $st.stable = $true; $st.source = 'msi'; $st.version = $msi.stable; $st.path = $msi.stablePath
+    }
+    if ($probePath -or -not $st.stable) {
+        $st.onPath = Get-PwshOnPath
+        foreach ($o in $st.onPath) {
+            if ($o.kind -eq 'preview') { $st.preview = $true }
+            if ($o.kind -ne 'stable') { continue }
+            if (-not $st.stable) { $st.stable = $true; $st.source = 'path'; $st.version = $o.text }
+            if (-not $st.path) { $st.path = $o.path }
+        }
+    }
+    return $st
+}
+
+# ---- winget (App Installer) ---------------------------------------------------------------------
+# Step "register" asks Windows to register the App Installer package that is already on the PC
+# (nothing is downloaded). Step "repair" downloads the Microsoft.WinGet.Client module from the
+# PowerShell Gallery into the user's own folders (-Scope CurrentUser on both cmdlets: Windows
+# PowerShell 5.1 would default to AllUsers, which needs administrator rights) and runs
+# Repair-WinGetPackageManager without -AllUsers (only -AllUsers needs administrator rights).
+# -Force answers the NuGet and the repository questions, so nothing can prompt.
+function Invoke-WingetStep([string]$step) {
+    $family = "$($script:pkgs['winget'].appx_name)" + '_8wekyb3d8bbwe'
+    if ($env:GATEKIT_SETUP_WINGET_RUNNER) { return (Invoke-Proc $env:GATEKIT_SETUP_WINGET_RUNNER @($step, $family) 600) }
+    $pre = '$ErrorActionPreference = ''Stop''; $ProgressPreference = ''SilentlyContinue''; '
+    if ($step -eq 'register') {
+        $cmd = $pre + 'Add-AppxPackage -RegisterByFamilyName -MainPackage ' + $family
+        return (Invoke-Proc $winPs @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', $cmd) 180)
+    }
+    $cmd = $pre + $tlsPrefix + 'Install-PackageProvider -Name NuGet -Scope CurrentUser -Force | Out-Null; ' +
+        'Install-Module -Name Microsoft.WinGet.Client -Scope CurrentUser -Force -Repository PSGallery | Out-Null; ' +
+        'Import-Module Microsoft.WinGet.Client; Repair-WinGetPackageManager'
+    return (Invoke-Proc $winPs @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', $cmd) 600)
+}
+
+function Install-Winget {
+    $script:currentAction = 'install'
+    if ((Get-App 'winget' $script:sessionPath).where -ne 'none') {
+        Remove-FailureRecord 'winget'
+        Say 'ok' 'A-winget' 'winget' (T '이미 설치되어 있어 건너뜁니다.' 'already installed, skipped.')
+        return
+    }
+    $outs = @()
+    $timedOut = $false
+    Say 'info' 'A-winget' 'winget' (T 'Windows 에 이미 있는 앱 설치 관리자(App Installer)의 등록을 요청합니다. 내려받는 것은 없습니다.' 'asking Windows to register the App Installer that is already on this PC. Nothing is downloaded.')
+    $r = Invoke-WingetStep 'register'
+    $outs += $r.Out
+    if ($r.TimedOut) { $timedOut = $true }
+    if ((Get-App 'winget' $script:sessionPath).where -eq 'none') {
+        Say 'info' 'A-winget' 'winget' (T '등록만으로는 되지 않아, PowerShell Gallery 에서 Microsoft.WinGet.Client 모듈을 사용자 폴더에 내려받아 winget 을 복구합니다(관리자 권한은 필요 없고 네트워크가 필요합니다).' 'registering was not enough, so the Microsoft.WinGet.Client module is downloaded from the PowerShell Gallery into your user folder to repair winget (no administrator rights, network needed).')
+        $r = Invoke-WingetStep 'repair'
+        $outs += $r.Out
+        if ($r.TimedOut) { $timedOut = $true }
+    }
+    $after = Get-App 'winget' $script:sessionPath
+    if ($after.where -eq 'session') {
+        Remove-FailureRecord 'winget'
+        [void]$script:done.Add('winget ' + (T '설치' 'install'))
+        Say 'ok' 'A-winget' 'winget' ((T '완료' 'done') + ' (' + (T '설치' 'install') + ')')
+        return
+    }
+    [void]$script:failedActions.Add('winget')
+    if ($after.where -eq 'registry') {
+        Add-FailureRecord 'winget' 'install' 'restart' '' (T '설치했지만 PATH 를 다시 읽어도 보이지 않습니다.' 'installed, but still not visible after re-reading PATH.')
+        Add-RestartItem 'S9-winget' 'recommended' 'winget' $after.apps[0].Source
+        return
+    }
+    $text = ($outs -join "`n")
+    $cls = 'store'
+    if ($text -match '(?i)(policy|administrator|access (is )?denied|0x80070005)') { $cls = 'policy' }
+    elseif ($timedOut -or (Test-NetworkText $text) -or $text -match '(?i)(rate limit|unable to download|no match was found|could not be resolved)') { $cls = 'network' }
+    $msg = T 'winget 을 자동으로 설치하지 못했습니다.' 'winget could not be installed automatically.'
+    $act = T 'Microsoft Store 에서 "앱 설치 관리자(App Installer)"를 설치한 뒤 다시 실행하세요(아래 링크).' 'install "App Installer" from the Microsoft Store, then run again (link below).'
+    if ($cls -eq 'policy') {
+        Set-Flag 'blocked'
+        $msg = T '회사·학교 정책이나 권한 문제로 winget 을 설치하지 못했습니다.' 'a company or school policy, or missing rights, kept winget from being installed.'
+        $act = T 'IT 담당자에게 문의하세요. 정책을 우회하지 마세요.' 'ask your IT contact. Do not work around the policy.'
+    } elseif ($cls -eq 'network') {
+        Set-Flag 'blocked'
+        $msg = T '네트워크 문제로 winget 을 설치하지 못했습니다.' 'a network problem kept winget from being installed.'
+        $act = T '인터넷·VPN·프록시 연결을 확인하고 다시 시도하거나, Microsoft Store 에서 "앱 설치 관리자(App Installer)"를 설치하세요(아래 링크).' 'check the internet, VPN and proxy and try again, or install "App Installer" from the Microsoft Store (link below).'
+    } else { Set-Flag 'needs' }
+    Add-FailureRecord 'winget' 'install' $cls '' $msg
+    $hints = @("$($script:pkgs['winget'].store_url)")
+    foreach ($l in @(($text -split "`r?`n") | Where-Object { $_.Trim() } | Select-Object -Last 4)) { $hints += ('  ' + $l.Trim()) }
+    Add-Item 'S16-winget' 'recommended' ('winget ' + (T '설치' 'install')) 'fail' $msg $act $hints
+}
+
 function Invoke-Action([string]$name, [string]$mode) {
     if ($name -eq 'venv') { return }                     # handled by the .venv step below
+    if ($name -eq 'winget') { Install-Winget; return }
     $script:currentAction = $mode
     $found = Get-App $name $script:sessionPath
     $apps = $found.apps
     $present = ($found.where -ne 'none')
+    # pwsh: a preview build on PATH is not "installed"; the stable product decides.
+    $pwState = $null
+    if ($name -eq 'pwsh') { $pwState = Get-PwshState $false; $present = $pwState.stable }
     if ($mode -eq 'install' -and $present) {
         Remove-FailureRecord $name
         Say 'ok' ('A-' + $name) $name (T '이미 설치되어 있어 건너뜁니다.' 'already installed, skipped.')
@@ -601,7 +803,7 @@ function Invoke-Action([string]$name, [string]$mode) {
             $pwshExtra = @('--installer-type', $script:pkgs['pwsh'].installer_type)
             if ($mode -eq 'install') { $verb = 'install' }
             if ($mode -eq 'reinstall') { $verb = 'install'; $pwshExtra += '--force' }
-            if (($mode -eq 'update' -or $mode -eq 'reinstall') -and (Test-PwshMsiPath $apps[0].Source)) {
+            if (($mode -eq 'update' -or $mode -eq 'reinstall') -and ($pwState.source -eq 'msi' -or (Test-PwshMsiPath $pwState.path))) {
                 Say 'info' 'A-pwsh' 'pwsh' (T '기존 MSI 설치본이라 업데이트 중 관리자 확인 창(UAC)이 뜰 수 있습니다. 창이 뜨면 허용하거나 IT 담당자에게 문의하세요.' 'this is an older MSI install, so a Windows administrator prompt (UAC) may appear during the update. Allow it, or ask your IT contact.')
             }
             $ok = Invoke-WingetAction $verb $script:pkgs['pwsh'].winget_id 'pwsh' ('PowerShell 7 (winget ' + $script:pkgs['pwsh'].winget_id + ')') $pwshExtra
@@ -699,12 +901,22 @@ function Invoke-Action([string]$name, [string]$mode) {
     }
     if ($ok) {
         $after = Get-App $name $script:sessionPath
-        if ($after.where -eq 'none') {
+        $visible = ($after.where -ne 'none')
+        $afterPath = ''
+        $afterVersion = ''
+        if ($visible) { $afterPath = $after.apps[0].Source }
+        if ($name -eq 'pwsh') {
+            $pwAfter = Get-PwshState $false
+            $visible = $pwAfter.stable
+            $afterPath = $pwAfter.path
+            $afterVersion = $pwAfter.version
+        }
+        if (-not $visible) {
             Set-Flag 'restart'
             [void]$script:failedActions.Add($name)
             Add-FailureRecord $name $mode 'restart' '' (T '설치했지만 PATH 를 다시 읽어도 보이지 않습니다.' 'installed, but still not visible after re-reading PATH.')
             Add-Item ('S9-' + $name) 'required' $name 'warn' (T '설치했지만 PATH 를 다시 읽어도 보이지 않습니다.' 'installed, but still not visible after re-reading PATH.') `
-                (T 'Claude 앱(VS Code 창)을 완전히 닫고 다시 연 뒤 /gatekit:setup 을 다시 실행하세요.' 'close the Claude app (VS Code window) completely, open it again, then run /gatekit:setup again.')
+                (T 'Claude Code(데스크톱 앱, VS Code 창, 또는 실행 중인 터미널)를 완전히 닫고 다시 여세요. 그런 다음 /gatekit-setup 을 다시 실행하세요.' 'close Claude Code completely (the desktop app, the VS Code window, or the terminal it runs in) and open it again, then run /gatekit-setup again.')
         } else {
             Remove-FailureRecord $name
             $modeKo = '업데이트'
@@ -712,7 +924,7 @@ function Invoke-Action([string]$name, [string]$mode) {
             if ($mode -eq 'reinstall') { $modeKo = '재설치' }
             [void]$script:done.Add($name + ' ' + (T $modeKo $mode))
             Say 'ok' ('A-' + $name) $name ((T '완료' 'done') + ' (' + (T $modeKo $mode) + ')')
-            if ($mode -eq 'reinstall') { Confirm-Reinstalled $name $after.apps[0].Source }
+            if ($mode -eq 'reinstall') { Confirm-Reinstalled $name $afterPath $afterVersion }
         }
     }
 }
@@ -755,7 +967,8 @@ if ($mark) {
 $wingetFound = Get-App 'winget' $script:sessionPath
 $wingetApp = $wingetFound.apps
 if ($wingetFound.where -eq 'none') {
-    Add-Item 'S3' 'recommended' 'winget' 'warn' (T '없음' 'not found') (T 'Microsoft Store 의 "앱 설치 관리자(App Installer)"를 설치·업데이트하세요(자동 설치 안 함). uv·claude 는 winget 없이도 설치할 수 있습니다' 'install or update "App Installer" from the Microsoft Store (not done automatically). uv and claude can be installed without winget')
+    Add-Item 'S3' 'recommended' 'winget' 'warn' (T '없음' 'not found') (T '허락하면 설치합니다 (-Install winget). uv·claude 는 winget 없이도 설치할 수 있습니다' 'installed if you allow it (-Install winget). uv and claude can be installed without winget') `
+        @((T '직접 하려면 Microsoft Store 에서 "앱 설치 관리자(App Installer)"를 설치하세요:' 'to do it yourself, install "App Installer" from the Microsoft Store:'), "$($script:pkgs['winget'].store_url)")
 } elseif ($wingetFound.where -eq 'registry') {
     Add-RestartItem 'S3' 'recommended' 'winget' $wingetApp[0].Source
 } else {
@@ -784,58 +997,70 @@ if ($wingetFound.where -eq 'none') {
 }
 
 # S2 pwsh -----------------------------------------------------------------------
-$pwshFound = Get-App 'pwsh' $script:sessionPath
-$pwshApps = $pwshFound.apps
-$script:pkgInfo['pwsh'] = @{ where = $pwshFound.where; path = ''; version = '' }
-if ($pwshFound.where -eq 'none') {
-    Set-Flag 'needs'
-    Add-Item 'S2' 'required' 'pwsh' 'fail' (T 'PowerShell 7 이 없습니다. Claude Code 의 PowerShell 도구가 이것으로 실행됩니다.' 'PowerShell 7 not found. Claude Code runs its PowerShell tool with it.') `
-        (T '허락하면 설치합니다 (-Install pwsh). 직접 하려면 아래를 실행하세요' 'installed if you allow it (-Install pwsh). To do it yourself run this') `
-        @(('winget install --id ' + $script:pkgs['pwsh'].winget_id + ' -e --source winget --installer-type ' + $script:pkgs['pwsh'].installer_type), (T 'winget 이 없으면 Microsoft Store 에서 "PowerShell" 을 설치하세요.' 'without winget, install "PowerShell" from the Microsoft Store.'))
-} elseif ($pwshFound.where -eq 'registry') {
-    Add-RestartItem 'S2' 'required' 'pwsh' $pwshApps[0].Source
-} else {
-    $found = @()
-    $seenVersions = @{}
-    $primaryStable = $false
-    $primaryText = ''
-    $primaryPath = ''
-    $anyStable = $false
-    $index = 0
-    foreach ($a in ($pwshApps | Select-Object -First 3)) {
-        $r = Invoke-Proc $a.Source @('-NoProfile', '-NoLogo', '-Command', '$PSVersionTable.PSVersion.ToString()') 20
-        $vt = ($r.Out.Trim() -split "`r?`n")[0]
-        $stable = $false
-        if ($vt -match '^(\d+)\.(\d+)\.(\d+)(-\S+)?$') {
-            $ver = [version]($Matches[1] + '.' + $Matches[2] + '.' + $Matches[3])
-            if (-not $Matches[4] -and $ver -ge $pwshMinimum) { $stable = $true }
-        } else { $vt = '?' }
-        if ($stable) { $anyStable = $true }
-        if ($index -eq 0) { $primaryStable = $stable; $primaryText = $vt; $primaryPath = $a.Source }
-        # The same version behind an alias path is one install: show it once.
-        if ($vt -eq '?' -or -not $seenVersions.ContainsKey($vt)) {
-            $found += ($a.Source + ' = ' + $vt)
-            $seenVersions[$vt] = $true
-        }
-        $index++
+# The stable product decides (Get-PwshState): a preview build that comes first on PATH is only noted.
+$pw = Get-PwshState $true
+$pathSeen = @()
+$seenVersions = @{}
+foreach ($o in $pw.onPath) {
+    # The same version behind an alias path is one install: show it once.
+    if ($o.text -eq '?' -or -not $seenVersions.ContainsKey($o.text)) {
+        $pathSeen += ($o.path + ' = ' + $o.text)
+        $seenVersions[$o.text] = $true
     }
-    $where = $found -join '; '
-    $script:pkgInfo['pwsh'] = @{ where = 'session'; path = $primaryPath; version = $(if ($primaryText -ne '?') { $primaryText } else { '' }) }
+}
+$pathText = $pathSeen -join '; '
+$pwshInstallAct = T '허락하면 설치합니다 (-Install pwsh). 직접 하려면 아래를 실행하세요' 'installed if you allow it (-Install pwsh). To do it yourself run this'
+if ($wingetFound.where -eq 'none') {
+    $pwshInstallAct = T 'winget 도 없습니다. 허락하면 둘 다 설치합니다 (-Install winget,pwsh). 직접 하려면 아래를 실행하세요' 'winget is missing too. Both are installed if you allow it (-Install winget,pwsh). To do it yourself run this'
+}
+$pwshInstallHints = @(('winget install --id ' + $script:pkgs['pwsh'].winget_id + ' -e --source winget --installer-type ' + $script:pkgs['pwsh'].installer_type), (T 'winget 없이 하려면 Microsoft Store 에서 "PowerShell" 을 설치하세요.' 'without winget, install "PowerShell" from the Microsoft Store.'))
+$script:pkgInfo['pwsh'] = @{ where = $pw.where; path = ''; version = ''; source = '' }
+if ($pw.stable) {
+    $srcText = ''
+    if ($pw.source -eq 'package') { $srcText = (T '패키지 ' 'package ') + $script:pkgs['pwsh'].appx_name }
+    elseif ($pw.source -eq 'msi') { $srcText = 'MSI ' + $pw.path }
+    $tail = $srcText
+    if ($pathText) {
+        if ($tail) { $tail += '; ' }
+        $tail += 'PATH: ' + $pathText
+    }
+    $infoWhere = 'registry'
+    if ($pw.where -eq 'session') { $infoWhere = 'session' }
+    $script:pkgInfo['pwsh'] = @{ where = $infoWhere; path = $pw.path; version = $(if ($pw.version -ne '?') { $pw.version } else { '' }); source = $pw.source }
     $uacHint = @()
-    if (Test-PwshMsiPath $primaryPath) {
+    if ($pw.source -eq 'msi' -or (Test-PwshMsiPath $pw.path)) {
         $uacHint = @(T '기존 MSI 설치본이라 업데이트할 때 관리자 확인 창(UAC)이 뜰 수 있습니다.' 'this is an older MSI install, so the update may show a Windows administrator prompt (UAC).')
     }
-    if ($primaryText -eq '?') {
-        Add-Item 'S2' 'required' 'pwsh' 'unverified' ((T '버전을 읽지 못했습니다: ' 'could not read the version: ') + $where)
-    } elseif ($primaryStable) {
-        Add-Item 'S2' 'required' 'pwsh' 'ok' ((T '안정판 ' 'stable ') + $primaryText + ' (' + $where + ')')
-    } elseif ($primaryText -match '-') {
-        $act = T '안정판 7.6 권장, 허락하면 업데이트합니다 (-Update pwsh)' 'stable 7.6 recommended, updated if you allow it (-Update pwsh)'
-        if ($anyStable) { $act = T '안정판 7.6 이 다른 경로에 있습니다. PATH 순서를 확인하세요' 'a stable 7.6 exists at another path. Check the PATH order' }
-        Add-Item 'S2' 'required' 'pwsh' 'warn' ((T '미리보기(preview) 버전이 먼저 잡힙니다: ' 'a preview build is found first: ') + $where) $act $uacHint
+    if ($pw.version -eq '?') {
+        Add-Item 'S2' 'required' 'pwsh' 'unverified' ((T '버전을 읽지 못했습니다: ' 'could not read the version: ') + $tail)
+    } elseif ([version]$pw.version -lt $pwshMinimum) {
+        Set-Flag 'needs'
+        Add-Item 'S2' 'required' 'pwsh' 'fail' ((T '안정판이 ' 'the stable build is older than ') + $pwshMinimum + (T ' 보다 낮습니다: ' ': ') + $pw.version + ' (' + $tail + ')') (T '허락하면 업데이트합니다 (-Update pwsh)' 'updated if you allow it (-Update pwsh)') $uacHint
+    } elseif ($pw.where -ne 'session') {
+        Add-RestartItem 'S2' 'required' 'pwsh' ((T '안정판 ' 'stable ') + $pw.version + ', ' + $srcText)
     } else {
-        Add-Item 'S2' 'required' 'pwsh' 'warn' ((T '7.6 안정판보다 낮습니다: ' 'older than stable 7.6: ') + $where) (T '허락하면 업데이트합니다 (-Update pwsh)' 'updated if you allow it (-Update pwsh)') $uacHint
+        $note = ''
+        if ($pw.onPath.Count -gt 0 -and $pw.onPath[0].kind -eq 'preview') {
+            $note = T '; PATH 에서는 미리보기(preview) 버전이 먼저 잡힙니다' '; a preview build comes first on PATH'
+        }
+        Add-Item 'S2' 'required' 'pwsh' 'ok' ((T '안정판 ' 'stable ') + $pw.version + ' (' + $tail + ')' + $note)
     }
+} elseif ($pw.preview) {
+    Set-Flag 'needs'
+    if ($pw.onPath.Count -gt 0) {
+        $script:pkgInfo['pwsh'] = @{ where = 'session'; path = $pw.onPath[0].path; version = $(if ($pw.onPath[0].text -ne '?') { $pw.onPath[0].text } else { '' }); source = 'path' }
+    }
+    $only = T '미리보기(preview) 버전만 있고 안정판이 없습니다' 'only a preview build is installed, no stable one'
+    if ($pathText) { $only += ': ' + $pathText }
+    Add-Item 'S2' 'required' 'pwsh' 'fail' $only $pwshInstallAct $pwshInstallHints
+} elseif ($pw.onPath.Count -gt 0) {
+    $script:pkgInfo['pwsh'] = @{ where = 'session'; path = $pw.onPath[0].path; version = ''; source = 'path' }
+    Add-Item 'S2' 'required' 'pwsh' 'unverified' ((T '버전을 읽지 못했습니다: ' 'could not read the version: ') + $pathText)
+} elseif ($pw.where -eq 'registry') {
+    Add-RestartItem 'S2' 'required' 'pwsh' (Get-App 'pwsh' $script:sessionPath).apps[0].Source
+} else {
+    Set-Flag 'needs'
+    Add-Item 'S2' 'required' 'pwsh' 'fail' (T 'PowerShell 7 이 없습니다. Claude Code 의 PowerShell 도구가 이것으로 실행됩니다.' 'PowerShell 7 not found. Claude Code runs its PowerShell tool with it.') $pwshInstallAct $pwshInstallHints
 }
 
 # S4 uv -------------------------------------------------------------------------
@@ -1139,13 +1364,15 @@ function Get-PkgMethodText([string]$key, $info, [string]$wingetSource) {
         if ($p -match '(?i)\\npm\\') { return (T '기타(npm)' 'other (npm)') }
     }
     if ($key -eq 'pwsh') {
+        if ($info.source -eq 'package') { return (T 'MSIX(winget 또는 스토어)' 'MSIX (winget or Store)') }
+        if ($info.source -eq 'msi') { return (T '기타(MSI)' 'other (MSI)') }
         if (Test-PwshMsiPath $p) { return (T '기타(MSI)' 'other (MSI)') }
         if ($p -match '(?i)\\WindowsApps\\') { return (T 'MSIX(winget 또는 스토어)' 'MSIX (winget or Store)') }
     }
     return (T '기타' 'other')
 }
 
-if ($script:pkgs.Count -ge 4) {
+if ($script:pkgs.Count -ge 5) {
     $wingetOkForList = ($wingetFound.where -eq 'session' -and $script:agreementOk)
     $noListReason = T 'winget 약관 동의가 확인되지 않아 업데이트 조회를 하지 않았습니다' 'winget agreements are not confirmed, so the update lookup was not run'
     if ($wingetFound.where -eq 'none') { $noListReason = T 'winget 이 없어 업데이트 조회를 하지 않았습니다' 'winget is missing, so the update lookup was not run' }

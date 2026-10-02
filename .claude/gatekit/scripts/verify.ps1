@@ -174,19 +174,21 @@ elseif ($r.Code -eq 0) { Say 'ok' ('.claude/settings.json is valid JSON / 유효
 else { Fail ('.claude/settings.json is not valid JSON / JSON 오류 ' + (Format-Secs $r.Seconds)) $r.Lines }
 
 # 5. type check and lint ------------------------------------------------------
-# pyright and ruff live in the uv dev group; --frozen never rewrites uv.lock.
+# pyright and ruff live in the uv dev group. pyproject.toml sets default-groups = [], so a plain
+# `uv run --frozen` (what the commands use) never installs them: only these two calls ask for
+# the group. --frozen never rewrites uv.lock.
 $uv = Get-Command uv -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
 if (-not $uv) {
     Fail 'uv not found: type check and lint cannot run / uv 없음, 타입검사·린트 실행 불가' $null
 }
 else {
     $uvExe = $uv.Source
-    $r = Invoke-Proc $uvExe @('run', '--frozen', 'pyright') $pyrightTimeout $kit
+    $r = Invoke-Proc $uvExe @('run', '--frozen', '--group', 'dev', 'pyright') $pyrightTimeout $kit
     if ($r.TimedOut) { Fail-Timeout 'type check (pyright)' $pyrightTimeout $r }
     elseif ($r.Code -eq 0) { Say 'ok' ('type check (pyright): ' + (Get-LastLine $r) + ' ' + (Format-Secs $r.Seconds)) }
     else { Fail ('type check (pyright) failed / 실패 ' + (Format-Secs $r.Seconds)) $r.Lines }
 
-    $r = Invoke-Proc $uvExe @('run', '--frozen', 'ruff', 'check', 'gatekit') $ruffTimeout $kit
+    $r = Invoke-Proc $uvExe @('run', '--frozen', '--group', 'dev', 'ruff', 'check', 'gatekit') $ruffTimeout $kit
     if ($r.TimedOut) { Fail-Timeout 'lint (ruff)' $ruffTimeout $r }
     elseif ($r.Code -eq 0) { Say 'ok' ('lint (ruff): ' + (Get-LastLine $r) + ' ' + (Format-Secs $r.Seconds)) }
     else { Fail ('lint (ruff) failed / 실패 ' + (Format-Secs $r.Seconds)) $r.Lines }

@@ -62,6 +62,11 @@ AXIS_NAMES_KO = {
 #: Hook arguments every PowerShell hook must carry (no profile, no policy block).
 REQUIRED_PS_ARGS = ("-NoProfile", "-ExecutionPolicy", "Bypass")
 
+#: Values ``.claude/settings.json`` must carry so Claude Code runs its PowerShell tool
+#: and the input-box ``!`` commands with PowerShell 7 (the same two setup.ps1 S12 checks).
+REQUIRED_POWERSHELL_SETTINGS = ('env.CLAUDE_CODE_USE_POWERSHELL_TOOL = "1"',
+                                'defaultShell = "powershell"')
+
 
 def _t(en, ko):
     return ko if _LANG == "ko" else en
@@ -163,13 +168,28 @@ def _powershell_hooks_missing_args(hooks):
     return bad
 
 
+def _missing_powershell_settings(settings) -> list:
+    """The :data:`REQUIRED_POWERSHELL_SETTINGS` values that ``settings.json`` lacks,
+    written the way ``setup.ps1`` (S12) names them."""
+    missing = []
+    env = settings.get("env")
+    if not isinstance(env, dict) or str(env.get("CLAUDE_CODE_USE_POWERSHELL_TOOL", "")) != "1":
+        missing.append(REQUIRED_POWERSHELL_SETTINGS[0])
+    if settings.get("defaultShell") != "powershell":
+        missing.append(REQUIRED_POWERSHELL_SETTINGS[1])
+    return missing
+
+
 def axis_hooks_registered(root) -> dict:
     """Standalone mode registers hooks in the project's own
     ``.claude/settings.json`` (no plugin manager, so nothing to enable/disable
     globally). Every expected event must be registered, every hook must be in
     exec form (a shell string would need Git Bash), the gate events must run
     ``bin/gatekit.py``, SessionStart must run ``session-check.ps1`` and every
-    PowerShell hook must pass ``-NoProfile -ExecutionPolicy Bypass``."""
+    PowerShell hook must pass ``-NoProfile -ExecutionPolicy Bypass``. Last, the
+    two PowerShell settings must be there (PowerShell 7 is the shell of this
+    kit): ``env.CLAUDE_CODE_USE_POWERSHELL_TOOL = "1"`` and
+    ``defaultShell = "powershell"``."""
     name = "hooks registered"
     restore = _t("restore .claude/settings.json from git", "git 에서 .claude/settings.json 을 복원하세요")
     path = _project_settings_path(root)
@@ -217,6 +237,14 @@ def axis_hooks_registered(root) -> dict:
                      _t("PowerShell hook(s) missing -NoProfile -ExecutionPolicy Bypass: %s",
                         "PowerShell 훅에 -NoProfile -ExecutionPolicy Bypass 가 없습니다: %s")
                      % ", ".join(no_flags), restore)
+    missing_ps = _missing_powershell_settings(settings)
+    if missing_ps:
+        return _axis(name, verdict.FAIL,
+                     _t("PowerShell settings are missing in .claude/settings.json: %s",
+                        ".claude/settings.json 에 PowerShell 설정이 빠져 있습니다: %s")
+                     % ", ".join(missing_ps),
+                     _t("/gatekit-setup  (it adds only the missing values, after asking)",
+                        "/gatekit-setup  (물어본 뒤 빠진 값만 넣습니다)"))
     return _axis(name, verdict.OK,
                  _t("all %d hook events registered in exec form (no shell)",
                     "훅 이벤트 %d개가 모두 exec 형식(셸 없음)으로 등록됨") % len(EXPECTED_HOOK_EVENTS))
@@ -230,8 +258,8 @@ def axis_project_state(root) -> dict:
     if not state.is_dir():
         return _axis("project state", verdict.UNVERIFIED,
                      _t("no .gatekit/ in this project yet", "이 프로젝트에 아직 .gatekit/ 이 없습니다"),
-                     _t("/gatekit:setup  (creates .gatekit/config.json)",
-                        "/gatekit:setup  (.gatekit/config.json 을 만듭니다)"))
+                     _t("/gatekit-setup  (creates .gatekit/config.json)",
+                        "/gatekit-setup  (.gatekit/config.json 을 만듭니다)"))
     problems = []
     cfg = state / "config.json"
     if cfg.is_file():
@@ -267,7 +295,7 @@ def axis_spec_set(root) -> dict:
     if not paths.spec_dir(root).is_dir():
         return _axis("spec set", verdict.UNVERIFIED,
                      _t("no spec/ directory in this project", "이 프로젝트에 spec/ 폴더가 없습니다"),
-                     "/gatekit:interview")
+                     "/gatekit-interview")
     try:
         from gatekit import spec as spec_mod
         result = spec_mod.validate(root)
@@ -372,8 +400,8 @@ def _venv_version(kit):
 def axis_python(root) -> dict:
     """The project venv's interpreter (the one every hook runs) must exist and
     be at least :data:`MIN_PYTHON`."""
-    setup_fix = _t("/gatekit:setup  (or: uv sync --project .claude/gatekit --frozen)",
-                   "/gatekit:setup  (또는: uv sync --project .claude/gatekit --frozen)")
+    setup_fix = _t("/gatekit-setup  (or: uv sync --project .claude/gatekit --frozen)",
+                   "/gatekit-setup  (또는: uv sync --project .claude/gatekit --frozen)")
     try:
         kit = paths.gatekit_root()
     except Exception as exc:
@@ -396,9 +424,9 @@ def axis_python(root) -> dict:
         return _axis("python", verdict.FAIL,
                      _t("venv python %s is below the required %d.%d",
                         ".venv 의 파이썬 %s 이(가) 필요한 %d.%d 보다 낮습니다") % (text, *wanted),
-                     _t("rebuild the venv: /gatekit:setup (-Install venv), or delete "
+                     _t("rebuild the venv: /gatekit-setup (-Install venv), or delete "
                         ".claude/gatekit/.venv and run uv sync --project .claude/gatekit --frozen",
-                        ".venv 를 다시 만드세요: /gatekit:setup (-Install venv), 또는 .claude/gatekit/.venv 를 지운 뒤 "
+                        ".venv 를 다시 만드세요: /gatekit-setup (-Install venv), 또는 .claude/gatekit/.venv 를 지운 뒤 "
                         "uv sync --project .claude/gatekit --frozen"))
     return _axis("python", verdict.OK, _t("venv python %s", ".venv 파이썬 %s") % text)
 
@@ -408,9 +436,9 @@ def axis_uv(root) -> dict:
     found = shutil.which("uv")
     if not found:
         return _axis("uv", verdict.FAIL, _t("uv is not on PATH", "PATH 에 uv 가 없습니다"),
-                     _t("winget install --id=astral-sh.uv -e  (ask the user first; /gatekit:setup "
+                     _t("winget install --id=astral-sh.uv -e  (ask the user first; /gatekit-setup "
                         "explains it)",
-                        "/gatekit:setup 을 실행하세요 (설치는 사용자에게 먼저 묻습니다). "
+                        "/gatekit-setup 을 실행하세요 (설치는 사용자에게 먼저 묻습니다). "
                         "직접 하려면: winget install --id=astral-sh.uv -e"))
     try:
         proc = subprocess.run(paths.resolve_argv(["uv", "--version"]), capture_output=True,

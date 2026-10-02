@@ -67,6 +67,47 @@ version checks that this audience never benefits from.
   pinning `>=3.14` with uv-provided interpreters avoids depending on
   whatever the machine has.
 
+## Decision change 2026-10-02 (winget install, stable product, dev group)
+
+Three follow-ups to the change below, decided the same day. Command names are
+written the new way here (`/gatekit-setup`; the skills replaced the commands).
+
+1. **setup installs winget.** "Known cost" below ended at the Microsoft Store.
+   Now `-Install winget` exists (`packages.json` lists `winget` as 권장): step 1
+   asks Windows to register the App Installer package that is already on the PC
+   (`Add-AppxPackage -RegisterByFamilyName`, nothing downloaded); step 2, only
+   if winget is still missing, installs the `Microsoft.WinGet.Client` module and
+   the NuGet provider with `-Scope CurrentUser` and runs
+   `Repair-WinGetPackageManager` without `-AllUsers`; step 3 prints the Store
+   link and ends at exit 2 (exit 4 when policy or the network blocks it).
+   Step 2 runs automatically because it needs no administrator rights: the
+   cmdlet help says only `-AllUsers` does, and `-Scope CurrentUser` installs
+   into the user's folders. It is given explicitly on both cmdlets because
+   Windows PowerShell 5.1 would default to AllUsers. When PowerShell 7 is
+   missing too, `S2` names `-Install winget,pwsh`; winget is always done first.
+   There is no `-Update winget` or `-Reinstall winget` (the Store updates it).
+2. **The stable product decides `S2`, not the PATH order.** A machine with the
+   stable 7.6 and a preview build side by side was reported as `warn` because
+   the preview came first on PATH. The preview is a different product
+   (package `Microsoft.PowerShellPreview`, MSI folder `7-preview`), so setup
+   now looks for the stable one: `Get-AppxPackage -Name Microsoft.PowerShell`,
+   then `Program Files\PowerShell\7`, then the version text of the `pwsh` on
+   PATH. Stable and at least 7.6.0: `ok` (a preview first on PATH is only
+   noted). Stable but older: `fail`, `-Update pwsh`. Preview only, or nothing:
+   `fail`, `-Install pwsh`. Installed but no `pwsh` on this session's PATH:
+   `warn`, exit 3. The package names live in `packages.json`
+   (`appx_name`, `appx_preview_name`). `session-check.ps1` still only looks at
+   PATH: it may not start a process or load a module at session start.
+3. **The dev group is not installed by default.** `uv run --frozen` (the form
+   every skill uses) installed `pyright[nodejs]` and `ruff` on a user's machine
+   because uv syncs the `dev` group by default. `[tool.uv] default-groups = []`
+   stops that; `scripts/verify.ps1` asks for them with `--group dev`. `uv.lock`
+   does not change.
+
+Doctor's "hooks registered" axis now also fails when
+`env.CLAUDE_CODE_USE_POWERSHELL_TOOL = "1"` or `defaultShell = "powershell"`
+is missing, and points at `/gatekit-setup`.
+
 ## Decision change 2026-10-02 (PowerShell 7 is required)
 
 PowerShell 7 was "recommended". The user decided it is required: the audience

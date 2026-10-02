@@ -73,11 +73,11 @@ class TestSessionCheck(unittest.TestCase):
         self.assertEqual(proc.returncode, 0, proc.stderr)
         data = json.loads(proc.stdout.decode("ascii"))  # pure ASCII (\u escapes)
         self.assertIn(".venv", data["systemMessage"])
-        self.assertIn("/gatekit:setup", data["systemMessage"])
+        self.assertIn("/gatekit-setup", data["systemMessage"])
         self.assertIn("환경", data["systemMessage"])  # Korean survives the \u escape
         hook = data["hookSpecificOutput"]
         self.assertEqual(hook["hookEventName"], "SessionStart")
-        self.assertIn("/gatekit:setup", hook["additionalContext"])
+        self.assertIn("/gatekit-setup", hook["additionalContext"])
 
     def test_missing_uv_and_claude_are_both_reported(self) -> None:
         self.venv()
@@ -97,7 +97,7 @@ class TestSessionCheck(unittest.TestCase):
         proc = self.run_check()
         message = json.loads(proc.stdout.decode("ascii"))["systemMessage"]
         self.assertIn("pyvenv.cfg", message)
-        self.assertIn("/gatekit:setup", message)
+        self.assertIn("/gatekit-setup", message)
 
     def test_venv_with_an_existing_python_home_is_silent(self) -> None:
         self.fake("uv")
@@ -126,7 +126,7 @@ class TestSessionCheck(unittest.TestCase):
             cfg.write_text("home = %s\nversion_info = %s\n" % (self.root, old), encoding="utf-8")
             message = json.loads(self.run_check().stdout.decode("ascii"))["systemMessage"]
             self.assertIn("3.14", message)
-            self.assertIn("/gatekit:setup", message)
+            self.assertIn("/gatekit-setup", message)
         for fine in ("3.14.3", "3.15.0"):
             cfg.write_text("home = %s\nversion_info = %s\n" % (self.root, fine), encoding="utf-8")
             self.assertEqual(self.run_check().stdout.strip(), b"")
@@ -139,7 +139,7 @@ class TestSessionCheck(unittest.TestCase):
         py.write_bytes(b"")
         message = json.loads(self.run_check().stdout.decode("ascii"))["systemMessage"]
         self.assertIn("0 bytes", message)
-        self.assertIn("/gatekit:setup", message)
+        self.assertIn("/gatekit-setup", message)
 
     def test_missing_powershell_7_is_reported(self) -> None:
         (self.bin / "pwsh.exe").unlink()
@@ -151,7 +151,7 @@ class TestSessionCheck(unittest.TestCase):
         proc = self.run_check(GATEKIT_SETUP_REGISTRY_PATH=str(empty))
         message = json.loads(proc.stdout.decode("ascii"))["systemMessage"]
         self.assertIn("PowerShell 7 (pwsh): not found", message)
-        self.assertIn("/gatekit:setup", message)
+        self.assertIn("/gatekit-setup", message)
 
     def test_program_visible_only_in_the_registry_path_says_restart_not_missing(self) -> None:
         # Same rule as setup.ps1: judged by this session's PATH; the registry only

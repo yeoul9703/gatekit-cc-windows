@@ -10,7 +10,8 @@ from tests.test_scripts import POWERSHELL, SCRIPTS, SetupCase
 
 PACKAGES = SCRIPTS / "packages.json"
 FIELDS = ("key", "name_ko", "winget_id", "level", "min_version", "installer_type",
-          "admin_may_be_required", "official_script_url", "docs_url")
+          "admin_may_be_required", "official_script_url", "docs_url",
+          "appx_name", "appx_preview_name", "store_url")
 
 
 def load() -> dict:
@@ -32,9 +33,9 @@ class TestPackagesFile(unittest.TestCase):
         self.assertIn('requires-python = ">=%s"' % wanted,
                       (kit / "pyproject.toml").read_text(encoding="utf-8"))
 
-    def test_the_four_managed_packages_have_every_field(self) -> None:
+    def test_the_five_managed_packages_have_every_field(self) -> None:
         packages = {p["key"]: p for p in load()["packages"]}
-        self.assertEqual(sorted(packages), ["claude", "git", "pwsh", "uv"])
+        self.assertEqual(sorted(packages), ["claude", "git", "pwsh", "uv", "winget"])
         for key, pkg in packages.items():
             self.assertEqual(sorted(pkg), sorted(FIELDS), key)
             self.assertRegex(pkg["winget_id"], r"^[A-Za-z0-9]+[.-][A-Za-z0-9.-]+$")
@@ -46,6 +47,11 @@ class TestPackagesFile(unittest.TestCase):
                 self.assertRegex(pkg["min_version"], r"^\d+\.\d+\.\d+$")
             if pkg["official_script_url"] is not None:
                 self.assertTrue(pkg["official_script_url"].endswith("install.ps1"))
+            for field in ("appx_name", "appx_preview_name"):
+                if pkg[field] is not None:
+                    self.assertRegex(pkg[field], r"^[A-Za-z0-9]+(\.[A-Za-z0-9]+)+$")
+            if pkg["store_url"] is not None:
+                self.assertTrue(pkg["store_url"].startswith("https://apps.microsoft.com/"))
 
     def test_levels_and_special_values(self) -> None:
         packages = {p["key"]: p for p in load()["packages"]}
@@ -55,12 +61,25 @@ class TestPackagesFile(unittest.TestCase):
         self.assertEqual(packages["git"]["level"], "선택")
         self.assertEqual(packages["pwsh"]["installer_type"], "msix")
         self.assertIsNone(packages["git"]["official_script_url"])
+        self.assertEqual(packages["winget"]["level"], "권장")
+        self.assertFalse(packages["winget"]["admin_may_be_required"])
+
+    def test_product_names_that_tell_stable_from_preview(self) -> None:
+        # The stable PowerShell 7 and the preview build are different Windows packages.
+        packages = {p["key"]: p for p in load()["packages"]}
+        self.assertEqual(packages["pwsh"]["appx_name"], "Microsoft.PowerShell")
+        self.assertEqual(packages["pwsh"]["appx_preview_name"], "Microsoft.PowerShellPreview")
+        self.assertEqual(packages["winget"]["appx_name"], "Microsoft.DesktopAppInstaller")
+        self.assertEqual(packages["winget"]["store_url"], "https://apps.microsoft.com/detail/9nblggh4nns1")
+        for key in ("uv", "claude", "git"):
+            self.assertIsNone(packages[key]["appx_name"], key)
 
     def test_setup_ps1_hard_codes_none_of_the_ids_or_urls(self) -> None:
         text = (SCRIPTS / "setup.ps1").read_bytes().decode("utf-8-sig")
         for pkg in load()["packages"]:
             self.assertNotIn(pkg["winget_id"], text, pkg["key"])
-            for field in ("official_script_url", "docs_url", "min_version"):
+            for field in ("official_script_url", "docs_url", "min_version", "appx_name",
+                          "appx_preview_name", "store_url"):
                 if pkg[field]:
                     self.assertNotIn(pkg[field], text, "%s %s" % (pkg["key"], field))
         self.assertIn("packages.json", text)
