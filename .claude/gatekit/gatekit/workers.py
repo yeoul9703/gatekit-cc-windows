@@ -267,7 +267,7 @@ def _set_backend_flag(root, name: str, key: str, value) -> dict:
 
 def _usage() -> str:
     return (
-        "usage: python3 -m gatekit workers <command>\n"
+        "usage: %s workers <command>\n" % paths.cli_invocation() +
         "  list [--json]          show every backend, its argv and state\n"
         "  default                print the default backend name\n"
         "  check <name> [--probe] probe the executable; --probe also sends one prompt through it\n"

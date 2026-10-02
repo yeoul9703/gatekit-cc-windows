@@ -1,4 +1,4 @@
-"""`python3 -m gatekit <subcommand> ...` dispatcher.
+"""`bin/gatekit.py <subcommand> ...` dispatcher.
 
 Each subcommand lives in its own module exposing `run(argv: list[str]) -> int`.
 The mapping is the single registry; modules are imported lazily so a broken
@@ -58,7 +58,8 @@ def main(argv: list[str] | None = None) -> int:
     _force_utf8_stdio()
     argv = list(sys.argv[1:] if argv is None else argv)
     if not argv or argv[0] in ("-h", "--help", "help"):
-        print("usage: python3 -m gatekit <subcommand> [args]\n")
+        from gatekit.paths import CLI_INVOCATION
+        print("usage: %s <subcommand> [args]\n" % CLI_INVOCATION)
         for name, (_, help_text) in SUBCOMMANDS.items():
             print(f"  {name:<10} {help_text}")
         print(f"  _gate      Run a gate directly (used by hooks): {', '.join(GATES)}")

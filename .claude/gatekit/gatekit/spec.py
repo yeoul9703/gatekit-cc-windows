@@ -1,4 +1,4 @@
-"""Spec set validation (`python3 -m gatekit spec validate`).
+"""Spec set validation (`bin/gatekit.py spec validate`).
 
 Validates the seven files under `spec/` against the canonical heading map and
 the structural conventions the rest of gatekit depends on:

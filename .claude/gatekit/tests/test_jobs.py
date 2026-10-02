@@ -2372,7 +2372,10 @@ class TestUsageMatchesDispatch(unittest.TestCase):
 
     def test_usage_names_no_flag_run_does_not_read(self) -> None:
         import re
-        listed = set(re.findall(r"--[a-z-]+", jobs._usage()))
+        # The first line starts with the launcher (`uv run --project ... --frozen ...`): its
+        # flags belong to uv, not to `jobs`.
+        usage = jobs._usage().replace(jobs.paths.cli_invocation(), "")
+        listed = set(re.findall(r"--[a-z-]+", usage))
         self.assertEqual(sorted(listed - self._flags_read()), [])
 
     def test_help_and_unknown_command_exit_codes(self) -> None:

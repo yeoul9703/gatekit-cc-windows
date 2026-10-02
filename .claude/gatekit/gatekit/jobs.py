@@ -2032,7 +2032,7 @@ _USAGE_NOTE_INDENT = " " * 25
 
 
 def _usage() -> str:
-    lines = ["usage: python3 -m gatekit jobs <command> [--root DIR]"]
+    lines = ["usage: %s jobs <command> [--root DIR]" % paths.cli_invocation()]
     for name, synopsis, notes in COMMANDS:
         lines.append("  %s %s" % (name, synopsis))
         lines.extend(_USAGE_NOTE_INDENT + note for note in notes)

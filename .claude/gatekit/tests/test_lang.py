@@ -191,7 +191,7 @@ class TestRunFromFileAndStdin(unittest.TestCase):
 
 
 class TestModuleEntryPoint(unittest.TestCase):
-    """`python3 -m gatekit lang ...` must work with cwd=plugin and no PYTHONPATH."""
+    """`python -m gatekit lang ...` must work with cwd=.claude/gatekit and no PYTHONPATH."""
 
     def test_python_m_gatekit_lang(self) -> None:
         env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}

@@ -6,7 +6,7 @@ and as users do through ``uv run --project .claude/gatekit --frozen python
 .claude/gatekit/bin/gatekit.py <subcommand> ...`` from the project root. The ``gatekit`` package lives next to
 this file's parent, which is never on ``sys.path`` in a user's project, so the
 launcher adds the gatekit root itself before dispatching. Nothing else about
-the CLI differs from ``python3 -m gatekit``.
+the CLI differs from ``python -m gatekit`` run inside ``.claude/gatekit``.
 """
 from __future__ import annotations
 
