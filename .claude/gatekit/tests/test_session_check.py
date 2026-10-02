@@ -33,6 +33,7 @@ class TestSessionCheck(unittest.TestCase):
         shutil.copy(COMMON, self.scripts / "common.ps1")
         self.bin = self.root / "bin"
         self.bin.mkdir()
+        self.fake("pwsh")  # required like uv and claude; one test removes it
 
     def fake(self, name: str) -> None:
         (self.bin / (name + ".exe")).write_bytes(b"")
@@ -138,6 +139,18 @@ class TestSessionCheck(unittest.TestCase):
         py.write_bytes(b"")
         message = json.loads(self.run_check().stdout.decode("ascii"))["systemMessage"]
         self.assertIn("0 bytes", message)
+        self.assertIn("/gatekit:setup", message)
+
+    def test_missing_powershell_7_is_reported(self) -> None:
+        (self.bin / "pwsh.exe").unlink()
+        self.fake("uv")
+        self.fake("claude")
+        self.venv()
+        empty = self.root / "empty"  # stands in for the registry PATH: this machine's own pwsh must not count
+        empty.mkdir()
+        proc = self.run_check(GATEKIT_SETUP_REGISTRY_PATH=str(empty))
+        message = json.loads(proc.stdout.decode("ascii"))["systemMessage"]
+        self.assertIn("PowerShell 7 (pwsh): not found", message)
         self.assertIn("/gatekit:setup", message)
 
     def test_program_visible_only_in_the_registry_path_says_restart_not_missing(self) -> None:

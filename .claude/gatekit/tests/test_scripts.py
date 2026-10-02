@@ -379,6 +379,24 @@ class TestSetupWithoutUv(SetupCase):
         self.assertIn("-NoProfile -ExecutionPolicy Bypass", by_id["S12-settings"]["detail"])
         self.assertEqual(code, 1)
 
+    def test_settings_without_the_powershell_tool_env_or_default_shell_fails_s12(self) -> None:
+        path = self.root / ".claude" / "settings.json"
+        for drop, named in (("env", "CLAUDE_CODE_USE_POWERSHELL_TOOL"), ("defaultShell", "defaultShell")):
+            with self.subTest(drop=drop):
+                settings = json.loads((PROJECT / ".claude" / "settings.json").read_text(encoding="utf-8"))
+                del settings[drop]
+                path.write_text(json.dumps(settings), encoding="utf-8")
+                code, _, by_id = self.run_json("-Lang", "en")
+                self.assertEqual(by_id["S12-settings"]["verdict"], "fail", by_id["S12-settings"])
+                self.assertIn(named, by_id["S12-settings"]["detail"])
+                self.assertEqual(code, 2)  # the user can fix it: not exit 1
+
+    def test_missing_powershell_7_is_a_required_fail_that_offers_the_install(self) -> None:
+        _, _, by_id = self.run_json("-Lang", "en")
+        self.assertEqual(by_id["S2"]["level"], "required")
+        self.assertEqual(by_id["S2"]["verdict"], "fail", by_id["S2"])
+        self.assertIn("-Install pwsh", by_id["S2"]["action"])
+
     def test_real_settings_hook_flags_are_accepted(self) -> None:
         _, _, by_id = self.run_json("-Lang", "en")
         self.assertEqual(by_id["S12-settings"]["verdict"], "ok", by_id["S12-settings"])

@@ -67,6 +67,24 @@ version checks that this audience never benefits from.
   pinning `>=3.14` with uv-provided interpreters avoids depending on
   whatever the machine has.
 
+## Decision change 2026-10-02 (PowerShell 7 is required)
+
+PowerShell 7 was "recommended". The user decided it is required: the audience
+works in native Windows without Git Bash, so Claude Code's PowerShell tool is
+the shell, and Windows PowerShell 5.1 is a different language edition (no `&&`,
+other default encoding). `scripts/packages.json` lists `pwsh` as 필수,
+`setup.ps1` reports a missing one as a required `fail` (exit 2, `-Install pwsh`)
+and `session-check.ps1` names it at session start. `.claude/settings.json`
+carries `env.CLAUDE_CODE_USE_POWERSHELL_TOOL = "1"` and `defaultShell =
+"powershell"`, and `setup.ps1` (S12) fails when either is missing.
+
+The hooks and the two scripts themselves still run under Windows PowerShell
+5.1, so setup can start on a machine that has no PowerShell 7 yet.
+
+Known cost: `pwsh` installs through winget only (no official script). On a
+machine where winget is missing or blocked by policy, setup now ends at exit
+2 or 4 and can only point at the Microsoft Store or the IT contact.
+
 ## Decision change 2026-09-30 (Python 3.11 to 3.14)
 
 The first draft pinned 3.11. The user decided on 3.14 because this tool will

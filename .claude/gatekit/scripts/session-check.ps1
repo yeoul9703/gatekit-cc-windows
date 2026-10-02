@@ -68,6 +68,14 @@ try {
         }
     }
     if (Test-Budget) {
+        $where = (Get-App 'pwsh').where
+        if ($where -eq 'registry') {
+            $problems += 'PowerShell 7: installed but not visible in this session - close Claude Code completely and open it again / 설치돼 있지만 이 창에서는 보이지 않습니다 - Claude Code 를 완전히 닫고 다시 여세요'
+        } elseif ($where -eq 'none') {
+            $problems += 'PowerShell 7 (pwsh): not found / PowerShell 7 을 찾을 수 없습니다'
+        }
+    }
+    if (Test-Budget) {
         $where = (Get-App 'claude').where
         if ($where -eq 'registry') {
             $problems += 'claude CLI: installed but not visible in this session - close the Claude app completely and open it again / 설치돼 있지만 이 창에서는 보이지 않습니다 - Claude 앱을 완전히 닫고 다시 여세요'

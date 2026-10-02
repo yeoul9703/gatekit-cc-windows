@@ -19,7 +19,7 @@ gatekit이 쓰는 프로그램(PowerShell 7, uv, Claude Code, Git, `.venv`)을 *
 
 | key | 이름 | winget ID | 수준 | 최소 버전 | 설치 형식 | 관리자 | 공식 스크립트 | 문서 |
 |---|---|---|---|---|---|---|---|---|
-| `pwsh` | PowerShell 7 | `Microsoft.PowerShell` | 권장 | 7.6.0 | msix | 예전 MSI 설치본이면 필요할 수 있음 | 없음 | https://learn.microsoft.com/powershell/scripting/install/installing-powershell-on-windows |
+| `pwsh` | PowerShell 7 | `Microsoft.PowerShell` | 필수 | 7.6.0 | msix | 예전 MSI 설치본이면 필요할 수 있음 | 없음 | https://learn.microsoft.com/powershell/scripting/install/installing-powershell-on-windows |
 | `uv` | uv (Python 관리 도구) | `astral-sh.uv` | 필수 | 0.4.27 | - | 아니오 | https://astral.sh/uv/install.ps1 | https://docs.astral.sh/uv/getting-started/installation/ |
 | `claude` | Claude Code (claude 명령) | `Anthropic.ClaudeCode` | 필수 | 2.1.277 | - | 아니오 | https://claude.ai/install.ps1 | https://code.claude.com/docs/en/setup |
 | `git` | Git for Windows | `Git.Git` | 선택 | - | - | 필요할 수 있음 | 없음 | https://git-scm.com/download/win |
@@ -31,7 +31,7 @@ gatekit이 쓰는 Python은 **3.14 이상**이고, uv가 알아서 받습니다.
 
 각 블록에서 **한 방법만** 고르면 됩니다. winget이 막혀 있으면 공식 스크립트를 쓰세요.
 
-### 2-1. PowerShell 7 (`pwsh`, 권장)
+### 2-1. PowerShell 7 (`pwsh`, 필수)
 
 | 하고 싶은 것 | 명령 |
 |---|---|
@@ -43,7 +43,9 @@ gatekit이 쓰는 Python은 **3.14 이상**이고, uv가 알아서 받습니다.
 - 공식 설치 스크립트 방식은 gatekit이 쓰지 않습니다(공식 문서의 설치 방법은 위 문서 링크).
 - 관리자: MSIX 설치는 보통 필요 없습니다. **예전에 MSI로 설치한** PowerShell을 바꿀 때는
   Windows 관리자 확인 창(UAC)이 뜰 수 있습니다. 창이 뜨면 허용하거나 IT 담당자에게 문의하세요.
-- 없어도 gatekit은 동작합니다(권장일 뿐).
+- 필수입니다. Claude Code가 명령을 실행할 때 쓰는 PowerShell 도구와 입력창의 `!` 명령이 PowerShell 7로 돌아갑니다
+  (`.claude/settings.json`의 `env.CLAUDE_CODE_USE_POWERSHELL_TOOL = "1"`, `defaultShell = "powershell"`).
+- winget이 없거나 막혀 있으면 Microsoft Store에서 "PowerShell"을 설치하세요. 둘 다 안 되면 IT 담당자에게 문의하세요.
 
 ### 2-2. uv (필수)
 

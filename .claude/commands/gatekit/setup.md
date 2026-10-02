@@ -8,8 +8,8 @@ allowed-tools: Read, Write, Edit, Glob, Grep, Bash, PowerShell
 
 Input: `$ARGUMENTS` — unused; reserved for future backend configuration.
 
-gatekit needs exactly two programs: Claude Code and **uv**. uv downloads the
-Python it needs by itself; nothing else has to be installed. The work is done by
+gatekit needs three programs: Claude Code, **uv** and **PowerShell 7**. uv
+downloads the Python it needs by itself; nothing else has to be installed. The work is done by
 one script, `.claude/gatekit/scripts/setup.ps1`; this command runs it, shows the
 result, and installs something **only after the user says yes in the chat**.
 The user may not know the terminal: use plain words, no jargon.
@@ -63,7 +63,7 @@ but are old or broken go to `-Update`:
 |---|---|---|---|---|---|
 | `uv` | `-Install uv` / `-Update uv` | runs gatekit and fetches Python | none with the official script; winget adds source terms | small | no |
 | `claude` | `-Install claude` / `-Update claude` | the Claude Code CLI that workers use (the desktop app or the VS Code extension alone does not provide it) | none | tens of MB | no |
-| `pwsh` | `-Install pwsh` / `-Update pwsh` | PowerShell 7, optional | includes winget source and package terms | tens of MB | maybe, for an older MSI install |
+| `pwsh` | `-Install pwsh` / `-Update pwsh` | PowerShell 7, required: Claude Code runs its PowerShell tool and the input-box `!` commands with it | includes winget source and package terms | tens of MB | maybe, for an older MSI install |
 | `venv` | `-Install venv` only | Python and packages for the hooks; **a damaged `.claude/gatekit/.venv` is deleted and rebuilt** | none | tens of MB | no |
 | `git` | prints a command only | Git for Windows, optional | — | — | may need it |
 
@@ -83,6 +83,16 @@ never assume it.
   note, never inside "install all".
 - If the user picks "later", stop and say that gatekit hooks stay inactive until
   `uv` and the `.venv` exist. Nothing is installed.
+- `pwsh` installs through winget only. If winget is missing or blocked, say so
+  and pass on the hint the script printed (Microsoft Store); do not look for
+  another download.
+- **`S12-settings` is `fail` because a PowerShell setting is missing**: nothing
+  is installed for this. `.claude/settings.json` must carry
+  `"env": {"CLAUDE_CODE_USE_POWERSHELL_TOOL": "1"}` and
+  `"defaultShell": "powershell"`. Say which one is missing, ask in the chat,
+  and on yes read the file and add only the missing key with the Edit tool —
+  merge into the existing `env`, never replace the file or touch `hooks`. The
+  setting takes effect in a new session, so tell the user to reopen Claude Code.
 
 For manual reference, the commands the script would run for uv are (do not run them
 yourself unless the user asks you to, and run an install command only after

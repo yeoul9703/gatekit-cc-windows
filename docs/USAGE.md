@@ -10,7 +10,8 @@ gatekit은 "만들기 전에 정리하고, 끝났는지 코드로 확인하게" 
 |---|---|---|
 | Claude Code | 예 | 데스크톱 앱만으로는 부족합니다. `claude`라는 명령(CLI)도 함께 있어야 합니다 |
 | uv | 예 | gatekit이 쓰는 Python을 알아서 준비해 주는 프로그램입니다. 없으면 `/gatekit:setup`이 설치를 제안합니다 |
-| PowerShell 7.6, winget | 권장 | 설치를 쉽게 해 줍니다 |
+| PowerShell 7 | 예 | Claude Code가 명령을 실행할 때 씁니다. 없으면 `/gatekit:setup`이 설치를 제안합니다 |
+| winget | 권장 | 설치를 쉽게 해 줍니다. Windows 11에는 보통 들어 있습니다 |
 | Git for Windows | 선택 | 없어도 됩니다 |
 
 Python은 따로 설치하지 않아도 됩니다. uv가 준비합니다.

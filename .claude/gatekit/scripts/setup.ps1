@@ -788,9 +788,12 @@ $pwshFound = Get-App 'pwsh' $script:sessionPath
 $pwshApps = $pwshFound.apps
 $script:pkgInfo['pwsh'] = @{ where = $pwshFound.where; path = ''; version = '' }
 if ($pwshFound.where -eq 'none') {
-    Add-Item 'S2' 'recommended' 'pwsh' 'warn' (T 'PowerShell 7 이 없습니다(없어도 동작합니다)' 'PowerShell 7 not found (gatekit works without it)') (T '허락하면 설치합니다 (-Install pwsh)' 'installed if you allow it (-Install pwsh)')
+    Set-Flag 'needs'
+    Add-Item 'S2' 'required' 'pwsh' 'fail' (T 'PowerShell 7 이 없습니다. Claude Code 의 PowerShell 도구가 이것으로 실행됩니다.' 'PowerShell 7 not found. Claude Code runs its PowerShell tool with it.') `
+        (T '허락하면 설치합니다 (-Install pwsh). 직접 하려면 아래를 실행하세요' 'installed if you allow it (-Install pwsh). To do it yourself run this') `
+        @(('winget install --id ' + $script:pkgs['pwsh'].winget_id + ' -e --source winget --installer-type ' + $script:pkgs['pwsh'].installer_type), (T 'winget 이 없으면 Microsoft Store 에서 "PowerShell" 을 설치하세요.' 'without winget, install "PowerShell" from the Microsoft Store.'))
 } elseif ($pwshFound.where -eq 'registry') {
-    Add-RestartItem 'S2' 'recommended' 'pwsh' $pwshApps[0].Source
+    Add-RestartItem 'S2' 'required' 'pwsh' $pwshApps[0].Source
 } else {
     $found = @()
     $seenVersions = @{}
@@ -823,15 +826,15 @@ if ($pwshFound.where -eq 'none') {
         $uacHint = @(T '기존 MSI 설치본이라 업데이트할 때 관리자 확인 창(UAC)이 뜰 수 있습니다.' 'this is an older MSI install, so the update may show a Windows administrator prompt (UAC).')
     }
     if ($primaryText -eq '?') {
-        Add-Item 'S2' 'recommended' 'pwsh' 'unverified' ((T '버전을 읽지 못했습니다: ' 'could not read the version: ') + $where)
+        Add-Item 'S2' 'required' 'pwsh' 'unverified' ((T '버전을 읽지 못했습니다: ' 'could not read the version: ') + $where)
     } elseif ($primaryStable) {
-        Add-Item 'S2' 'recommended' 'pwsh' 'ok' ((T '안정판 ' 'stable ') + $primaryText + ' (' + $where + ')')
+        Add-Item 'S2' 'required' 'pwsh' 'ok' ((T '안정판 ' 'stable ') + $primaryText + ' (' + $where + ')')
     } elseif ($primaryText -match '-') {
         $act = T '안정판 7.6 권장, 허락하면 업데이트합니다 (-Update pwsh)' 'stable 7.6 recommended, updated if you allow it (-Update pwsh)'
         if ($anyStable) { $act = T '안정판 7.6 이 다른 경로에 있습니다. PATH 순서를 확인하세요' 'a stable 7.6 exists at another path. Check the PATH order' }
-        Add-Item 'S2' 'recommended' 'pwsh' 'warn' ((T '미리보기(preview) 버전이 먼저 잡힙니다: ' 'a preview build is found first: ') + $where) $act $uacHint
+        Add-Item 'S2' 'required' 'pwsh' 'warn' ((T '미리보기(preview) 버전이 먼저 잡힙니다: ' 'a preview build is found first: ') + $where) $act $uacHint
     } else {
-        Add-Item 'S2' 'recommended' 'pwsh' 'warn' ((T '7.6 안정판보다 낮습니다: ' 'older than stable 7.6: ') + $where) (T '허락하면 업데이트합니다 (-Update pwsh)' 'updated if you allow it (-Update pwsh)') $uacHint
+        Add-Item 'S2' 'required' 'pwsh' 'warn' ((T '7.6 안정판보다 낮습니다: ' 'older than stable 7.6: ') + $where) (T '허락하면 업데이트합니다 (-Update pwsh)' 'updated if you allow it (-Update pwsh)') $uacHint
     }
 }
 
@@ -1031,14 +1034,23 @@ if (-not (Test-Path -LiteralPath $settingsFile)) {
         $hasStart = ($settings.hooks.SessionStart -and $rawSettings -match 'session-check\.ps1')
         $hasGate = ($rawSettings -match 'bin/gatekit\.py')
         $noFlags = @(Get-HooksMissingPsFlags $settings)
+        # The PowerShell tool must be on (env) and the input-box ! commands must use it too.
+        $psTool = ($settings.env -and [string]$settings.env.CLAUDE_CODE_USE_POWERSHELL_TOOL -eq '1')
+        $psShell = ([string]$settings.defaultShell -eq 'powershell')
         if (-not ($hasStart -and $hasGate)) {
             Set-Flag 'fail'
             Add-Item 'S12-settings' 'required' '.claude/settings.json' 'fail' (T 'gatekit 훅 등록이 빠져 있습니다' 'gatekit hook registrations are missing') (T '저장소에서 복원하세요' 'restore it from the repository')
         } elseif ($noFlags.Count -gt 0) {
             Set-Flag 'fail'
             Add-Item 'S12-settings' 'required' '.claude/settings.json' 'fail' (T ('PowerShell 훅에 -NoProfile -ExecutionPolicy Bypass 가 없습니다: ' + ($noFlags -join ', ')) ('PowerShell hook without -NoProfile -ExecutionPolicy Bypass: ' + ($noFlags -join ', '))) (T '저장소에서 복원하세요' 'restore it from the repository')
+        } elseif (-not ($psTool -and $psShell)) {
+            Set-Flag 'needs'
+            $missing = @()
+            if (-not $psTool) { $missing += 'env.CLAUDE_CODE_USE_POWERSHELL_TOOL = "1"' }
+            if (-not $psShell) { $missing += 'defaultShell = "powershell"' }
+            Add-Item 'S12-settings' 'required' '.claude/settings.json' 'fail' ((T 'PowerShell 설정이 빠져 있습니다: ' 'PowerShell settings are missing: ') + ($missing -join ', ')) (T '.claude/settings.json 에 위 값을 넣으세요(다른 내용은 그대로 둡니다)' 'add the values above to .claude/settings.json (leave everything else as it is)')
         } else {
-            Add-Item 'S12-settings' 'required' '.claude/settings.json' 'ok' (T '훅 등록 확인(SessionStart, 게이트, -NoProfile -ExecutionPolicy Bypass)' 'hooks registered (SessionStart, gates, -NoProfile -ExecutionPolicy Bypass)')
+            Add-Item 'S12-settings' 'required' '.claude/settings.json' 'ok' (T '훅 등록과 PowerShell 도구 설정 확인(SessionStart, 게이트, -NoProfile -ExecutionPolicy Bypass)' 'hooks and PowerShell settings in place (SessionStart, gates, -NoProfile -ExecutionPolicy Bypass, env, defaultShell)')
         }
     }
 }

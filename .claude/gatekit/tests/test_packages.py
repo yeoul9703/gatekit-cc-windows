@@ -51,7 +51,7 @@ class TestPackagesFile(unittest.TestCase):
         packages = {p["key"]: p for p in load()["packages"]}
         self.assertEqual(packages["uv"]["level"], "필수")
         self.assertEqual(packages["claude"]["level"], "필수")
-        self.assertEqual(packages["pwsh"]["level"], "권장")
+        self.assertEqual(packages["pwsh"]["level"], "필수")
         self.assertEqual(packages["git"]["level"], "선택")
         self.assertEqual(packages["pwsh"]["installer_type"], "msix")
         self.assertIsNone(packages["git"]["official_script_url"])
