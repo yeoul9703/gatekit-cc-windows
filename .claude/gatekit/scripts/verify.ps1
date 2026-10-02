@@ -24,6 +24,7 @@ $doctorTimeout = 60
 $settingsTimeout = 30
 $pyrightTimeout = 180
 $ruffTimeout = 60
+$devSyncTimeout = 300
 
 $kit = Split-Path -Parent $PSScriptRoot
 $projectRoot = Split-Path -Parent (Split-Path -Parent $kit)
@@ -128,6 +129,22 @@ if (-not (Test-Path -LiteralPath $venvPy)) {
     exit 1
 }
 
+# 0. dev tools ----------------------------------------------------------------
+# The property tests need hypothesis, and pyright and ruff live in the same uv dev group.
+# pyproject.toml sets default-groups = [], so nothing installs the group unless asked: ask
+# once here. --frozen never rewrites uv.lock; --inexact removes nothing. Without the group the
+# property tests skip themselves, so a failed sync is reported as unverified, not hidden.
+$uv = Get-Command uv -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+if (-not $uv) {
+    Say 'unverified' 'dev tools: uv not found, the property tests will be skipped / uv 없음, 성질 테스트를 건너뜁니다'
+}
+else {
+    $r = Invoke-Proc $uv.Source @('sync', '--frozen', '--group', 'dev', '--inexact') $devSyncTimeout $kit
+    if ($r.TimedOut) { Say 'unverified' ('dev tools: sync timed out, the property tests may be skipped / 시간 초과 ' + (Format-Secs $r.Seconds)) }
+    elseif ($r.Code -eq 0) { Say 'ok' ('dev tools: the uv dev group is installed / 개발 도구 준비됨 ' + (Format-Secs $r.Seconds)) }
+    else { Say 'unverified' ('dev tools: sync failed, the property tests may be skipped / 설치 실패 ' + (Format-Secs $r.Seconds)) }
+}
+
 # 1. syntax -------------------------------------------------------------------
 $r = Invoke-Proc $venvPy @('-m', 'compileall', '-q', $kit) $compileTimeout $kit
 if ($r.TimedOut) { Fail-Timeout 'compileall' $compileTimeout $r }
@@ -177,7 +194,6 @@ else { Fail ('.claude/settings.json is not valid JSON / JSON 오류 ' + (Format-
 # pyright and ruff live in the uv dev group. pyproject.toml sets default-groups = [], so a plain
 # `uv run --frozen` (what the commands use) never installs them: only these two calls ask for
 # the group. --frozen never rewrites uv.lock.
-$uv = Get-Command uv -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
 if (-not $uv) {
     Fail 'uv not found: type check and lint cannot run / uv 없음, 타입검사·린트 실행 불가' $null
 }
