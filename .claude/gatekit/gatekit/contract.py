@@ -34,7 +34,7 @@ from . import approval, config, paths, verdict
 
 VERSION = 1
 
-#: Total wall-clock budget for a whole contract run (ARCHITECTURE.md section 5).
+#: Total wall-clock budget for a whole contract run when 05-gate.md declares none.
 #: A project whose suite is honestly slower may raise it with a
 #: ``gatekit-budget`` fence in spec/05-gate.md, up to MAX_BUDGET_S. Without
 #: that escape hatch a slow-but-passing suite is permanently `unverified`.

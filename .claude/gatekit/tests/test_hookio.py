@@ -1,7 +1,7 @@
 """Tests for gatekit.hookio — the hook stdin/stdout contract.
 
 Output shapes verified against the official Claude Code hooks documentation
-(code.claude.com/docs/en/hooks) on 2026-09-10; they match ARCHITECTURE.md §3.
+(code.claude.com/docs/en/hooks) on 2026-09-10.
 """
 from __future__ import annotations
 
@@ -300,8 +300,11 @@ class TestLogError(unittest.TestCase):
         self.assertTrue((self.root / ".gatekit" / "runs" / "hook-errors.log").is_file())
 
     def test_never_raises_on_unwritable_root(self) -> None:
-        # A path that cannot be created must not propagate out of a gate.
-        hookio.log_error(pathlib.Path("/proc/nonexistent-gatekit"), "Stop", RuntimeError("x"))
+        # A log folder that cannot be created must not propagate out of a gate. Here
+        # .gatekit is a file. ("/proc/..." is C:\proc\... on Windows and was created.)
+        (self.root / ".gatekit").write_text("not a folder", encoding="utf-8")
+        hookio.log_error(self.root, "Stop", RuntimeError("x"))
+        self.assertTrue((self.root / ".gatekit").is_file())
 
 
 class TestHelpers(unittest.TestCase):

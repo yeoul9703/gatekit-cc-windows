@@ -1,7 +1,8 @@
 """Filesystem layout resolution for gatekit.
 
-Every other module asks this one where things live so that the layout in
-ARCHITECTURE.md section 2 is stated exactly once. Two roots matter:
+Every other module asks this one where things live so that the layout of a
+project's ``spec/`` and ``.gatekit/`` folders is stated exactly once. Two roots
+matter:
 
 * the **project root** — the user's repository, found by walking up from a
   starting directory to the nearest ancestor holding ``.gatekit/`` or ``.git/``;

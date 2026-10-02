@@ -1,7 +1,7 @@
 """Grep gate: the docs must not describe the old plugin-era structure.
 
 ADRs are historical records and are skipped, except ADR-0018 (the current
-decision). README.md, USAGE.md and ARCHITECTURE.md are always checked."""
+decision). README.md and USAGE.md are always checked."""
 from __future__ import annotations
 
 import pathlib
@@ -47,7 +47,7 @@ class TestDocsStale(unittest.TestCase):
 
     def test_expected_files_are_checked(self) -> None:
         names = {p.name for p in checked_files()}
-        for expected in ("README.md", "USAGE.md", "ARCHITECTURE.md",
+        for expected in ("README.md", "USAGE.md",
                          "ADR-0018-windows-standalone-uv.md",
                          "ADR-0020-skills-under-claude-skills.md"):
             self.assertIn(expected, names)

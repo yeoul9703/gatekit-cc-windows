@@ -42,9 +42,8 @@ VERSION = 1
 
 READ_ONLY = "read-only"
 
-#: The pipelines a session can have active (ARCHITECTURE.md section 4). The
-#: prompt gate sets one when the user invokes ``/gatekit-<pipeline>``; the stop
-#: and question gates read it. ``discover`` is the optional first step and
+#: The pipelines a session can have active. The prompt gate sets one when the
+#: user invokes ``/gatekit-<pipeline>``; the stop and question gates read it. ``discover`` is the optional first step and
 #: ``design`` is re-entrant: it may run at any stage, including during a build
 #: (ADR-0008). ``doctor`` and ``setup`` are commands, not pipelines, and clear it.
 PIPELINES = ("discover", "interview", "mockup", "design", "tasks", "gate", "build", "verify")
@@ -231,6 +230,9 @@ class ScopeLock:
     turn. Without a lock, the later ``save`` of two overlapping hooks writes
     back the list it loaded and the other hook's change is lost — a dropped
     *add* would hide a scope from the conflict check.
+
+    Only those two take the lock. The prompt, skill, question and stop gates
+    and ``ledger release-scopes`` load and save the ledger without it.
 
     ``with ScopeLock(root, session) as held:`` — *held* is ``False`` when the
     lock could not be taken within *wait* seconds. The caller decides what that

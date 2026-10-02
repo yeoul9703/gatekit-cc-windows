@@ -2,8 +2,7 @@
 
 Claude Code invokes a gate as a subprocess, writes one JSON object to its
 stdin, and reads stdout for a decision. The output shapes below were verified
-against the official documentation (code.claude.com/docs/en/hooks) and match
-ARCHITECTURE.md section 3:
+against the official documentation (code.claude.com/docs/en/hooks):
 
 * ``PreToolUse`` deny  → nested ``hookSpecificOutput.permissionDecision``
 * ``Stop`` block       → **top-level** ``decision`` / ``reason``
@@ -25,7 +24,8 @@ from typing import Any, Callable, Dict, Optional, TextIO
 
 from . import paths
 
-#: Upper bound on injected UserPromptSubmit context (ARCHITECTURE.md section 3).
+#: Upper bound on injected UserPromptSubmit context; :func:`add_context` cuts
+#: anything longer.
 MAX_CONTEXT_CHARS = 600
 
 Event = Dict[str, Any]
