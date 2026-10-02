@@ -107,6 +107,32 @@ class TestSpecBeforeCode(WriteGateProject):
         # only *.md at the ROOT is allowlisted, not markdown anywhere
         self.assertIsNotNone(write_gate.handle(self.event(str(self.root / "src" / "notes.md"))))
 
+    # -- case: one file, one verdict (ADR-0022) --------------------------
+    def test_allowlist_ignores_case(self) -> None:
+        for rel in ("SPEC/01-prd.md", "Spec/new/x.md", "DOCS/adr.md", ".GATEKIT/config.json",
+                    "readme.MD", "ReadMe.txt", "CHANGELOG.MD"):
+            with self.subTest(rel=rel):
+                self.assertIsNone(write_gate.handle(self.event(str(self.root / rel))))
+                self.assertIsNone(write_gate.handle(self.event(rel)))
+
+    def test_case_does_not_widen_the_allowlist(self) -> None:
+        # what is denied in lower case is denied in every other spelling
+        (self.root / "src").mkdir()
+        for rel in ("SRC/app.ts", "Src/NOTES.MD", "src/README.md", "SPECS/x.md", "spec2/x.md",
+                    "DOCSX/a.md", ".GATEKIT2/x", "X/SPEC/a.md", "lib/DOCS/a.md", "notes.MDX"):
+            with self.subTest(rel=rel):
+                self.assertIsNotNone(write_gate.handle(self.event(str(self.root / rel))))
+
+    def test_in_allowlist_and_matches_fold_both_sides(self) -> None:
+        self.assertTrue(write_gate.in_allowlist("SPEC/x.md"))
+        self.assertTrue(write_gate.in_allowlist(".GateKit/runs/a.json"))
+        self.assertFalse(write_gate.in_allowlist("SRC/SPEC/x.md"))
+        self.assertTrue(write_gate.matches("SRC/Auth/Token.ts", "src/auth/**"))
+        self.assertTrue(write_gate.matches("src/auth/token.ts", "SRC/AUTH/*.TS"))
+        self.assertTrue(write_gate.matches("SRC/AUTH", "src/auth/**"))
+        self.assertFalse(write_gate.matches("SRC/Auth/deep/x.ts", "src/auth/*.ts"))
+        self.assertFalse(write_gate.matches("SRC/Billing/x.ts", "src/auth/**"))
+
     def test_no_spec_dir_means_no_enforcement(self) -> None:
         import shutil
 
@@ -253,6 +279,38 @@ class TestTaskWriteScope(WriteGateProject):
         # A task-scoped worker is not granted the spec-before-code allowlist.
         self.apply_env()
         self.assertIsNotNone(write_gate.handle(self.event(str(self.root / "spec" / "01-prd.md"))))
+
+    # -- case (ADR-0022) -------------------------------------------------
+    def test_scope_ignores_case_whether_or_not_the_folder_exists(self) -> None:
+        self.apply_env()
+        # nothing on disk: realpath cannot restore the spelling
+        self.assertIsNone(write_gate.handle(self.event(str(self.root / "SRC" / "Auth" / "new.ts"))))
+        (self.root / "src" / "auth").mkdir(parents=True)
+        self.assertIsNone(write_gate.handle(self.event(str(self.root / "SRC" / "AUTH" / "new.ts"))))
+        self.assertIsNone(write_gate.handle(self.event("Src/Auth/Deep/x.ts")))
+
+    def test_scope_pattern_case_is_ignored_too(self) -> None:
+        self.write_task(["SRC/Auth/**"])
+        self.apply_env()
+        self.assertIsNone(write_gate.handle(self.event(str(self.root / "src" / "auth" / "t.ts"))))
+
+    def test_case_does_not_let_a_worker_out_of_its_scope(self) -> None:
+        self.apply_env()
+        for rel in ("SRC/Billing/x.ts", "SRC/AUTHX/x.ts", "SPEC/01-prd.md", ".GATEKIT/config.json",
+                    "DOCS/a.md", "README.MD", "SRC/auth.ts"):
+            with self.subTest(rel=rel):
+                self.assertIsNotNone(write_gate.handle(self.event(str(self.root / rel))))
+
+    def test_read_only_task_denies_any_spelling(self) -> None:
+        self.write_task("read-only")
+        self.apply_env()
+        self.assertIsNotNone(write_gate.handle(self.event(str(self.root / "SRC" / "Auth" / "t.ts"))))
+
+    def test_root_spelled_in_another_case_is_still_the_root(self) -> None:
+        self.apply_env()
+        shouted = str(self.root).upper()
+        self.assertIsNone(write_gate.handle(self.event(shouted + "\\SRC\\AUTH\\t.ts")))
+        self.assertIsNotNone(write_gate.handle(self.event(shouted + "\\SRC\\OTHER\\t.ts")))
 
     def test_no_task_env_skips_rule_b(self) -> None:
         self.assertIsNone(write_gate.handle(self.event(str(self.root / "src" / "billing" / "x.ts"))))

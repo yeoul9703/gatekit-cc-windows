@@ -9,6 +9,8 @@ starts: the spawn prompt must carry a fenced block
     ```
 
 and the declared scope must not intersect one already claimed in this session.
+A claim is stored with the call's ``tool_use_id`` and dropped by the release
+hook (:mod:`gatekit.gates.release`) when that agent ends.
 
 The fence is parsed **as JSON**, never with a regex over prose. A prompt that
 merely talks about ``write_scope`` in a sentence does not satisfy the gate, so
@@ -52,8 +54,9 @@ _MESSAGES = {
         "conflict": (
             "gatekit: write_scope {scope} overlaps a scope already active in this "
             "session ({owners}). Narrow the scope or wait for that agent to finish. "
-            "A scope stays recorded after its agent ends; once it has finished, "
-            "release it with: {release}"
+            "A scope is released when its agent ends. If that agent has ended and "
+            "its scope is still here (it failed or was stopped), release it "
+            "with: {release}"
         ),
     },
     "ko": {
@@ -66,7 +69,8 @@ _MESSAGES = {
         "conflict": (
             "gatekit: write_scope {scope} 가 이 세션에서 이미 활성화된 범위와 겹칩니다 "
             "({owners}). 범위를 좁히거나 해당 에이전트가 끝날 때까지 기다리세요. "
-            "범위는 에이전트가 끝난 뒤에도 기록에 남습니다. 끝났다면 이 명령으로 해제하세요: {release}"
+            "범위는 에이전트가 끝나면 해제됩니다. 그 에이전트가 이미 끝났는데 범위가 남아 있다면"
+            "(실패했거나 중단된 경우) 이 명령으로 해제하세요: {release}"
         ),
     },
 }
@@ -156,6 +160,16 @@ def handle(event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     if not paths.state_dir(root).is_dir():
         return hookio.allow()
 
+    # One load-change-save at a time: the release hook drops scopes whenever
+    # an agent ends, and an overlapping save would lose this spawn's scope.
+    # A lock that cannot be taken does not stop the spawn from being judged.
+    with ledger.ScopeLock(root, session):
+        return _judge(event, root, session, tool_input, prompt)
+
+
+def _judge(
+    event: Dict[str, Any], root: Any, session: str, tool_input: Any, prompt: str
+) -> Optional[Dict[str, Any]]:
     led = ledger.Ledger.load(root, session)
     lang = led.output_lang
 
@@ -185,7 +199,10 @@ def handle(event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         )
 
     owner = owner_label(tool_input if isinstance(tool_input, dict) else {}, prompt)
-    led.add_scope(owner, scope)
+    # The call's tool_use_id is what the release hook finds this scope by when
+    # the agent ends (gates/release.py); without one the scope is released by hand.
+    call_id = event.get("tool_use_id")
+    led.add_scope(owner, scope, call_id if isinstance(call_id, str) else None)
     led.append_event(
         "scope_declared",
         {"owner": owner, "write_scope": scope, "stop_when": declaration["stop_when"]},

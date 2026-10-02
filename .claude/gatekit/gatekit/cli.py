@@ -15,9 +15,9 @@ SUBCOMMANDS = {
     "contract": ("gatekit.contract", "Derive and run the completion contract from spec/05-gate.md."),
     "approve":  ("gatekit.approval", "Hash-anchored approvals: approve / check / list."),
     "design":   ("gatekit.design",   "Design tokens: merge-preset / impact."),
-    "jobs":     ("gatekit.jobs",     "Worker jobs: start / status / wait / results / redelegate / clean."),
+    "jobs":     ("gatekit.jobs",     "Worker jobs: start / shape / status / wait / results / complete / recheck / redelegate / stop / evaluate / clean."),
     "workers":  ("gatekit.workers",  "Worker backends: list / check / set-default."),
-    "ledger":   ("gatekit.ledger",   "Session ledger: show / init / set-pipeline."),
+    "ledger":   ("gatekit.ledger",   "Session ledger: show / init / set-pipeline / release-scopes."),
     "lang":     ("gatekit.lang",     "Detect output language for a text (ko/en)."),
     "setup":    ("gatekit.setup",    "Run scripts/setup.ps1: --install/--update/--reinstall X,Y, --retry-failed, --status, --json, --lang ko|en."),
 }
@@ -26,8 +26,8 @@ SUBCOMMANDS = {
 #: `.claude/settings.json` hooks reach a gate through `bin/gatekit.py _gate
 #: <name>` (exec form, run by the project venv's python): the gate module reads
 #: the hook event JSON from this same process's stdin.
-GATES = ("prompt", "write", "bash", "powershell", "spawn", "skill", "question", "compact",
-         "stop", "tokens")
+GATES = ("prompt", "write", "bash", "powershell", "spawn", "release", "skill", "question",
+         "compact", "stop", "tokens")
 
 
 def _force_utf8_stdio() -> None:
@@ -70,8 +70,8 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         gate_module = importlib.import_module(f"gatekit.gates.{rest[0]}")
         try:
-            # Hook gates (prompt/write/bash/powershell/spawn/skill/question/
-            # compact/stop) take no argv and read the event from stdin. The task
+            # Hook gates (prompt/write/bash/powershell/spawn/release/skill/
+            # question/compact/stop) take no argv and read the event from stdin. The task
             # gate ("tokens") takes an argv list instead, so try that shape first.
             return int(gate_module.main(rest[1:]) or 0)
         except TypeError:

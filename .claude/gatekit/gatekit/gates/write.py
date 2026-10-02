@@ -15,6 +15,13 @@ workers from editing each other's files. Rule (b) is deliberately stricter than
 rule (a): a scoped worker gets no documentation allowlist, because a worker
 assigned ``src/auth/**`` has no business rewriting the PRD.
 
+**Paths are compared without regard to case** (ADR-0022). The kit is
+Windows-only and the file system is case-insensitive: ``SRC/Auth/x.ts`` and
+``src/auth/x.ts`` are one file, so they get one verdict. The fold is applied to
+both sides of every comparison in this module (:func:`matches`,
+:func:`in_allowlist`) — the allowlist and a task scope alike — so no spelling
+of a path reaches a rule its lower-case spelling would not reach.
+
 Denial reasons are written in the session's ``output_lang``.
 """
 from __future__ import annotations
@@ -130,14 +137,28 @@ def relative_target(root: pathlib.Path, raw_path: str) -> Optional[str]:
     return paths.relative_to_root(root, candidate)
 
 
+def fold(text: str) -> str:
+    """The form in which paths and patterns are compared: lower case.
+
+    Done explicitly instead of through ``fnmatch.fnmatch`` (which folds only
+    on a Windows interpreter), so the verdict does not depend on where the
+    code runs.
+    """
+    return text.lower()
+
+
 def matches(relpath: str, pattern: str) -> bool:
     """Glob match with ``**`` crossing directory separators.
 
     ``fnmatch`` alone treats ``*`` as crossing ``/``, which would make
     ``src/auth/*.ts`` match a nested file. This translates the pattern so that
     ``*`` stays within one path segment while ``**`` spans any number.
+
+    Case is ignored on both sides (:func:`fold`): the path and the pattern
+    name files on a case-insensitive file system.
     """
-    pattern = pattern.strip().replace("\\", "/")
+    relpath = fold(relpath)
+    pattern = fold(pattern.strip().replace("\\", "/"))
     while pattern.startswith("./"):
         pattern = pattern[2:]
     if not pattern:
@@ -172,7 +193,12 @@ def _glob_match(parts: List[str], pats: List[str]) -> bool:
 
 
 def in_allowlist(relpath: str) -> bool:
-    """True when *relpath* is writable regardless of the spec gate."""
+    """True when *relpath* is writable regardless of the spec gate.
+
+    Case-insensitive like :func:`matches`: ``SPEC/x.md``, ``Docs/a.md`` and
+    ``readme.MD`` are the same files as their usual spellings.
+    """
+    relpath = fold(relpath)
     for pattern in SPEC_ALLOWLIST:
         if pattern == "*.md":
             # Root-level markdown only: no separator left in the path.
@@ -180,7 +206,7 @@ def in_allowlist(relpath: str) -> bool:
                 return True
             continue
         if pattern == "README*":
-            if "/" not in relpath and fnmatch.fnmatchcase(relpath, "README*"):
+            if "/" not in relpath and fnmatch.fnmatchcase(relpath, fold("README*")):
                 return True
             continue
         if matches(relpath, pattern):

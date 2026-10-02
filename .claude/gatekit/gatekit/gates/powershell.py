@@ -133,8 +133,6 @@ _INLINE_FLAGS = set(bash._INLINE_FLAGS) | {"--eval", "-p", "--print"}
 _INFO_FLAGS = {"--version", "-V", "-v", "--help", "-h", "-?", "/?"}
 _POWERSHELLS = {"pwsh", "powershell"}
 
-#: ``git`` options that take the next argument as their value.
-_GIT_VALUE_FLAGS = {"-C", "-c", "--git-dir", "--work-tree", "--namespace", "--exec-path"}
 
 #: .NET types whose static members never write a file.
 _PURE_TYPES = {
@@ -939,20 +937,15 @@ def _interpreter(name: str, args: List[_Word], result: WriteTargets) -> None:
 
 
 def _git(args: List[_Word], result: WriteTargets) -> None:
-    index = 0
-    while index < len(args):
-        arg = args[index]
-        index += 1
-        if arg.value in _GIT_VALUE_FLAGS:
-            index += 1
-            continue
-        if arg.value.startswith("-") and arg.first_bare:
-            continue
-        if arg.dynamic:
-            result.mark_opaque("git subcommand is not literal")
-        elif arg.value in bash._GIT_OPAQUE:
-            result.mark_opaque("git %s" % arg.value)
+    # Global options are skipped by the Bash gate's reader (one rule for both).
+    at = bash.git_subcommand_index([arg.value for arg in args])
+    if at is None:
         return
+    arg = args[at]
+    if arg.dynamic:
+        result.mark_opaque("git subcommand is not literal")
+    elif arg.value in bash._GIT_OPAQUE:
+        result.mark_opaque("git %s" % arg.value)
 
 
 def _curl(args: List[_Word], result: WriteTargets, cwd: Optional[str]) -> None:

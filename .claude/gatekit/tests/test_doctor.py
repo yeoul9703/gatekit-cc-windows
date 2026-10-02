@@ -78,16 +78,25 @@ class DoctorTestCase(unittest.TestCase):
     def standalone_hooks(self) -> dict:
         """A minimal hooks object shaped like the real .claude/settings.json,
         with every expected event routed through bin/gatekit.py (exec form)."""
-        hooks = {event: [GATE_ENTRY] for event in doctor.EXPECTED_HOOK_EVENTS}
-        hooks["SessionStart"] = [SESSION_ENTRY]
-        hooks["PreToolUse"] = [
-            gate_entry("write", "Write|Edit|MultiEdit|NotebookEdit"),
-            gate_entry("bash", "Bash"),
-            gate_entry("powershell", "PowerShell"),
-            gate_entry("spawn", "Agent|Task"),
-            gate_entry("skill", "Skill"),
-        ]
-        return hooks
+        return {
+            "SessionStart": [SESSION_ENTRY],
+            "UserPromptSubmit": [gate_entry("prompt")],
+            "PreToolUse": [
+                gate_entry("write", "Write|Edit|MultiEdit|NotebookEdit"),
+                gate_entry("bash", "Bash"),
+                gate_entry("powershell", "PowerShell"),
+                gate_entry("spawn", "Agent|Task"),
+                gate_entry("skill", "Skill"),
+            ],
+            "PostToolUse": [
+                gate_entry("question", "AskUserQuestion"),
+                gate_entry("question", "Write|Edit|MultiEdit|NotebookEdit"),
+                gate_entry("release", "Agent|Task"),
+            ],
+            "SubagentStop": [gate_entry("release")],
+            "PreCompact": [gate_entry("compact")],
+            "Stop": [gate_entry("stop")],
+        }
 
     def stub_claude(self) -> None:
         make_fake(self.bindir, "claude", print_and_exit("claude 1.0.0"))
@@ -104,7 +113,7 @@ class TestReportShape(DoctorTestCase):
         report = doctor.diagnose(self.root)
         self.assertEqual(len(report["axes"]), 8)
         self.assertEqual([a["axis"] for a in report["axes"]][:2],
-                         ["plugin files", "hooks registered"])
+                         ["gatekit files", "hooks registered"])
         self.assertEqual(report["axes"][-1]["axis"], "uv")
         for axis in report["axes"]:
             for key in ("axis", "verdict", "detail", "fix"):
@@ -143,7 +152,7 @@ class TestAxisPluginFiles(DoctorTestCase):
         original = paths.gatekit_root
         paths.gatekit_root = lambda: base
         try:
-            return doctor.axis_plugin_files(self.root)
+            return doctor.axis_gatekit_files(self.root)
         finally:
             paths.gatekit_root = original
 
@@ -164,10 +173,10 @@ class TestAxisPluginFiles(DoctorTestCase):
             self.assertIn(rel, result["detail"])
 
     def test_real_checkout_axis_1_is_ok(self) -> None:
-        self.assertEqual(doctor.axis_plugin_files(self.root)["verdict"], verdict.OK)
+        self.assertEqual(doctor.axis_gatekit_files(self.root)["verdict"], verdict.OK)
 
     def test_real_checkout_has_every_gate_script_or_reports_which_is_missing(self) -> None:
-        result = doctor.axis_plugin_files(self.root)
+        result = doctor.axis_gatekit_files(self.root)
         if result["verdict"] == verdict.FAIL:
             self.assertIn("missing", result["detail"])
         else:
@@ -180,7 +189,7 @@ class TestAxisPluginFiles(DoctorTestCase):
         original = paths.gatekit_root
         paths.gatekit_root = lambda: fake_plugin
         try:
-            result = doctor.axis_plugin_files(self.root)
+            result = doctor.axis_gatekit_files(self.root)
         finally:
             paths.gatekit_root = original
         self.assertEqual(result["verdict"], verdict.FAIL)
@@ -194,7 +203,7 @@ class TestAxisPluginFiles(DoctorTestCase):
         original = paths.gatekit_root
         paths.gatekit_root = lambda: fake_plugin
         try:
-            result = doctor.axis_plugin_files(self.root)
+            result = doctor.axis_gatekit_files(self.root)
         finally:
             paths.gatekit_root = original
         self.assertEqual(result["verdict"], verdict.FAIL)
@@ -288,7 +297,7 @@ class TestAxisHooksRegistered(DoctorTestCase):
         self.assertNotIn("PowerShell", result["detail"])
 
     def test_both_missing_matchers_are_named(self) -> None:
-        # Spelled out (not derived from doctor.REQUIRED_PRETOOLUSE_GATES) so the
+        # Spelled out (not derived from doctor.REQUIRED_HOOKS) so the
         # test fails if doctor stops requiring either one.
         hooks = self.standalone_hooks()
         hooks["PreToolUse"] = [gate_entry("write", "Write|Edit|MultiEdit|NotebookEdit"),
@@ -299,9 +308,109 @@ class TestAxisHooksRegistered(DoctorTestCase):
         self.assertIn("PowerShell", result["detail"])
         self.assertIn("Skill", result["detail"])
 
+    # -- every gatekit hook is required (ADR-0022) -----------------------
+    def test_each_required_hook_fails_alone_and_is_named(self) -> None:
+        # Spelled out, not derived from doctor.REQUIRED_HOOKS: the test fails if
+        # doctor stops requiring one of them.
+        wanted = (
+            ("UserPromptSubmit", None, "prompt", "UserPromptSubmit (_gate prompt)"),
+            ("PreToolUse", "Write|Edit|MultiEdit|NotebookEdit", "write",
+             "PreToolUse Write (_gate write)"),
+            ("PreToolUse", "Bash", "bash", "PreToolUse Bash (_gate bash)"),
+            ("PreToolUse", "PowerShell", "powershell", "PreToolUse PowerShell (_gate powershell)"),
+            ("PreToolUse", "Agent|Task", "spawn", "PreToolUse Agent (_gate spawn)"),
+            ("PreToolUse", "Skill", "skill", "PreToolUse Skill (_gate skill)"),
+            ("PostToolUse", "AskUserQuestion", "question",
+             "PostToolUse AskUserQuestion (_gate question)"),
+            ("PostToolUse", "Write|Edit|MultiEdit|NotebookEdit", "question",
+             "PostToolUse NotebookEdit (_gate question)"),
+            ("PostToolUse", "Agent|Task", "release", "PostToolUse Task (_gate release)"),
+            ("SubagentStop", None, "release", "SubagentStop (_gate release)"),
+            ("PreCompact", None, "compact", "PreCompact (_gate compact)"),
+            ("Stop", None, "stop", "Stop (_gate stop)"),
+        )
+        self.assertEqual(len(wanted), len(doctor.REQUIRED_HOOKS))
+        for event, matcher, gate, named in wanted:
+            with self.subTest(event=event, matcher=matcher, gate=gate):
+                hooks = self.standalone_hooks()
+                # Reroute the one group to another gate: the event stays
+                # registered, so only the required-hook check can catch it.
+                for group in hooks[event]:
+                    if group.get("matcher") == matcher and group["hooks"][0]["args"][-1] == gate:
+                        group["hooks"][0]["args"][-1] = "tokens"
+                self.write_project_settings(hooks)
+                result = doctor.axis_hooks_registered(self.root)
+                self.assertEqual(result["verdict"], verdict.FAIL, result)
+                self.assertIn(named, result["detail"])
+                self.assertIn("settings.json", result["fix"])
+
+    def test_one_tool_missing_from_a_matcher_is_named_alone(self) -> None:
+        hooks = self.standalone_hooks()
+        hooks["PreToolUse"][0]["matcher"] = "Write|Edit|MultiEdit"
+        hooks["PostToolUse"][2]["matcher"] = "Agent"
+        self.write_project_settings(hooks)
+        detail = doctor.axis_hooks_registered(self.root)["detail"]
+        self.assertIn("PreToolUse NotebookEdit (_gate write)", detail)
+        self.assertIn("PostToolUse Task (_gate release)", detail)
+        self.assertNotIn("PreToolUse Write (", detail)
+        self.assertNotIn("PostToolUse Agent (", detail)
+
+    def test_missing_subagent_stop_fails(self) -> None:
+        hooks = self.standalone_hooks()
+        del hooks["SubagentStop"]
+        self.write_project_settings(hooks)
+        result = doctor.axis_hooks_registered(self.root)
+        self.assertEqual(result["verdict"], verdict.FAIL)
+        self.assertIn("SubagentStop", result["detail"])
+
+    def test_a_tool_may_be_covered_by_split_groups(self) -> None:
+        hooks = self.standalone_hooks()
+        hooks["PreToolUse"][3:4] = [gate_entry("spawn", "Agent"), gate_entry("spawn", "Task")]
+        self.write_project_settings(hooks)
+        self.assertEqual(doctor.axis_hooks_registered(self.root)["verdict"], verdict.OK)
+
+    def test_a_gate_under_the_wrong_event_does_not_count(self) -> None:
+        hooks = self.standalone_hooks()
+        hooks["PostToolUse"] = hooks["PostToolUse"][:2]
+        hooks["PreToolUse"].append(gate_entry("release", "Agent|Task"))
+        self.write_project_settings(hooks)
+        result = doctor.axis_hooks_registered(self.root)
+        self.assertEqual(result["verdict"], verdict.FAIL)
+        self.assertIn("PostToolUse Agent (_gate release)", result["detail"])
+
+    def test_required_hooks_are_exactly_the_real_settings_json(self) -> None:
+        """Both directions: a hook added to settings.json without a row in
+        REQUIRED_HOOKS fails here, and so does a row with no registration."""
+        project = pathlib.Path(__file__).resolve().parents[3]
+        settings = json.loads((project / ".claude" / "settings.json").read_text(encoding="utf-8"))
+        registered = set()
+        for event, groups in settings["hooks"].items():
+            for group in groups:
+                for hook in group["hooks"]:
+                    args = hook.get("args") or []
+                    if len(args) >= 2 and args[-2] == "_gate":
+                        matcher = group.get("matcher")
+                        for tool in (matcher.split("|") if matcher else [None]):
+                            registered.add((event, tool, args[-1]))
+        required = set()
+        for event, matcher, gate in doctor.REQUIRED_HOOKS:
+            for tool in (matcher.split("|") if matcher else [None]):
+                required.add((event, tool, gate))
+        self.assertEqual(sorted(registered - required, key=str), [], "registered, not required")
+        self.assertEqual(sorted(required - registered, key=str), [], "required, not registered")
+        self.assertEqual(len(doctor.REQUIRED_HOOKS), len(set(doctor.REQUIRED_HOOKS)))
+
+    def test_required_hook_events_and_gates_are_known(self) -> None:
+        from gatekit import cli
+
+        for event, _matcher, gate in doctor.REQUIRED_HOOKS:
+            self.assertIn(event, doctor.EXPECTED_HOOK_EVENTS)
+            self.assertIn(gate, cli.GATES)
+            self.assertIn(gate + ".py", doctor.GATE_SCRIPTS)
+
     def test_bash_matcher_does_not_stand_in_for_powershell(self) -> None:
         hooks = self.standalone_hooks()
-        hooks["PreToolUse"] = [gate_entry("powershell", "Bash"), gate_entry("skill", "Skill")]
+        hooks["PreToolUse"][2] = gate_entry("powershell", "Bash")
         self.write_project_settings(hooks)
         result = doctor.axis_hooks_registered(self.root)
         self.assertEqual(result["verdict"], verdict.FAIL)
@@ -309,7 +418,7 @@ class TestAxisHooksRegistered(DoctorTestCase):
 
     def test_matcher_routed_to_the_wrong_gate_fails(self) -> None:
         hooks = self.standalone_hooks()
-        hooks["PreToolUse"] = [gate_entry("bash", "PowerShell"), gate_entry("skill", "Skill")]
+        hooks["PreToolUse"][2] = gate_entry("bash", "PowerShell")
         self.write_project_settings(hooks)
         result = doctor.axis_hooks_registered(self.root)
         self.assertEqual(result["verdict"], verdict.FAIL)
@@ -319,8 +428,7 @@ class TestAxisHooksRegistered(DoctorTestCase):
         for matcher in ("Bash|PowerShell", "*", None):
             with self.subTest(matcher=matcher):
                 hooks = self.standalone_hooks()
-                hooks["PreToolUse"] = [gate_entry("powershell", matcher),
-                                       gate_entry("skill", "Skill")]
+                hooks["PreToolUse"][2] = gate_entry("powershell", matcher)
                 self.write_project_settings(hooks)
                 self.assertEqual(doctor.axis_hooks_registered(self.root)["verdict"], verdict.OK)
 
@@ -689,7 +797,7 @@ class TestCli(DoctorTestCase):
         self.assertNotIn("no .gatekit/ in this project", text)
         _, raw = self._output("--lang", "ko", "--json")
         axes = [a["axis"] for a in json.loads(raw)["axes"]]
-        self.assertEqual(axes[:2], ["plugin files", "hooks registered"])  # stable keys
+        self.assertEqual(axes[:2], ["gatekit files", "hooks registered"])  # stable keys
 
     def test_default_output_stays_english(self) -> None:
         _, text = self._output()

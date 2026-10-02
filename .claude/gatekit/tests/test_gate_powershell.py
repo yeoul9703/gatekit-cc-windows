@@ -558,8 +558,24 @@ class TestExtractOpaque(unittest.TestCase):
     def test_git_working_tree_mutations_are_opaque(self) -> None:
         for cmd in ("git apply p.diff", "git checkout -- src/x.ts", "git restore x",
                     "git stash pop", "git reset --hard", "git clone https://x/y src/c",
-                    "git -C sub checkout x", "git.exe apply p.diff", "git $sub"):
+                    "git -C sub checkout x", "git.exe apply p.diff", "git $sub",
+                    "git -C dir apply x", "git -c core.x=y checkout -- f",
+                    "git --git-dir=.git --work-tree=. checkout x", "git --git-dir .git reset --hard",
+                    "git --no-pager stash pop", "git -C a -c k=v --no-pager apply x",
+                    "git '--no-pager' apply x", "git --exec-path apply p", "git -C dir $sub"):
             self.assertTrue(targets_of(cmd)[1], cmd)
+
+    def test_git_global_option_value_is_not_read_as_the_subcommand(self) -> None:
+        for cmd in ("git -C apply status", "git -c apply=1 log", "git --git-dir=checkout diff",
+                    "git --no-pager log", "git -C", "git --no-pager", "git"):
+            self.assertEqual(targets_of(cmd), ([], False), cmd)
+
+    def test_git_options_are_read_by_the_bash_gate_function(self) -> None:
+        from gatekit.gates import bash as bash_gate
+        from gatekit.gates import powershell as powershell_gate
+
+        self.assertFalse(hasattr(powershell_gate, "_GIT_VALUE_FLAGS"))
+        self.assertIn("-C", bash_gate.GIT_VALUE_FLAGS)
 
     def test_git_metadata_commands_are_fine(self) -> None:
         for cmd in ("git status", "git add -A", "git commit -m x", "git diff", "git log",

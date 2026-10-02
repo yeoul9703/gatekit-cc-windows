@@ -186,6 +186,12 @@ class TestDeny(SpawnProject):
         led.save()
         self.assertIsNone(spawn_gate.handle(self.event(second, description="b")))
 
+    def test_conflict_ignores_case(self) -> None:
+        first = "a\n" + scope_fence({"write_scope": ["src/auth/**"], "stop_when": "x"})
+        second = "b\n" + scope_fence({"write_scope": ["SRC/Auth/token.ts"], "stop_when": "x"})
+        self.assertIsNone(spawn_gate.handle(self.event(first, description="a")))
+        self.assertTrue(self.is_deny(spawn_gate.handle(self.event(second, description="b"))))
+
     def test_conflicting_scope_is_not_recorded(self) -> None:
         first = "a\n" + scope_fence({"write_scope": ["src/auth/**"], "stop_when": "x"})
         spawn_gate.handle(self.event(first, description="a"))

@@ -106,6 +106,33 @@ class TestExtractCommands(unittest.TestCase):
         for cmd in ("git status", "git add -A", "git commit -m x", "git diff", "git log"):
             self.assertEqual(targets_of(cmd), ([], False), cmd)
 
+    def test_git_global_options_are_skipped_to_find_the_subcommand(self) -> None:
+        for cmd in ("git -C dir apply x", "git -C /x/y apply p.diff", "git -c core.x=y checkout -- f",
+                    "git --git-dir=.git --work-tree=. checkout x", "git --git-dir .git reset --hard",
+                    "git --work-tree . restore x", "git --no-pager stash pop",
+                    "git -C a -C b -c k=v --no-pager apply x", "git -p --namespace n clean -fd",
+                    "git --exec-path=/x apply p", "git --exec-path apply p", "sudo git -C dir apply x"):
+            self.assertEqual(targets_of(cmd), ([], True), cmd)
+
+    def test_git_global_option_value_is_not_read_as_the_subcommand(self) -> None:
+        # the value of -C / -c is a directory or a setting, even when it spells a subcommand
+        for cmd in ("git -C apply status", "git -c apply=1 log", "git -C sub status",
+                    "git --git-dir=checkout diff", "git --no-pager log", "git -C", "git -c",
+                    "git --no-pager", "git"):
+            self.assertEqual(targets_of(cmd), ([], False), cmd)
+
+    def test_git_subcommand_from_a_variable_is_opaque(self) -> None:
+        self.assertTrue(targets_of("git -C dir $sub x")[1])
+        self.assertTrue(targets_of("git `echo apply` x")[1])
+
+    def test_git_subcommand_index(self) -> None:
+        index = bash_gate.git_subcommand_index
+        self.assertEqual(index(["apply", "x"]), 0)
+        self.assertEqual(index(["-C", "dir", "apply", "x"]), 2)
+        self.assertEqual(index(["-c", "a=b", "--git-dir=x", "--no-pager", "status"]), 4)
+        self.assertIsNone(index(["-C"]))
+        self.assertIsNone(index([]))
+
     def test_patch_is_opaque(self) -> None:
         self.assertTrue(targets_of("patch -p1 < x.diff")[1])
 
@@ -353,6 +380,14 @@ class TestTaskScope(BashGateProject):
 
     def test_second_command_in_chain_is_checked(self) -> None:
         self.assertIsNotNone(bash_gate.handle(self.event("cat > src/auth/a.ts && cat > spec/01-prd.md")))
+
+    def test_git_dash_c_apply_denied_for_scoped_worker(self) -> None:
+        self.assertIsNotNone(bash_gate.handle(self.event("git -C src/auth apply p.diff")))
+        self.assertIsNone(bash_gate.handle(self.event("git -C src/auth status")))
+
+    def test_scope_ignores_case(self) -> None:
+        self.assertIsNone(bash_gate.handle(self.event("cat > SRC/Auth/token.ts")))
+        self.assertIsNotNone(bash_gate.handle(self.event("cat > SRC/Other.ts")))
 
     def test_opaque_denied_for_scoped_worker(self) -> None:
         self.assertIsNotNone(bash_gate.handle(self.event("git checkout -- src/auth/a.ts")))

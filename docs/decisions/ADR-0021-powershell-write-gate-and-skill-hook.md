@@ -235,7 +235,7 @@ that this path is taken.
 - **No variable tracking.** `$p = 'src/x.ts'; Set-Content $p y` is denied as
   opaque rather than resolved. `$env:TEMP`, `$HOME`, `$PWD` and
   `$PSScriptRoot` are variables like any other.
-- **Path case.** `write.matches` compares with `fnmatchcase`, and
+- **Path case** (changed by ADR-0022: scope matching now ignores case)**.** `write.matches` compares with `fnmatchcase`, and
   `realpath` restores the on-disk case only for the part of a path that
   exists. `Set-Content SRC/Auth/new.ts` against a scope of `src/auth/**` is
   therefore allowed when `SRC/Auth` exists (as `src/auth`) and denied when it

@@ -14,7 +14,7 @@ import unittest
 
 KIT = pathlib.Path(__file__).resolve().parents[1]
 
-GATES = ("prompt", "write", "bash", "powershell", "spawn", "skill", "stop")
+GATES = ("prompt", "write", "bash", "powershell", "spawn", "release", "skill", "stop")
 
 #: gatekit modules a gate must never load at import time (the runner, the spec
 #: checker, worker backends, the doctor, setup, design, the CLI).

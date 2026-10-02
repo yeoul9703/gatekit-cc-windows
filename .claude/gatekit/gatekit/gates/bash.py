@@ -55,6 +55,14 @@ _GIT_OPAQUE = {
     "submodule", "filter-branch", "read-tree", "checkout-index", "init", "clone",
 }
 
+#: ``git`` global options that take the next argument as their value. The
+#: ``--name=value`` spellings are one word and need no entry. ``--exec-path``
+#: is not here: its value is only ever attached (``--exec-path[=<path>]``).
+GIT_VALUE_FLAGS = frozenset({
+    "-C", "-c", "--git-dir", "--work-tree", "--namespace", "--super-prefix",
+    "--config-env", "--attr-source",
+})
+
 #: Editors and languages that write wherever their own script says.
 _OPAQUE_PROGRAMS = {
     "eval", "xargs", "patch", "trap", "awk", "gawk", "mawk", "nawk",
@@ -370,6 +378,29 @@ def _archive(name: str, args: List[str], result: WriteTargets, cwd: Optional[str
         _add(result, target or ".", cwd, "variable in tar directory")
 
 
+def git_subcommand_index(args: List[str]) -> Optional[int]:
+    """Index in *args* (the words after ``git``) of the subcommand, or ``None``.
+
+    Global options come before the subcommand and are skipped: one of
+    :data:`GIT_VALUE_FLAGS` together with the word after it (``-C <path>``,
+    ``-c <name=value>``, ``--git-dir <path>``), and any other word starting
+    with ``-`` (``--no-pager``, ``--git-dir=<path>``, ``-p``). Without this,
+    ``git -C dir apply x`` reads ``dir`` as the subcommand and ``apply`` is
+    never seen. Shared with the PowerShell gate so the two cannot drift.
+    """
+    index = 0
+    while index < len(args):
+        arg = args[index]
+        if arg in GIT_VALUE_FLAGS:
+            index += 2
+            continue
+        if arg.startswith("-"):
+            index += 1
+            continue
+        return index
+    return None
+
+
 def _analyze(words: List[str], result: WriteTargets, cwd: Optional[str]) -> Optional[str]:
     """Inspect one simple command. Returns the new cwd (or ``None`` = unknown)."""
     args = _pull_redirects(words, result, cwd)
@@ -426,8 +457,11 @@ def _analyze(words: List[str], result: WriteTargets, cwd: Optional[str]) -> Opti
         return cwd
 
     if name == "git":
-        sub = next((a for a in rest if not a.startswith("-")), "")
-        if sub in _GIT_OPAQUE:
+        at = git_subcommand_index(rest)
+        sub = rest[at] if at is not None else ""
+        if "$" in sub or "`" in sub:
+            result.mark_opaque("git subcommand is not literal")
+        elif sub in _GIT_OPAQUE:
             result.mark_opaque("git %s" % sub)
         return cwd
 

@@ -258,6 +258,105 @@ class TestReleaseScopes(TempProject):
         self.assertEqual(ledger.run(["release-scopes", "--root", str(self.root), "--session", "nope"]), 1)
 
 
+class TestReleaseByIdentifier(TempProject):
+    def setUp(self) -> None:
+        super().setUp()
+        self.led = ledger.Ledger.load(self.root, "s")
+        self.led.add_scope("a", ["src/a/**"], tool_use_id="toolu_a")
+        self.led.add_scope("a", ["src/b/**"], tool_use_id="toolu_b")   # same owner label
+        self.led.add_scope("old", ["src/c/**"])                         # no call id
+
+    def test_tool_use_id_is_stored_only_when_given(self) -> None:
+        scopes = self.led.data["scopes"]
+        self.assertEqual(scopes[0]["tool_use_id"], "toolu_a")
+        self.assertNotIn("tool_use_id", scopes[2])
+
+    def test_release_by_tool_use_id_drops_that_one_only(self) -> None:
+        self.assertEqual(self.led.release_scope("tool_use_id", "toolu_a"), 1)
+        self.assertEqual([s["write_scope"] for s in self.led.data["scopes"]],
+                         [["src/b/**"], ["src/c/**"]])
+        self.assertEqual(self.led.data["events"][-1]["kind"], "scope_released")
+
+    def test_bind_agent_then_release_by_agent_id(self) -> None:
+        self.assertTrue(self.led.bind_agent("toolu_b", "agent-b"))
+        self.assertFalse(self.led.bind_agent("toolu_zzz", "agent-z"))
+        self.assertFalse(self.led.bind_agent("toolu_a", ""))
+        self.assertEqual(self.led.release_scope("agent_id", "agent-zzz"), 0)
+        self.assertEqual(self.led.release_scope("agent_id", "agent-b"), 1)
+        self.assertEqual(len(self.led.data["scopes"]), 2)
+
+    def test_release_refuses_other_keys_and_empty_values(self) -> None:
+        self.assertEqual(self.led.release_scope("owner", "a"), 0)
+        self.assertEqual(self.led.release_scope("tool_use_id", ""), 0)
+        self.assertEqual(self.led.release_scope("agent_id", None), 0)  # type: ignore[arg-type]
+        self.assertEqual(len(self.led.data["scopes"]), 3)
+        self.assertIsNone(self.led.scope_of("owner", "a"))
+
+    def test_ended_agents_are_remembered_once_and_capped(self) -> None:
+        self.led.note_agent_ended("x")
+        self.led.note_agent_ended("x")
+        self.assertEqual(self.led.data["ended_agents"], ["x"])
+        self.assertTrue(self.led.agent_ended("x"))
+        self.assertFalse(self.led.agent_ended("y"))
+        self.assertFalse(self.led.agent_ended(""))
+        for index in range(ledger.MAX_ENDED_AGENTS + 5):
+            self.led.note_agent_ended("agent-%d" % index)
+        self.assertEqual(len(self.led.data["ended_agents"]), ledger.MAX_ENDED_AGENTS)
+
+    def test_older_ledger_gets_the_ended_agents_list(self) -> None:
+        self.led.save()
+        path = ledger.Ledger.path_for(self.root, "s")
+        data = json.loads(path.read_text(encoding="utf-8"))
+        del data["ended_agents"]
+        path.write_text(json.dumps(data), encoding="utf-8")
+        self.assertEqual(ledger.Ledger.load(self.root, "s").data["ended_agents"], [])
+
+
+class TestScopeLock(TempProject):
+    def test_lock_is_exclusive_and_removed_on_exit(self) -> None:
+        first = ledger.ScopeLock(self.root, "s")
+        with first as held:
+            self.assertTrue(held)
+            self.assertTrue(first.path.is_file())
+            with ledger.ScopeLock(self.root, "s", wait=0.05) as second:
+                self.assertFalse(second)
+            self.assertTrue(first.path.is_file())  # the loser did not remove it
+            with ledger.ScopeLock(self.root, "other", wait=0.05) as other:
+                self.assertTrue(other)             # one lock per session
+        self.assertFalse(first.path.exists())
+
+    def test_stale_lock_is_taken_over(self) -> None:
+        lock = ledger.ScopeLock(self.root, "s", wait=0.05, stale=0.0)
+        lock.path.parent.mkdir(parents=True, exist_ok=True)
+        lock.path.write_text("", encoding="utf-8")
+        with lock as held:
+            self.assertTrue(held)
+        self.assertFalse(lock.path.exists())
+
+    def test_lock_is_released_when_the_body_raises(self) -> None:
+        lock = ledger.ScopeLock(self.root, "s")
+        with self.assertRaises(RuntimeError):
+            with lock:
+                raise RuntimeError("boom")
+        self.assertFalse(lock.path.exists())
+
+    def test_lock_name_cannot_leave_the_runs_folder(self) -> None:
+        lock = ledger.ScopeLock(self.root, "../../evil")
+        self.assertEqual(lock.path.parent, ledger.Ledger.path_for(self.root, "x").parent)
+
+
+class TestScopesIntersectIgnoringCase(unittest.TestCase):
+    def test_same_scope_in_another_case_intersects(self) -> None:
+        self.assertTrue(ledger.globs_intersect("src/auth/**", "SRC/Auth/**"))
+        self.assertTrue(ledger.globs_intersect("SRC/AUTH/token.ts", "src/auth/*.ts"))
+        self.assertTrue(ledger.globs_intersect("Src/**", "src/auth/deep/x.ts"))
+        self.assertTrue(ledger.globs_intersect("README.md", "readme.MD"))
+
+    def test_different_folders_still_do_not(self) -> None:
+        self.assertFalse(ledger.globs_intersect("SRC/Auth/**", "src/billing/**"))
+        self.assertFalse(ledger.globs_intersect("SRC/a.ts", "src/b.ts"))
+
+
 class TestScopesIntersect(unittest.TestCase):
     """The documented pairwise heuristic, exercised directly."""
 

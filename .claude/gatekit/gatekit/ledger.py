@@ -1,8 +1,9 @@
 """Per-session run ledger: ``.gatekit/runs/<session_id>.json``.
 
-The ledger is the only memory shared between the five gates. The prompt gate
-writes the detected language, the spawn gate records write scopes, the question
-gate counts AskUserQuestion calls and the stop gate records the final verdict.
+The ledger is the only memory shared between the gates. The prompt gate writes
+the detected language, the spawn gate records write scopes and the release hook
+drops them when their agent ends, the question gate counts AskUserQuestion
+calls and the stop gate records the final verdict.
 
 **Resolution is strictly by session id.** There is deliberately no "most recent
 file" fallback: with two Claude Code sessions open in one project, a recency
@@ -18,16 +19,24 @@ from __future__ import annotations
 import datetime
 import fnmatch
 import json
+import os
 import pathlib
 import posixpath
 import re
 import sys
+import time
 from typing import Any, Dict, List, Optional, Union
 
 from . import config, paths
 
 #: `events` is append-only and capped; the oldest entries are dropped first.
 MAX_EVENTS = 500
+
+#: Agent ids whose SubagentStop arrived before their scope knew the id; capped.
+MAX_ENDED_AGENTS = 200
+
+#: The two identifiers a scope entry can be released by (ADR-0022).
+SCOPE_KEYS = ("tool_use_id", "agent_id")
 
 VERSION = 1
 
@@ -73,6 +82,7 @@ def _blank(session_id: str) -> Dict[str, Any]:
         "active_pipeline": None,
         "questions": {"asked": 0, "max_calls": 2, "budget_exceeded": False},
         "scopes": [],
+        "ended_agents": [],
         "stop": {"block_count": 0, "final_verdict": None, "last_reasons": []},
         "events": [],
     }
@@ -92,6 +102,8 @@ def _backfill(data: Dict[str, Any], session_id: str) -> Dict[str, Any]:
         data["events"] = []
     if not isinstance(data.get("scopes"), list):
         data["scopes"] = []
+    if not isinstance(data.get("ended_agents"), list):
+        data["ended_agents"] = []
     return data
 
 
@@ -150,8 +162,11 @@ def globs_intersect(left: str, right: str) -> bool:
 
     Non-intersection is reported only when both literal prefixes diverge, which
     is the one case that is genuinely safe to allow.
+
+    Case is ignored: on the case-insensitive file system this kit runs on,
+    ``SRC/Auth/**`` and ``src/auth/**`` cover the same files (ADR-0022).
     """
-    left_n, right_n = _normalize(left), _normalize(right)
+    left_n, right_n = _normalize(left).lower(), _normalize(right).lower()
     if not left_n or not right_n:
         return False
     if left_n == right_n:
@@ -202,6 +217,57 @@ def _as_list(scope: Scope) -> List[str]:
     return []
 
 
+class ScopeLock:
+    """A lock file beside the ledger, held across one load-change-save.
+
+    The spawn gate adds a scope while the parent's turn runs; the release hook
+    drops one whenever an agent ends, which is at no particular moment of that
+    turn. Without a lock, the later ``save`` of two overlapping hooks writes
+    back the list it loaded and the other hook's change is lost — a dropped
+    *add* would hide a scope from the conflict check.
+
+    ``with ScopeLock(root, session) as held:`` — *held* is ``False`` when the
+    lock could not be taken within *wait* seconds. The caller decides what that
+    means (the release hook then changes nothing). A lock file older than
+    *stale* seconds belongs to a hook that was killed and is taken over.
+    """
+
+    def __init__(self, root: pathlib.Path, session_id: str,
+                 wait: float = 2.0, stale: float = 15.0) -> None:
+        self.path = paths.runs_dir(root) / f"{_safe_session_id(session_id)}.lock"
+        self.wait = wait
+        self.stale = stale
+        self.held = False
+
+    def __enter__(self) -> bool:
+        deadline = time.monotonic() + self.wait
+        while True:
+            try:
+                paths.ensure_dir(self.path.parent)
+                os.close(os.open(str(self.path), os.O_CREAT | os.O_EXCL | os.O_WRONLY))
+                self.held = True
+                return True
+            except OSError:
+                pass
+            try:
+                if time.time() - self.path.stat().st_mtime > self.stale:
+                    self.path.unlink()
+                    continue
+            except OSError:
+                pass  # gone in the meantime, or not ours to remove: try again
+            if time.monotonic() >= deadline:
+                return False
+            time.sleep(0.02)
+
+    def __exit__(self, *exc_info: Any) -> None:
+        if self.held:
+            self.held = False
+            try:
+                self.path.unlink()
+            except OSError:
+                pass
+
+
 class Ledger:
     """Mutable view over one session's ledger file."""
 
@@ -250,23 +316,83 @@ class Ledger:
         if len(events) > MAX_EVENTS:
             del events[: len(events) - MAX_EVENTS]
 
-    def add_scope(self, owner: str, write_scope: Scope) -> None:
-        """Record a write scope claimed by *owner* (an agent label or hash)."""
-        self.data.setdefault("scopes", []).append(
-            {
-                "owner": str(owner),
-                "write_scope": write_scope,
-                "declared_at": _now(),
-            }
-        )
+    def add_scope(self, owner: str, write_scope: Scope,
+                  tool_use_id: Optional[str] = None) -> None:
+        """Record a write scope claimed by *owner* (an agent label or hash).
+
+        *tool_use_id* is the id of the Agent/Task call that spawns the agent.
+        It is the one value the spawn-time event shares with the events that
+        report the agent's end, so it is what the scope is released by.
+        """
+        entry: Dict[str, Any] = {
+            "owner": str(owner),
+            "write_scope": write_scope,
+            "declared_at": _now(),
+        }
+        if tool_use_id:
+            entry["tool_use_id"] = str(tool_use_id)
+        self.data.setdefault("scopes", []).append(entry)
+
+    def scope_of(self, key: str, value: str) -> Optional[Dict[str, Any]]:
+        """The scope entry whose *key* (one of :data:`SCOPE_KEYS`) equals *value*."""
+        if key not in SCOPE_KEYS or not value:
+            return None
+        for entry in self.data.get("scopes", []):
+            if isinstance(entry, dict) and entry.get(key) == value:
+                return entry
+        return None
+
+    def bind_agent(self, tool_use_id: str, agent_id: str) -> bool:
+        """Write *agent_id* on the scope declared by the call *tool_use_id*.
+
+        Returns ``False`` when no scope carries that call id.
+        """
+        entry = self.scope_of("tool_use_id", tool_use_id)
+        if entry is None or not agent_id:
+            return False
+        entry["agent_id"] = str(agent_id)
+        return True
+
+    def release_scope(self, key: str, value: str) -> int:
+        """Drop the scope(s) whose *key* equals *value*; return how many.
+
+        *key* is ``tool_use_id`` or ``agent_id``. The match is exact equality on
+        an identifier Claude Code issued — never a label, a prompt or a guess —
+        so an agent that is still running cannot lose its scope to another
+        agent's end.
+        """
+        if key not in SCOPE_KEYS or not value:
+            return 0
+        scopes = self.data.get("scopes", [])
+        kept = [s for s in scopes if not (isinstance(s, dict) and s.get(key) == value)]
+        dropped = len(scopes) - len(kept)
+        if dropped:
+            owners = [str(s.get("owner", "?")) for s in scopes
+                      if isinstance(s, dict) and s.get(key) == value]
+            self.data["scopes"] = kept
+            self.append_event(
+                "scope_released", {"by": key, "id": value, "owners": owners, "count": dropped}
+            )
+        return dropped
+
+    def note_agent_ended(self, agent_id: str) -> None:
+        """Remember that *agent_id* has ended (for a scope that learns its id later)."""
+        ended = self.data.setdefault("ended_agents", [])
+        if agent_id and agent_id not in ended:
+            ended.append(str(agent_id))
+            if len(ended) > MAX_ENDED_AGENTS:
+                del ended[: len(ended) - MAX_ENDED_AGENTS]
+
+    def agent_ended(self, agent_id: str) -> bool:
+        return bool(agent_id) and agent_id in self.data.get("ended_agents", [])
 
     def release_scopes(self, owner: Optional[str] = None) -> int:
-        """Drop recorded scopes and return how many were dropped.
+        """Drop recorded scopes by owner label and return how many were dropped.
 
-        A scope stays recorded for the whole session: nothing tells the ledger
-        that the agent holding it has finished, so a later round of agents over
-        the same files would be refused for ever. Releasing is the explicit
-        step that says "that agent is done". ``owner=None`` releases all.
+        The manual step behind ``ledger release-scopes``. The release hook
+        (:mod:`gatekit.gates.release`) drops a scope when its agent ends; this
+        is for one that was left behind — an agent that failed or was killed
+        before its end was reported. ``owner=None`` releases all.
         """
         scopes = self.data.get("scopes", [])
         kept = [] if owner is None else [s for s in scopes if str(s.get("owner")) != owner]
