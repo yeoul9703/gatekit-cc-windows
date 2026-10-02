@@ -427,15 +427,53 @@ def axis_contract_freshness(root) -> dict:
 # ------------------------------------------------------------------- axis 6
 
 
+def cli_required(root) -> bool:
+    """True when this project's settings start a worker CLI.
+
+    With the defaults nothing does: ``build.execution`` is ``host`` (the session
+    implements the tasks itself) and the reviewer of ``/gatekit-verify`` is a
+    subagent of the session (ADR-0023). A CLI is started only when
+    ``.gatekit/config.json`` says ``build.execution = "worker"`` or names a
+    backend in ``verify.evaluator`` (any value other than ``agent``). The
+    evaluator is read as written, not through ``workers.evaluator_choice``,
+    which falls back to ``agent`` for a backend that cannot review: a project
+    that wrote a name meant the CLI.
+
+    This is the one Python copy of the rule; the PowerShell copy is
+    ``Test-CliRequired`` in ``scripts/common.ps1`` (``setup.ps1`` S6 and
+    ``session-check.ps1``), and the two must agree.
+    """
+    from gatekit import config as config_mod
+    from gatekit import jobs as jobs_mod
+    cfg = config_mod.load(root)
+    if jobs_mod.execution_mode(cfg) == "worker":
+        return True
+    verify = cfg.get("verify")
+    value = verify.get("evaluator") if isinstance(verify, dict) else None
+    name = value.strip() if isinstance(value, str) else ""
+    return bool(name) and name != "agent"
+
+
 def axis_workers(root) -> dict:
+    """The default backend's executable. A project whose settings never start it
+    (:func:`cli_required` is false) is ``ok`` without it, and the detail says so."""
     try:
         from gatekit import workers as workers_mod
         name = workers_mod.default_name(root)
         result = workers_mod.check(root, name)
+        needed = cli_required(root)
     except Exception as exc:
         return _axis("workers", verdict.UNVERIFIED,
                      _t("worker check could not run: %s", "워커 점검을 실행하지 못했습니다: %s") % exc, "")
     v = result.get("verdict", verdict.UNVERIFIED)
+    if v != verdict.OK and not needed:
+        if _LANG == "ko":
+            summary = "PATH 에서 찾지 못함" if v == verdict.FAIL else "실행 여부를 확인하지 못함"
+            return _axis("workers", verdict.OK,
+                         "기본 워커 %s: %s. 지금 설정(build.execution=host)에서는 쓰지 않는다" % (name, summary))
+        return _axis("workers", verdict.OK,
+                     "default backend %s — %s; not used with the current settings "
+                     "(build.execution=host)" % (name, result.get("detail", "")))
     fix = ""
     if v == verdict.FAIL:
         fix = _t("install the %s CLI, or: %s workers set-default <name>",

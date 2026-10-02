@@ -22,7 +22,7 @@ gatekit이 쓰는 프로그램(winget, PowerShell 7, uv, Claude Code, Git, `.ven
 | `winget` | winget (앱 설치 관리자) | `Microsoft.AppInstaller` | 권장 | - | - | 아니오 | 없음 | https://learn.microsoft.com/windows/package-manager/winget/ |
 | `pwsh` | PowerShell 7 | `Microsoft.PowerShell` | 필수 | 7.6.0 | msix | 예전 MSI 설치본이면 필요할 수 있음 | 없음 | https://learn.microsoft.com/powershell/scripting/install/installing-powershell-on-windows |
 | `uv` | uv (Python 관리 도구) | `astral-sh.uv` | 필수 | 0.4.27 | - | 아니오 | https://astral.sh/uv/install.ps1 | https://docs.astral.sh/uv/getting-started/installation/ |
-| `claude` | Claude Code (claude 명령) | `Anthropic.ClaudeCode` | 필수 | 2.1.277 | - | 아니오 | https://claude.ai/install.ps1 | https://code.claude.com/docs/en/setup |
+| `claude` | Claude Code (claude 명령) | `Anthropic.ClaudeCode` | 권장 | 2.1.277 | - | 아니오 | https://claude.ai/install.ps1 | https://code.claude.com/docs/en/setup |
 | `git` | Git for Windows | `Git.Git` | 선택 | - | - | 필요할 수 있음 | 없음 | https://git-scm.com/download/win |
 
 `.venv`(프로젝트 안의 Python 환경)는 프로그램이 아니라 폴더입니다. 5번을 보세요.
@@ -134,7 +134,32 @@ PATH에 있는 `pwsh.exe` 파일에 적힌 버전만 봅니다. preview만 있�
 - 어떤 방법으로 설치했는지 모르겠으면 `/gatekit-setup` 표의 "설치 방법" 칸을 보세요.
   scoop이나 pip로 설치한 uv는 그 도구의 명령으로 바꾸세요(`scoop update uv`, `python -m pip install -U uv`).
 
-### 2-3. Claude Code (`claude`, 필수)
+### 2-3. Claude Code (`claude` 명령, 권장)
+
+Claude Code 자체는 필요합니다. 데스크톱 앱, VS Code 확장, 터미널 중 어느 것이든 됩니다.
+여기서 다루는 것은 터미널에서 쓰는 `claude` 명령(CLI)이고, 이것은 **권장**입니다.
+기본 설정에서는 gatekit이 이 명령을 실행하는 곳이 없습니다. build는 지금 세션이 직접
+작업하고(`build.execution`의 기본값 `host`), verify의 검토는 세션의 읽기 전용
+서브에이전트가 합니다.
+
+`claude` 명령이 필요한 것은 프로젝트의 `.gatekit/config.json`이 아래 둘 중 하나일 때뿐입니다.
+
+- `build.execution`이 `"worker"` (build를 워커 방식으로 돌림)
+- `verify.evaluator`에 `agent`가 아닌 백엔드 이름을 적음
+
+setup(`S6`)은 이 설정을 읽어 이렇게 판정합니다. 설정 파일이 없거나 읽을 수 없으면 기본으로 봅니다.
+
+| 상태 | 기본 설정 | `claude` 명령이 필요한 프로젝트 |
+|---|---|---|
+| 이 창의 PATH에 없음 | `warn`(권장), 종료 코드에 영향 없음 | `fail`(필수), 종료 코드 2, `-Install claude` |
+| 설치돼 있지만 이 창의 PATH에 안 보임 | `warn`, 종료 코드에 영향 없음 | `warn`, 종료 코드 3 |
+| 권장 버전(2.1.277)보다 낮음 | `warn`, 종료 코드에 영향 없음, `-Update claude` | `warn`, 종료 코드에 영향 없음, `-Update claude` |
+
+세션 시작 점검(`session-check.ps1`)도 같은 규칙을 씁니다. 기본 설정에서는 `claude` 명령이
+없어도 아무 말도 하지 않고, 필요한 프로젝트에서만 알립니다. `/gatekit-doctor`의 워커 항목도
+기본 설정에서는 통과(`ok`)이고 "지금 설정에서는 쓰지 않는다"고 적습니다.
+
+설치하고 싶을 때의 명령은 아래와 같습니다.
 
 | 하고 싶은 것 | 공식 스크립트 방식(권장) | winget 방식 |
 |---|---|---|
@@ -144,7 +169,7 @@ PATH에 있는 `pwsh.exe` 파일에 적힌 버전만 봅니다. preview만 있�
 | 버전 확인 | `claude --version` | `claude --version` |
 
 - 관리자 권한은 필요 없습니다.
-- Claude 데스크톱 앱만으로는 `claude` 명령이 생기지 않습니다. 워커를 쓰려면 이 명령이 PATH 에 있어야 합니다.
+- 데스크톱 앱이나 VS Code 확장을 설치해도 `claude` 명령은 생기지 않습니다. build를 워커 방식으로 돌릴 때만 위 명령으로 따로 설치하세요.
 
 ### 2-3-1. 프로그램별 재설치를 setup 으로 하려면
 
@@ -207,6 +232,10 @@ CLI는 위 스크립트를 그대로 부르고, 출력과 종료 코드도 그�
 | 4 | 회사·학교 정책이나 네트워크가 막음(winget 정책, 네트워크, 그룹 정책이 고정한 실행 정책, 프로그램 실행 차단) | 아래 문의문을 IT 담당자에게 전달. 우회 금지 |
 
 여러 문제가 섞이면 1 > 4 > 3 > 2 > 0 순서로 먼저 해당하는 코드가 나옵니다.
+
+`claude` 명령은 권장 항목이라 기본 설정에서는 없거나, 이 창에서 안 보이거나, 버전이 낮아도
+종료 코드가 바뀌지 않습니다. 다른 필수 항목이 모두 준비돼 있으면 0입니다. `claude` 명령이
+필요한 프로젝트(2-3 참고)에서만 없을 때 2, 이 창에서 안 보일 때 3이 됩니다.
 
 ## 5. `.venv` (프로젝트 안 Python 환경)
 

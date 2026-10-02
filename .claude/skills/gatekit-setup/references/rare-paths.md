@@ -153,6 +153,10 @@ uv run --project .claude/gatekit --frozen python .claude/gatekit/bin/gatekit.py 
 uv run --project .claude/gatekit --frozen python .claude/gatekit/bin/gatekit.py workers list
 ```
 
+With the default settings no worker is started (build runs in the session
+itself), so these commands matter only in a project that set
+`build.execution` to `worker` or named a backend in `verify.evaluator`.
+
 `workers check` verdicts: `ok` — the CLI answered its version probe;
 `unverified` — the binary is there but the probe did not answer (not a
 failure, not a pass; builds will still run); `fail` — the binary is missing.

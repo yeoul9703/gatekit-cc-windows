@@ -33,7 +33,7 @@ class TestSessionCheck(unittest.TestCase):
         shutil.copy(COMMON, self.scripts / "common.ps1")
         self.bin = self.root / "bin"
         self.bin.mkdir()
-        self.fake("pwsh")  # required like uv and claude; one test removes it
+        self.fake("pwsh")  # required like uv; one test removes it
 
     def fake(self, name: str) -> None:
         (self.bin / (name + ".exe")).write_bytes(b"")
@@ -82,8 +82,52 @@ class TestSessionCheck(unittest.TestCase):
         self.assertEqual(hook["hookEventName"], "SessionStart")
         self.assertIn("/gatekit-setup", hook["additionalContext"])
 
+    def config(self, data: dict) -> None:
+        state = self.root / ".gatekit"
+        state.mkdir(exist_ok=True)
+        (state / "config.json").write_text(json.dumps(data), encoding="utf-8")
+
+    def test_missing_claude_is_silent_with_the_default_settings(self) -> None:
+        # Nothing starts the CLI by default (build.execution = host, the reviewer is a subagent).
+        self.fake("uv")
+        self.venv()
+        for data in (None, {}, {"build": {"execution": "host"}}, {"verify": {"evaluator": "agent"}}):
+            with self.subTest(config=data):
+                if data is not None:
+                    self.config(data)
+                proc = self.run_check()
+                self.assertEqual(proc.returncode, 0, proc.stderr)
+                self.assertEqual(proc.stdout.strip(), b"")
+
+    def test_missing_claude_is_reported_when_the_project_runs_it(self) -> None:
+        self.fake("uv")
+        self.venv()
+        for data in ({"build": {"execution": "worker"}}, {"verify": {"evaluator": "claude"}}):
+            with self.subTest(config=data):
+                self.config(data)
+                # KEEP_PATH: this machine's registry PATH (which may hold a claude) is not read
+                proc = self.run_check(GATEKIT_SETUP_KEEP_PATH="1")
+                self.assertEqual(proc.returncode, 0, proc.stderr)
+                message = json.loads(proc.stdout.decode("ascii"))["systemMessage"]
+                self.assertIn("claude CLI: not found on PATH", message)
+                self.assertNotIn("uv:", message)
+
+    def test_claude_that_needs_a_restart_is_named_only_when_the_project_runs_it(self) -> None:
+        self.fake("uv")
+        self.venv()
+        elsewhere = self.root / "elsewhere"
+        elsewhere.mkdir()
+        (elsewhere / "claude.exe").write_bytes(b"")
+        proc = self.run_check(GATEKIT_SETUP_REGISTRY_PATH=str(elsewhere))
+        self.assertEqual(proc.stdout.strip(), b"")
+        self.config({"build": {"execution": "worker"}})
+        proc = self.run_check(GATEKIT_SETUP_REGISTRY_PATH=str(elsewhere))
+        message = json.loads(proc.stdout.decode("ascii"))["systemMessage"]
+        self.assertIn("claude CLI: installed but not visible in this session", message)
+
     def test_missing_uv_and_claude_are_both_reported(self) -> None:
         self.venv()
+        self.config({"build": {"execution": "worker"}})
         proc = self.run_check()
         self.assertEqual(proc.returncode, 0, proc.stderr)
         message = json.loads(proc.stdout.decode("ascii"))["systemMessage"]

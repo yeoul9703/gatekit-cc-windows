@@ -11,7 +11,7 @@ says what to tell the user about each candidate and which cases stay out of
 | `winget` | `-Install winget` only | recommended | Windows' package manager; `pwsh` installs through it | none for the first attempt (registers the App Installer already on the PC); the fallback installs a PowerShell Gallery module | nothing for the first attempt; a few MB for the fallback | not expected; if the fallback cannot finish, the script points to the Microsoft Store |
 | `pwsh` | `-Install pwsh` / `-Update pwsh` | required | PowerShell 7 stable; Claude Code runs its PowerShell tool and the input-box `!` commands with it | includes winget source and package terms | tens of MB | maybe, for an older MSI install |
 | `uv` | `-Install uv` / `-Update uv` | required | runs gatekit and fetches Python | none with the official script; winget adds source terms | small | no |
-| `claude` | `-Install claude` / `-Update claude` | required | the Claude Code CLI that workers use (the desktop app or the VS Code extension alone does not provide it) | none | tens of MB | no |
+| `claude` | `-Install claude` / `-Update claude` | recommended | the Claude Code CLI; only needed when build runs its tasks as workers. With the default settings nothing starts it, so the desktop app or the VS Code extension alone is enough | none | tens of MB | no |
 | `venv` | `-Install venv` only | required | Python and packages for the hooks; **a damaged `.claude/gatekit/.venv` is deleted and rebuilt** | none | tens of MB | no |
 | `git` | prints a command only | optional | Git for Windows | — | — | may need it |
 
@@ -27,6 +27,15 @@ how much is downloaded, whether administrator rights are needed.
 - **`venv`**: say plainly that Python and packages are downloaded (network
   needed). If its verdict was `fail`, also say that the damaged
   `.claude/gatekit/.venv` folder is deleted and rebuilt.
+- **`claude`**: look at the `level` of the `S6` item. `recommended` (the
+  default) means nothing in this project starts the CLI: it is not a
+  candidate, it is never inside "install all", and a `warn` on it is not a
+  problem to fix. Offer it as a separate, optional note ("only needed when
+  build runs its tasks as workers"), and pass `-Install claude` or
+  `-Update claude` only if the user asks for it. `required` means the
+  project's `.gatekit/config.json` sets `build.execution` to `worker` or
+  names a backend in `verify.evaluator`; then it is a candidate like `uv`,
+  and its line says that this project's settings run it.
 - **`git`**: the script never installs it, because it may need administrator
   rights. Show the command the script prints and let the user run it. Offer
   it as a separate, optional note, never inside "install all".

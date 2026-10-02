@@ -1392,5 +1392,156 @@ class TestSetupExecDenied(SetupCase):
             self.assertIn("IT 담당자에게 보낼 문의문", out)
 
 
+@unittest.skipUnless(POWERSHELL.is_file(), "Windows PowerShell 5.1 not available")
+class TestSetupClaudeCli(SetupCase):
+    """S6: the claude CLI is recommended. It is required only in a project whose
+    .gatekit/config.json starts it (build.execution = "worker", or a backend named in
+    verify.evaluator); the rule is Test-CliRequired in common.ps1."""
+
+    WORKER = {"build": {"execution": "worker"}}
+    EVALUATOR = {"verify": {"evaluator": "claude"}}
+
+    def ready(self) -> dict:
+        """Every required program is there (uv, a stable PowerShell 7); no claude."""
+        self.fake_uv()
+        self.fake_pwsh("7.6.6")
+        return {"GATEKIT_SETUP_PWSH_PACKAGES": STABLE_PKG % "7.6.6.0"}
+
+    def config(self, data) -> None:
+        state = self.root / ".gatekit"
+        state.mkdir(exist_ok=True)
+        text = data if isinstance(data, str) else json.dumps(data)
+        (state / "config.json").write_text(text, encoding="utf-8")
+
+    def status(self, env: dict, **extra):
+        environment = dict(env)
+        environment.update(extra)
+        code, _, by_id = self.run_json("-Status", "-Lang", "en", env=environment)
+        return code, by_id["S6"], by_id
+
+    def claude_elsewhere(self) -> dict:
+        """claude is installed, but only the registry PATH shows it (restart needed)."""
+        elsewhere = self.root / "elsewhere"
+        elsewhere.mkdir(exist_ok=True)
+        fakebin.make_fake(elsewhere, "claude", "print('2.1.300 (Claude Code)')\n")
+        return {"GATEKIT_SETUP_KEEP_PATH": "", "GATEKIT_SETUP_REGISTRY_PATH": str(elsewhere)}
+
+    def test_default_settings_without_the_cli_is_a_warn_and_exit_0(self) -> None:
+        code, item, by_id = self.status(self.ready())
+        self.assertEqual(item["verdict"], "warn", item)
+        self.assertEqual(item["level"], "recommended")
+        self.assertIn("do not need it", item["detail"])
+        self.assertIn("-Install claude", item["action"])
+        self.assertNotIn("desktop app", item["detail"])
+        self.assertEqual(by_id["P-claude"]["level"], "recommended")
+        self.assertEqual(code, 0, by_id)
+        self.assertNotIn("S11", by_id)  # nothing left to do, so no summary line
+
+    def test_a_config_that_leaves_the_two_settings_alone_is_the_default(self) -> None:
+        env = self.ready()
+        for data in ({}, {"worker": {"default": "claude"}}, {"build": {"execution": "host"}},
+                     {"verify": {"evaluator": "agent"}}, {"verify": {"evaluator": ""}},
+                     {"build": {"execution": "Worker"}},  # jobs.execution_mode reads a typo as host
+                     "{not json"):
+            with self.subTest(config=data):
+                self.config(data)
+                code, item, _ = self.status(env)
+                self.assertEqual((item["verdict"], item["level"], code), ("warn", "recommended", 0), item)
+
+    def test_worker_execution_without_the_cli_is_a_required_fail_and_exit_2(self) -> None:
+        self.config(self.WORKER)
+        code, item, _ = self.status(self.ready())
+        self.assertEqual(item["verdict"], "fail", item)
+        self.assertEqual(item["level"], "required")
+        self.assertIn("-Install claude", item["action"])
+        self.assertEqual(code, 2)
+
+    def test_a_backend_named_as_evaluator_without_the_cli_is_a_required_fail(self) -> None:
+        self.config(self.EVALUATOR)
+        code, item, _ = self.status(self.ready())
+        self.assertEqual(item["verdict"], "fail", item)
+        self.assertEqual(item["level"], "required")
+        self.assertEqual(code, 2)
+
+    def test_cli_visible_only_after_a_restart_does_not_change_the_default_exit_code(self) -> None:
+        env = self.ready()
+        code, item, _ = self.status(env, **self.claude_elsewhere())
+        self.assertEqual(item["verdict"], "warn", item)
+        self.assertEqual(item["level"], "recommended")
+        self.assertIn("not visible", item["detail"])
+        self.assertEqual(code, 0)
+        self.config(self.WORKER)
+        code, item, _ = self.status(env, **self.claude_elsewhere())
+        self.assertEqual((item["verdict"], item["level"]), ("warn", "required"), item)
+        self.assertEqual(code, 3)
+
+    def test_an_older_cli_is_a_warn_that_leaves_the_exit_code_alone(self) -> None:
+        env = self.ready()
+        fakebin.make_fake(self.bin, "claude", "print('1.0.0 (Claude Code)')\n")
+        code, item, _ = self.status(env)
+        self.assertEqual((item["verdict"], item["level"]), ("warn", "recommended"), item)
+        self.assertIn("-Update claude", item["action"])
+        self.assertEqual(code, 0)
+        self.config(self.WORKER)
+        code, item, _ = self.status(env)
+        self.assertEqual((item["verdict"], item["level"]), ("warn", "required"), item)
+        self.assertEqual(code, 0)
+
+    def test_a_present_cli_is_ok_at_either_level(self) -> None:
+        env = self.ready()
+        fakebin.make_fake(self.bin, "claude", "print('2.1.300 (Claude Code)')\n")
+        code, item, _ = self.status(env)
+        self.assertEqual((item["verdict"], item["level"], code), ("ok", "recommended", 0), item)
+        self.config(self.WORKER)
+        code, item, _ = self.status(env)
+        self.assertEqual((item["verdict"], item["level"], code), ("ok", "required", 0), item)
+
+    def test_the_status_check_only_reads_the_config(self) -> None:
+        env = self.ready()
+        self.status(env)
+        self.assertFalse((self.root / ".gatekit" / "config.json").exists())
+        self.config(self.WORKER)
+        before = (self.root / ".gatekit" / "config.json").read_bytes()
+        self.status(env)
+        self.assertEqual((self.root / ".gatekit" / "config.json").read_bytes(), before)
+
+    def test_full_run_without_the_cli_ends_ready_and_doctor_agrees(self) -> None:
+        self.copy_kit_sources()
+        env = self.ready()
+        self.fake_uv("nopython")
+        code, _, by_id = self.run_json("-Install", "venv", "-Lang", "en", env=env)
+        self.assertEqual(by_id["S5"]["verdict"], "ok", by_id["S5"])
+        self.assertEqual(by_id["S12-config"]["verdict"], "ok", by_id["S12-config"])
+        self.assertEqual(by_id["S6"]["verdict"], "warn", by_id["S6"])
+        self.assertEqual(by_id["S15"]["verdict"], "ok", by_id["S15"])
+        workers_line = [h for h in by_id["S15"]["hints"] if " workers " in h]
+        self.assertEqual(len(workers_line), 1, by_id["S15"])
+        self.assertIn("build.execution=host", workers_line[0])
+        self.assertEqual(code, 0, by_id)
+
+    def test_the_rule_is_defined_once_in_common_ps1(self) -> None:
+        common = (SCRIPTS / "common.ps1").read_bytes().decode("utf-8-sig")
+        self.assertEqual(common.count("function Test-CliRequired("), 1)
+        for name, call in (("setup.ps1", "Test-CliRequired $projectRoot"),
+                           ("session-check.ps1", "(Test-CliRequired (")):
+            text = (SCRIPTS / name).read_bytes().decode("utf-8-sig")
+            self.assertNotIn("function Test-CliRequired", text, name)
+            self.assertIn(call, text, name)
+            # neither script reads the two settings on its own
+            code = "\n".join(line for line in text.splitlines() if not line.lstrip().startswith("#"))
+            for key in (".execution", ".evaluator"):
+                self.assertNotIn(key, code.replace("build.execution 또는 verify.evaluator", "")
+                                 .replace("build.execution or verify.evaluator", ""), name)
+
+    def test_korean_lines_have_no_english_sentence(self) -> None:
+        env = self.ready()
+        for data in (None, self.WORKER):
+            if data:
+                self.config(data)
+            _, out = self.run_setup("-Status", "-Lang", "ko", env=env)
+            self.assertIn("claude CLI", out)
+            self.assertEqual(english_sentence_lines(out), [], out)
+
+
 if __name__ == "__main__":
     unittest.main()

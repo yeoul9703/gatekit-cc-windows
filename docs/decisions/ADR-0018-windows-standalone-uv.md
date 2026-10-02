@@ -154,3 +154,42 @@ still be used after 2026-10, when 3.10 reaches end of life; 3.11 ends
   stdlib-only stays.
 - ADR-0006 (Codex second host): not adopted here; the file was removed
   from this fork on 2026-10-02.
+
+## Decision change 2026-10-02 (the claude CLI is recommended, not required)
+
+The first draft listed the `claude` CLI as a prerequisite ("the desktop app
+alone does not provide it") and `setup.ps1` reported a missing one as a
+required `fail`. That was true while every build task was handed to a spawned
+worker. It no longer is. `build.execution` defaults to `host` (ADR-0013
+decision 1): the session implements the tasks itself. The reviewer of
+`/gatekit-verify` is the host's read-only subagent (ADR-0023). With the
+default settings nothing starts the `claude` command, and the audience is
+beginners, many of whom have only the desktop app or the VS Code extension.
+Telling them a program is missing that nothing runs sent them to install a
+terminal tool for no effect.
+
+The prerequisites are now Claude Code in any form (the desktop app, the VS
+Code extension or the CLI), uv and PowerShell 7. This replaces the first
+bullet of Consequences above and item 5's mention of the CLI in the
+SessionStart check.
+
+- `scripts/packages.json` lists `claude` as 권장.
+- "A project that needs the CLI" is one rule: `.gatekit/config.json` sets
+  `build.execution` to `worker`, or names a backend (anything but `agent`) in
+  `verify.evaluator`. A missing or unreadable file is the default. The rule
+  exists once per language: `Test-CliRequired` in `scripts/common.ps1`, which
+  reads the JSON itself so it works before the `.venv` exists, and
+  `cli_required` in `gatekit/doctor.py`.
+- `setup.ps1` S6: in such a project the item is `required` and a missing CLI
+  is `fail` (exit 2, `-Install claude`), as before. Otherwise it is
+  `recommended`: missing, visible only after a restart, or older than the
+  recommended version is a `warn` that sets no exit flag, so a PC without the
+  CLI ends at exit 0.
+- `session-check.ps1` names the CLI only in such a project.
+- The `workers` axis of doctor is `ok` when the default backend's executable
+  is missing and the project does not need it; the detail says it is not
+  used with the current settings.
+
+Known cost: a user who later sets `build.execution` to `worker` meets the
+missing CLI only then, at the next setup, session start or doctor run, not at
+the first setup.

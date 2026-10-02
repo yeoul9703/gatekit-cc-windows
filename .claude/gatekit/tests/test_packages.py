@@ -56,7 +56,7 @@ class TestPackagesFile(unittest.TestCase):
     def test_levels_and_special_values(self) -> None:
         packages = {p["key"]: p for p in load()["packages"]}
         self.assertEqual(packages["uv"]["level"], "필수")
-        self.assertEqual(packages["claude"]["level"], "필수")
+        self.assertEqual(packages["claude"]["level"], "권장")  # nothing runs it by default
         self.assertEqual(packages["pwsh"]["level"], "필수")
         self.assertEqual(packages["git"]["level"], "선택")
         self.assertEqual(packages["pwsh"]["installer_type"], "msix")
@@ -138,7 +138,16 @@ class TestSetupReadsPackages(SetupCase):
         fakebin.make_fake(self.bin, "claude", "print('2.1.300 (Claude Code)')\n")
         _, _, by_id = self.run_json("-Lang", "en")
         self.assertEqual(by_id["S6"]["verdict"], "warn")
+        self.assertEqual(by_id["S6"]["level"], "recommended")
         self.assertIn("9.0.0", by_id["S6"]["detail"])
+
+    def test_the_package_row_level_comes_from_the_file(self) -> None:
+        _, _, by_id = self.run_json("-Lang", "en")
+        self.assertEqual(by_id["P-claude"]["level"], "recommended")
+        self.assertEqual(by_id["P-uv"]["level"], "required")
+        self.edit("claude", level="필수")
+        _, _, by_id = self.run_json("-Lang", "en")
+        self.assertEqual(by_id["P-claude"]["level"], "required")
 
 
 if __name__ == "__main__":

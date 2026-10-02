@@ -1,6 +1,6 @@
 ---
 name: gatekit-setup
-description: Prepare gatekit on Windows — check uv, build the .venv from uv.lock, initialize .gatekit/config.json, check the Claude worker backend and run doctor. Installs a program only after the user says yes. Korean triggers — "셋업 해줘", "초기 설정", "설치해줘", "워커 확인해줘", "백엔드 설정". English triggers — "set up gatekit", "install gatekit", "check my workers", "configure the backend". NOT for diagnosing a project that is already set up — that is /gatekit-doctor — and NOT for enabling a bypass or unsandboxed backend, which gatekit refuses.
+description: Prepare gatekit on Windows — check uv, build the .venv from uv.lock, initialize .gatekit/config.json, report whether the optional claude CLI is present and run doctor. Installs a program only after the user says yes. Korean triggers — "셋업 해줘", "초기 설정", "설치해줘", "워커 확인해줘", "백엔드 설정". English triggers — "set up gatekit", "install gatekit", "check my workers", "configure the backend". NOT for diagnosing a project that is already set up — that is /gatekit-doctor — and NOT for enabling a bypass or unsandboxed backend, which gatekit refuses.
 allowed-tools: Read, Write, Edit, Glob, Grep, Bash, PowerShell
 ---
 
@@ -8,8 +8,12 @@ allowed-tools: Read, Write, Edit, Glob, Grep, Bash, PowerShell
 
 Input: `$ARGUMENTS` — unused; reserved for future backend configuration.
 
-gatekit needs three programs: Claude Code, **uv** and **PowerShell 7**. uv
-downloads the Python it needs by itself; nothing else has to be installed.
+gatekit needs three programs: Claude Code, **uv** and **PowerShell 7**. Claude
+Code in any form will do: the desktop app, the VS Code extension or the
+terminal. uv downloads the Python it needs by itself; nothing else has to be
+installed. The `claude` command (the CLI) is **recommended, not required**:
+with the default settings nothing starts it, and it is needed only when build
+runs its tasks as workers.
 The work is done by one script, `.claude/gatekit/scripts/setup.ps1`; this
 skill runs it, shows the result, and installs something **only after the user
 says yes in the chat**. The user may not know the terminal: use plain words,
@@ -28,7 +32,8 @@ These hold in every step and in every reference file this skill reads.
   reinstall on your own.
 - **No bypass.** Never enable a bypass flag or an unsandboxed backend to make
   a worker run, and never look for a way around a company policy or a blocked
-  network. A missing `claude` CLI is fixed by installing it, nothing else.
+  network. When a project does need the `claude` CLI (`S6` is `fail`), that
+  is fixed by installing it, nothing else.
 
 ## Reference files
 
@@ -85,6 +90,14 @@ Installable candidates are the items with verdict `fail` **or `warn`** whose
 but are old or broken go to `-Update`; use the names exactly as `action`
 gives them (for example `-Install winget,pwsh` when both are missing).
 
+**The `claude` CLI (`S6`) is the exception.** When its `level` is
+`recommended`, this project does not use it: do not make it a candidate, do
+not count it under "install all", and do not describe it as something
+missing. Mention it once below the table as optional ("only needed when build
+runs its tasks as workers; I can install it if you want"). It is a candidate
+like the others only when its `level` is `required`, which the script reports
+for a project whose `.gatekit/config.json` runs workers.
+
 **Read `.claude/skills/gatekit-setup/references/install-programs.md` now.**
 It has, per program, what to tell the user: purpose, whether agreeing to
 terms is included, download size, administrator rights, and the cases that
@@ -112,7 +125,7 @@ Pass exactly the allowed names and nothing else (`winget`, `pwsh`, `uv`,
 may be given in one call:
 
 ```
-powershell -NoProfile -ExecutionPolicy Bypass -File .claude/gatekit/scripts/setup.ps1 -Install uv,claude,venv -Update pwsh -Json -Lang <output_lang>
+powershell -NoProfile -ExecutionPolicy Bypass -File .claude/gatekit/scripts/setup.ps1 -Install uv,venv -Update pwsh -Json -Lang <output_lang>
 ```
 
 Then run the plain check from Step 1 again, show the new table, and react to

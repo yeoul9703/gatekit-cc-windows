@@ -52,6 +52,25 @@ class TestPackagesTable(unittest.TestCase):
             self.assertEqual(row[8], pkg["docs_url"], pkg["key"])
             self.assertEqual(pkg["admin_may_be_required"], row[6] not in ("아니오",), pkg["key"])
 
+    def test_the_claude_command_is_recommended_and_the_exit_codes_say_so(self) -> None:
+        claude = next(p for p in PACKAGES if p["key"] == "claude")
+        self.assertEqual(claude["level"], "권장")
+        text = doc_text()
+        self.assertIn("### 2-3. Claude Code (`claude` 명령, 권장)", text)
+        section = text[text.index("### 2-3. "):text.index("### 2-3-1. ")]
+        rows = {r[0]: r for r in table_rows("### 2-3. ", section) if len(r) == 3 and "종료 코드" in r[1]}
+        self.assertIn("`fail`(필수), 종료 코드 2, `-Install claude`", rows["이 창의 PATH에 없음"][2])
+        self.assertEqual(rows["이 창의 PATH에 없음"][1], "`warn`(권장), 종료 코드에 영향 없음")
+        self.assertIn("종료 코드 3", rows["설치돼 있지만 이 창의 PATH에 안 보임"][2])
+        self.assertIn(claude["min_version"], section)
+        for key in ('`build.execution`이 `"worker"`', "`verify.evaluator`에 `agent`가 아닌"):
+            self.assertIn(key, section)
+        self.assertNotIn("데스크톱 앱만으로는", text)
+        usage = (DOC.parent / "USAGE.md").read_text(encoding="utf-8")
+        self.assertIn("| Claude Code | 예 | 데스크톱 앱, VS Code 확장, 터미널 중 어느 것이든 됩니다 |", usage)
+        self.assertRegex(usage, r"(?m)^\| `claude` 명령\(CLI\) \| 선택 \|")
+        self.assertNotIn("데스크톱 앱만으로는", usage)
+
     def test_every_winget_id_in_a_command_is_a_managed_package(self) -> None:
         ids = {p["winget_id"] for p in PACKAGES}
         used = set(re.findall(r"winget (?:install|upgrade|list) --id[= ]([A-Za-z0-9.-]+)", doc_text()))

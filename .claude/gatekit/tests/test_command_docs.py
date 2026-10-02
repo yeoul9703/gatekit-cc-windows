@@ -394,6 +394,30 @@ class TestSetupSkill(unittest.TestCase):
         self.assertIn("-Install winget,pwsh", text)
         self.assertRegex(text, r"(?m)^\| `winget` \|[^|]*\| recommended \|")
         self.assertRegex(text, r"(?m)^\| `pwsh` \|[^|]*\| required \|")
+        self.assertRegex(text, r"(?m)^\| `uv` \|[^|]*\| required \|")
+
+    def test_the_claude_cli_is_recommended_and_stays_out_of_install_all(self) -> None:
+        # ADR-0018 (2026-10-02): nothing starts the CLI with the default settings.
+        text = read(self.refs / "install-programs.md")
+        row = re.search(r"(?m)^\| `claude` \|[^|]*\| recommended \|([^|]*)\|", text)
+        assert row is not None
+        self.assertIn("only needed when build runs its tasks as workers", row.group(1))
+        self.assertIn('never inside "install all"', one_line(text))
+        body = one_line(self.body)
+        self.assertIn("gatekit needs three programs: Claude Code, **uv** and **PowerShell 7**", body)
+        self.assertIn("the desktop app, the VS Code extension or the terminal", body)
+        self.assertIn("**recommended, not required**", body)
+        self.assertIn("do not make it a candidate", body)
+        self.assertIn("only when its `level` is `required`", body)
+        for stale in ("does not provide it", "A missing `claude` CLI is fixed"):
+            self.assertNotIn(stale, one_line(self.text))
+        # the example install call does not install what the default settings do not use
+        calls = [line for line in self.body.splitlines() if "setup.ps1 -Install" in line]
+        self.assertEqual(len(calls), 1)
+        self.assertNotIn("claude", calls[0].split("-Install", 1)[1])
+        doctor = one_line(read(skill("doctor") / "SKILL.md"))
+        self.assertIn("not used with the current settings", doctor)
+        self.assertIn("do not suggest installing the `claude` CLI", doctor)
 
     def test_settings_reference_carries_both_required_values(self) -> None:
         text = read(self.refs / "settings.md")

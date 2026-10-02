@@ -105,12 +105,15 @@ try {
             }
         }
     }
-    if (Test-Budget) {
+    # The claude CLI is named only in a project whose settings start it (Test-CliRequired in
+    # common.ps1: build.execution = "worker", or a backend in verify.evaluator). With the default
+    # settings nothing runs it, so a PC with only the desktop app or the VS Code extension is fine.
+    if ((Test-Budget) -and (Test-CliRequired (Split-Path -Parent (Split-Path -Parent $kitRoot)))) {
         $where = (Get-App 'claude').where
         if ($where -eq 'registry') {
             $problems += 'claude CLI: installed but not visible in this session - close Claude Code completely (the desktop app, the VS Code window, or the terminal it runs in) and open it again / 설치돼 있지만 이 창에서는 보이지 않습니다 - Claude Code(데스크톱 앱, VS Code 창, 또는 실행 중인 터미널)를 완전히 닫고 다시 여세요'
         } elseif ($where -eq 'none') {
-            $problems += 'claude CLI: not found on PATH (workers cannot start) / PATH 에 없음 (워커 실행 불가)'
+            $problems += 'claude CLI: not found on PATH, and this project is set to run it (build.execution or verify.evaluator in .gatekit/config.json) / PATH 에 없음 - 이 프로젝트 설정(.gatekit/config.json 의 build.execution 또는 verify.evaluator)은 이 명령을 실행합니다'
         }
     }
 

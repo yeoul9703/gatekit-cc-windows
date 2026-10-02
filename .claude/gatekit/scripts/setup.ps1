@@ -62,6 +62,12 @@
 #   2  the user must allow or do something (a required program is missing or too
 #      old, Python must be downloaded, .venv is broken, or a program needs administrator rights)
 #   0  ready
+# The claude CLI (S6) is recommended, not required: with the default settings nothing starts it
+# (build.execution = "host", the reviewer is a subagent). Missing, not visible in this session or
+# older than the recommended version is then a warn that leaves the exit code alone. It is
+# required (missing: fail, exit 2; not visible: exit 3) only in a project whose
+# .gatekit/config.json says build.execution = "worker" or names a backend in verify.evaluator
+# (Test-CliRequired in common.ps1).
 # Test hooks (environment): GATEKIT_SETUP_KEEP_PATH=1 never reads the registry PATH;
 #   GATEKIT_SETUP_REGISTRY_PATH replaces the registry PATH value (these two are read by
 #   common.ps1, so session-check.ps1 honors them too); GATEKIT_SETUP_SYNC_TIMEOUT
@@ -468,8 +474,10 @@ function Get-VersionFrom([string]$text) {
     return $null
 }
 
-function Add-RestartItem([string]$id, [string]$level, [string]$name, [string]$found) {
-    Set-Flag 'restart'
+# $setFlag = $false: the line is shown but the exit code stays as it is (a program this project
+# does not need right now).
+function Add-RestartItem([string]$id, [string]$level, [string]$name, [string]$found, [bool]$setFlag = $true) {
+    if ($setFlag) { Set-Flag 'restart' }
     Add-Item $id $level $name 'warn' (T ('설치되어 있지만(' + $found + ') 지금 창의 PATH 에는 보이지 않습니다.') ('installed (' + $found + ') but not visible on the PATH of this session.')) `
         (T 'Claude Code(데스크톱 앱, VS Code 창, 또는 실행 중인 터미널)를 완전히 닫고 다시 여세요. 그런 다음 /gatekit-setup 을 다시 실행하세요' 'close Claude Code completely (the desktop app, the VS Code window, or the terminal it runs in) and open it again, then run /gatekit-setup again')
 }
@@ -1437,21 +1445,28 @@ if (-not (Test-Path -LiteralPath $settingsFile)) {
 $claudeFound = Get-App 'claude' $script:sessionPath
 $claudeApps = $claudeFound.apps
 $script:pkgInfo['claude'] = @{ where = $claudeFound.where; path = ''; version = '' }
-if ($claudeFound.where -eq 'none') {
+# Required only in a project whose settings start the CLI (Test-CliRequired, common.ps1).
+# Otherwise recommended: every verdict below is at most a warn and no exit flag is set.
+$cliRequired = Test-CliRequired $projectRoot
+$claudeLevel = 'recommended'
+if ($cliRequired) { $claudeLevel = 'required' }
+if ($claudeFound.where -eq 'none' -and -not $cliRequired) {
+    Add-Item 'S6' $claudeLevel 'claude CLI' 'warn' (T 'PATH 에 claude 가 없습니다. 지금 설정에서는 필요 없습니다. build 를 워커 방식으로 돌릴 때만 필요합니다.' 'claude is not on PATH. The current settings do not need it; it is needed only when build runs its tasks as workers.') (T '허락하면 설치합니다 (-Install claude)' 'installed if you allow it (-Install claude)')
+} elseif ($claudeFound.where -eq 'none') {
     Set-Flag 'needs'
-    Add-Item 'S6' 'required' 'claude CLI' 'fail' (T 'PATH 에 claude 가 없습니다(데스크톱 앱만으로는 CLI 가 없습니다). 워커를 실행할 수 없습니다.' 'claude is not on PATH (the desktop app alone does not include the CLI). Workers cannot start.') (T '허락하면 설치합니다 (-Install claude)' 'installed if you allow it (-Install claude)')
+    Add-Item 'S6' $claudeLevel 'claude CLI' 'fail' (T 'PATH 에 claude 가 없습니다(데스크톱 앱만으로는 CLI 가 없습니다). 워커를 실행할 수 없습니다.' 'claude is not on PATH (the desktop app alone does not include the CLI). Workers cannot start.') (T '허락하면 설치합니다 (-Install claude)' 'installed if you allow it (-Install claude)')
 } elseif ($claudeFound.where -eq 'registry') {
-    Add-RestartItem 'S6' 'required' 'claude CLI' $claudeApps[0].Source
+    Add-RestartItem 'S6' $claudeLevel 'claude CLI' $claudeApps[0].Source $cliRequired
 } else {
     $cp = Invoke-Proc $claudeApps[0].Source @('--version') 30
     $cv = Get-VersionFrom $cp.Out
     $script:pkgInfo['claude'] = @{ where = 'session'; path = $claudeApps[0].Source; version = $(if ($cv) { $cv.ToString() } else { '' }) }
     if (-not $cv) {
-        Add-Item 'S6' 'required' 'claude CLI' 'unverified' ((T 'PATH 에 있으나 버전을 읽지 못했습니다: ' 'on PATH but the version could not be read: ') + $claudeApps[0].Source)
+        Add-Item 'S6' $claudeLevel 'claude CLI' 'unverified' ((T 'PATH 에 있으나 버전을 읽지 못했습니다: ' 'on PATH but the version could not be read: ') + $claudeApps[0].Source)
     } elseif ($cv -lt $claudeRecommended) {
-        Add-Item 'S6' 'required' 'claude CLI' 'warn' ('claude ' + $cv + ' < ' + $claudeRecommended + (T ' (권장)' ' (recommended)')) (T '허락하면 업데이트합니다 (-Update claude)' 'updated if you allow it (-Update claude)')
+        Add-Item 'S6' $claudeLevel 'claude CLI' 'warn' ('claude ' + $cv + ' < ' + $claudeRecommended + (T ' (권장)' ' (recommended)')) (T '허락하면 업데이트합니다 (-Update claude)' 'updated if you allow it (-Update claude)')
     } else {
-        Add-Item 'S6' 'required' 'claude CLI' 'ok' ('claude ' + $cv)
+        Add-Item 'S6' $claudeLevel 'claude CLI' 'ok' ('claude ' + $cv)
     }
 }
 

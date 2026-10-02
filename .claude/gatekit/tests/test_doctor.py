@@ -98,6 +98,11 @@ class DoctorTestCase(unittest.TestCase):
             "Stop": [gate_entry("stop")],
         }
 
+    def write_config(self, data: dict) -> None:
+        state = self.root / ".gatekit"
+        state.mkdir(exist_ok=True)
+        (state / "config.json").write_text(json.dumps(data), encoding="utf-8")
+
     def stub_claude(self) -> None:
         make_fake(self.bindir, "claude", print_and_exit("claude 1.0.0"))
 
@@ -571,11 +576,55 @@ class TestAxisContractFreshness(DoctorTestCase):
 
 
 class TestAxisWorkers(DoctorTestCase):
-    def test_missing_default_worker_binary_fails(self) -> None:
+    """The CLI is needed only in a project whose settings start it (doctor.cli_required)."""
+
+    def test_missing_default_worker_binary_fails_when_build_runs_workers(self) -> None:
+        self.write_config({"build": {"execution": "worker"}})
         result = doctor.axis_workers(self.root)
         self.assertEqual(result["verdict"], verdict.FAIL)
         self.assertIn("claude", result["detail"])
         self.assertTrue(result["fix"])
+
+    def test_missing_default_worker_binary_fails_when_a_backend_is_the_evaluator(self) -> None:
+        self.write_config({"verify": {"evaluator": "claude"}})
+        result = doctor.axis_workers(self.root)
+        self.assertEqual(result["verdict"], verdict.FAIL)
+        self.assertTrue(result["fix"])
+
+    def test_missing_default_worker_binary_is_ok_with_the_default_settings(self) -> None:
+        for data in (None, {"build": {"execution": "host"}}, {"verify": {"evaluator": "agent"}}):
+            with self.subTest(config=data):
+                if data is not None:
+                    self.write_config(data)
+                result = doctor.axis_workers(self.root)
+                self.assertEqual(result["verdict"], verdict.OK)
+                self.assertIn("claude not found on PATH", result["detail"])
+                self.assertIn("not used with the current settings (build.execution=host)",
+                              result["detail"])
+                self.assertEqual(result["fix"], "")
+
+    def test_korean_detail_says_the_backend_is_not_used(self) -> None:
+        doctor._LANG = "ko"
+        self.addCleanup(setattr, doctor, "_LANG", "en")
+        result = doctor.axis_workers(self.root)
+        self.assertEqual(result["verdict"], verdict.OK)
+        self.assertIn("지금 설정(build.execution=host)에서는 쓰지 않는다", result["detail"])
+
+    def test_cli_required_reads_the_two_settings(self) -> None:
+        self.assertFalse(doctor.cli_required(self.root))  # no config file
+        cases = (({}, False), ({"build": {"execution": "host"}}, False),
+                 ({"build": {"execution": "worker"}}, True),
+                 ({"build": {"execution": "Worker"}}, False),  # a typo means host (jobs.execution_mode)
+                 ({"verify": {"evaluator": ""}}, False), ({"verify": {"evaluator": "agent"}}, False),
+                 ({"verify": {"evaluator": "claude"}}, True),
+                 ({"verify": {"evaluator": "no-such-backend"}}, True),  # as written, like common.ps1
+                 ({"verify": {"evaluator": 3}}, False))
+        for data, expected in cases:
+            with self.subTest(config=data):
+                self.write_config(data)
+                self.assertEqual(doctor.cli_required(self.root), expected)
+        (self.root / ".gatekit" / "config.json").write_text("{not json", encoding="utf-8")
+        self.assertFalse(doctor.cli_required(self.root))
 
     def test_present_default_worker_binary_is_ok(self) -> None:
         self.stub_claude()
@@ -759,7 +808,10 @@ class TestCli(DoctorTestCase):
         import contextlib
         import io
 
-        # No `claude` on PATH → axis 6 fails.
+        # A project that runs workers, and no `claude` on PATH → axis 6 fails.
+        self.write_config({"build": {"execution": "worker"}})
+        report = doctor.diagnose(self.root)
+        self.assertEqual(self.axis(report, 6)["verdict"], verdict.FAIL)
         with contextlib.redirect_stdout(io.StringIO()):
             code = doctor.run(["--root", str(self.root)])
         self.assertEqual(code, 1)

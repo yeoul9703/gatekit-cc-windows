@@ -74,8 +74,13 @@ Common cases:
   derived, or a design input did (`02-screens.md`, `02-design.md`, or
   `tokens.json`); the detail names which file changed. Fix either case with
   `/gatekit-tasks` then `/gatekit-gate`.
-- **workers** fail — the default backend's binary is not on PATH. Route to
-  `/gatekit-setup`.
+- **workers** fail — the project is set to run a worker CLI (`build.execution`
+  is `worker`, or `verify.evaluator` names a backend) and the default
+  backend's binary is not on PATH. Route to `/gatekit-setup`.
+- **workers** ok with "not used with the current settings" in the detail — the
+  binary is missing, and nothing runs it: with the default settings
+  (`build.execution` is `host`) the session does the work itself. Nothing to
+  fix; do not suggest installing the `claude` CLI.
 - **python** fail — `.claude/gatekit/.venv` is missing (hooks are silently
   inactive) or its interpreter is below 3.14. Route to `/gatekit-setup`.
 - **uv** fail — `uv` is not on PATH. Route to `/gatekit-setup`, which shows the
