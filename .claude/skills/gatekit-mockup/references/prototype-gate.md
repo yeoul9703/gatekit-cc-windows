@@ -70,7 +70,7 @@ nothing to prototype).
    against what the finished thing would look like, not against an
    abstraction.
 2. Hand it to the user to actually open (a file path today; a
-   Claude-in-Chrome-driven walkthrough where that tool is available and the
+   walkthrough driven by the host's browser tool where it has one and the
    user wants it — never the required path, since it adds real per-round
    latency a static file does not have). Ask for feedback as concrete change
    requests against a specific screen and element, not free-form prose about

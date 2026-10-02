@@ -1,14 +1,14 @@
 ---
 name: gatekit-design
 description: Read a Figma file, screenshots, HTML files, a live site URL, a preset, or a user pattern file and derive spec/02-design.md plus spec/tokens.json, recording every gap the source does not evidence as an assumption. Korean triggers — "이 사이트 느낌 나게", "색이랑 글꼴 맞추고 싶어", "색감 따와줘", "이 사이트처럼 만들어줘", "디자인 패턴 정리해줘", "레퍼런스 사이트에서 뽑아줘", "디자인 프리셋 적용해줘". English triggers — "match this site's colors and fonts", "make it look like this site", "extract design patterns from this reference", "apply this design preset". Call it before the look is implemented, and even when no URL or file was given yet — the skill asks for the source. NOT for a screen list with flows and per-screen states — that is /gatekit-mockup — and NOT for implementing the design as code.
-argument-hint: "[Figma URL | screenshot/HTML paths | live site URL | preset name | pattern file]"
-allowed-tools: Read, Write, Edit, Glob, Grep, Bash, PowerShell, mcp__figma__get_design_context, mcp__figma__get_variable_defs, mcp__figma__get_screenshot, mcp__figma__get_metadata, WebFetch, mcp__claude-in-chrome__tabs_context_mcp, mcp__claude-in-chrome__tabs_create_mcp, mcp__claude-in-chrome__navigate, mcp__claude-in-chrome__get_page_text, mcp__claude-in-chrome__computer, mcp__claude-in-chrome__tabs_close_mcp
+argument-hint: "[screenshot/HTML paths | live site URL | preset name | pattern file | Figma URL]"
+allowed-tools: Read, Write, Edit, Glob, Grep, Bash, PowerShell, WebFetch
 ---
 
 # /gatekit-design
 
-Input: `$ARGUMENTS` — a Figma URL, screenshot or HTML paths, a live site URL, a
-preset name, or a path to a pattern file the user wrote.
+Input: `$ARGUMENTS` — screenshot or HTML paths, a live site URL, a preset
+name, a path to a pattern file the user wrote, or a Figma URL.
 
 This is an *extraction* command, not an interview: read the source
 deterministically, write what was observed, push every gap into the
@@ -55,12 +55,12 @@ corroborate itself (ADR-0011). Say so and ask for a real source.
 
 | Input | How to read it |
 |---|---|
-| Figma URL | Same as `/gatekit-mockup`: `get_metadata` for the frame tree, `get_design_context` for structure and component names, `get_variable_defs` for tokens, `get_screenshot` for a visual check. If the Figma MCP tools are unavailable, say so and ask for an export or screenshots — never guess a design from a URL. |
 | Screenshot files | Read each image; record which file each observation came from. |
 | HTML files | Read each file; extract repeated class or component patterns and CSS custom properties for tokens. |
-| Live site URL | `WebFetch` the page and any linked CSS first for routes, repeated patterns, and CSS custom properties. If the fetched HTML is a client-rendered shell (little more than a script tag and an empty root element), use the Chrome tools instead: `navigate` to the URL, `get_page_text` for rendered content, `computer` to capture a screenshot. Save every capture — HTML, CSS, screenshots — under `spec/design/` and cite the saved file, never the URL, as evidence; a screenshot over 1 MB (CI's repo-wide limit) must be downsized or refused, never committed oversized. If `WebFetch` or the Chrome tools are unavailable, say so and ask for local captures instead of guessing from the URL. |
+| Live site URL | `WebFetch` the page and any linked CSS first for routes, repeated patterns, and CSS custom properties. Save every capture — HTML, CSS, screenshots — under `spec/design/` and cite the saved file, never the URL, as evidence. If the fetched HTML is a client-rendered shell (little more than a script tag and an empty root element), read `.claude/skills/gatekit-design/references/browser.md` and follow it. If `WebFetch` is unavailable, say so and ask for local captures instead of guessing from the URL. |
 | Preset name | Run `uv run --project .claude/gatekit --frozen python .claude/gatekit/bin/gatekit.py design merge-preset <name>`. Project values win; every row the preset added carries `"evidence": "preset:<name>"`. Cite the preset name as the source. |
 | User pattern file | Read the Markdown or JSON file; extract each rule as a `P<n>` row citing the file as evidence. |
+| Figma URL | Read `.claude/skills/gatekit-mockup/references/figma.md` and follow it. Skip this row when the input is not a Figma URL. |
 
 ## Step 4 — write spec/02-design.md
 

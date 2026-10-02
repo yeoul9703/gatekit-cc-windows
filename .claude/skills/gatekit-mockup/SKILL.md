@@ -1,13 +1,13 @@
 ---
 name: gatekit-mockup
 description: Read a Figma file, HTML, or screenshots and derive spec/02-screens.md plus spec/tokens.json, recording every screen state the mockup does not evidence as an assumption. Korean triggers — "피그마 보고 화면 명세 만들어줘", "목업에서 스펙 뽑아줘", "이 디자인 정리해줘", "화면 명세 써줘". English triggers — "spec these screens from Figma", "extract screens from this mockup", "turn this design into a screen spec". Call it even when no file or link was given yet — the skill asks for it. NOT for implementing the design as code, and NOT for writing the PRD — that is /gatekit-interview.
-argument-hint: "[Figma URL | path to HTML | path to screenshots]"
-allowed-tools: Read, Write, Edit, Glob, Grep, Bash, PowerShell, mcp__figma__get_design_context, mcp__figma__get_variable_defs, mcp__figma__get_screenshot, mcp__figma__get_metadata
+argument-hint: "[path to HTML | path to screenshots | Figma URL]"
+allowed-tools: Read, Write, Edit, Glob, Grep, Bash, PowerShell
 ---
 
 # /gatekit-mockup
 
-Input: `$ARGUMENTS` — a Figma URL, HTML files, or screenshot paths.
+Input: `$ARGUMENTS` — HTML files, screenshot paths, or a Figma URL.
 `spec/tokens.json` is shared with `/gatekit-design`: either may create it,
 and both merge rather than overwrite.
 
@@ -57,16 +57,13 @@ Pick the branch that matches the input. Extract; do not imagine. **Every
 extracted item carries its evidence** — the frame name, file path, or
 selector it came from.
 
-**Figma URL** — with the Figma MCP tools: `get_metadata` for the frame
-tree, `get_design_context` for structure and component names,
-`get_variable_defs` for tokens, `get_screenshot` for a visual check. If
-those tools are unavailable, say so, ask for an export or screenshots, and
-stop. **Never guess a design from a URL.**
-
 **HTML files** — routes or page boundaries, repeated class or component
 patterns, CSS custom properties for tokens.
 
 **Screenshots** — name each screen after what it shows.
+
+**Figma URL** — read `.claude/skills/gatekit-mockup/references/figma.md` and
+follow it. Skip this branch when the input is not a Figma URL.
 
 ## Step 3 — write spec/02-screens.md
 
