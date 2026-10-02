@@ -83,19 +83,23 @@ script is being run directly. The same permissions apply to `-Install`,
 `-Update` and `-Reinstall`.
 
 If the script file itself is missing, do not rebuild it by hand: tell the
-user the files under `.claude/gatekit/scripts` have to be restored. With Git
-installed that is `git checkout .claude/gatekit/scripts`; without Git (the
-project came as a zip file) the user downloads the repository again and
-overwrites that folder.
+user the files under `.claude/gatekit/scripts` have to be restored. In a
+Git work tree (Git is installed and the project folder holds `.git`) that is
+`git checkout .claude/gatekit/scripts`; otherwise (the project came as a zip
+file, with or without Git on the PC) the user downloads the repository again
+and overwrites that folder.
 
 ## A kit file is missing or damaged
 
 The script's `action` already says which way applies: when Git is on this
-session's PATH it prints `git checkout <file>`; when it is not, it says to
-download the repository again and overwrite that file. Pass that on as it
-is. Do not suggest installing Git just for this, and do not recreate the
-file by hand. Only when `common.ps1` itself cannot be read does the script
-print both ways, because it cannot look for Git at that point.
+session's PATH **and** the project folder holds `.git` (a folder or a file)
+it prints `git checkout <file>`; when Git is missing, or Git is installed
+but there is no `.git` (a zip download, where that command would fail), it
+says to download the repository again and overwrite that file. Pass that on
+as it is. Do not suggest installing Git or running `git init` just for this,
+and do not recreate the file by hand. Only when `common.ps1` itself cannot
+be read does the script print both ways, because it cannot look for Git at
+that point.
 
 ## Environment items
 

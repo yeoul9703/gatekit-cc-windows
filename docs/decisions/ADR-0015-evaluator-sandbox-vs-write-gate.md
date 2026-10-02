@@ -1,6 +1,6 @@
 # ADR-0015: The evaluator needs a writable sandbox, and gatekit cannot make Codex trust its own hooks
 
-Status: accepted 2026-09-18 (owner approval in the session that found the sandbox defect); implemented the same day.
+Status: accepted 2026-09-18 (owner approval in the session that found the sandbox defect); implemented the same day; not adopted in this fork (Claude Code only, ADR-0018).
 
 Origin: the `gk-trial2` retrial's Codex evaluator run
 (`.gatekit/jobs/20260918T133500Z-2b06`). 111 seconds, exit 0, and 12 of 18

@@ -32,9 +32,10 @@ means out of retries (`build.max_retries`) and you do not retry past it.
 
 ## Out of retries
 
-Consecutive failures bind across jobs by code (ADR-0014): `redelegate` and
-`start` both refuse a task at `max_retries`, exit 3, naming the jobs it failed
-in. On refusal, diagnose: read `spec/RECOVERY.md` and the task's `gates.json`,
+Consecutive failures bind across jobs by code (ADR-0014): `start` refuses a
+task whose consecutive failures have reached `max_retries`, and `redelegate`
+refuses once they are past it. Both exit 3 and print the task, the count and
+`max_retries` (not the job ids). On refusal, diagnose: read `spec/RECOVERY.md` and the task's `gates.json`,
 write the diagnosis there under a heading naming the task (what gate fails,
 what the output says, likely causes), then **stop the pipeline**. Once the
 cause is fixed, `jobs start --force-retry <task_id>` clears its count — never

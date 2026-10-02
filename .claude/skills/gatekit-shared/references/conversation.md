@@ -6,9 +6,11 @@ one question at a time, with no fixed slots and no question ceiling. Each
 command file names the *subject* its conversation pursues; the rules for
 *how* to conduct it live here, so the two cannot drift apart.
 
-`.claude/skills/gatekit-shared/references/questioning.md` still applies in full. This file does not replace
-it — it is the long form of what a free-ranging conversation looks like in
-practice, written after real trials found specific ways it goes wrong.
+`.claude/skills/gatekit-shared/references/questioning.md` still applies in full: it holds the stop signals,
+the rule against asking what is already knowable, and the question-window
+budget, and this file does not repeat them. This file is the only place
+that says what a free-ranging conversation looks like in practice, written
+after real trials found specific ways it goes wrong.
 
 ## Rules for every question
 

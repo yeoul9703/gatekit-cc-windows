@@ -76,7 +76,7 @@ the assumption ledger rely on.
 keep values as that system's own defaults or documented conventions — never
 invented values dressed up as someone else's — and commit directly.
 
-**Observed preset**: the same rule ADR-0006 applies to host parity claims —
+**Observed preset**: the same rule gatekit applies to any parity claim —
 write it, merge it into a real project, run the build, and only then add
 the file here. A preset that has never produced a passing build and is not
 a cited seed is a guess with a filename.

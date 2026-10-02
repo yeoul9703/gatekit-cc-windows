@@ -285,11 +285,13 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .claude/gatekit/scripts/setu
 
 이 스크립트도 안 돌면(파일이 없음 등) 파일을 되돌려야 합니다.
 
-- Git이 있으면: `git checkout .claude/gatekit/scripts`
-- Git이 없으면(압축 파일로 받은 경우): 저장소를 다시 내려받아 `.claude/gatekit/scripts` 폴더의 파일을 덮어쓰세요.
+- `git clone`으로 받았으면(프로젝트 폴더에 `.git`이 있음): `git checkout .claude/gatekit/scripts`
+- 압축 파일로 받았으면(Git이 없거나, Git은 있어도 프로젝트 폴더에 `.git`이 없음): 저장소를 다시 내려받아 `.claude/gatekit/scripts` 폴더의 파일을 덮어쓰세요.
 
-setup도 같은 식으로 안내합니다. 이 창의 PATH에 Git이 있으면 `git checkout ...` 명령을, 없으면
-"저장소를 다시 내려받아 그 파일을 덮어쓰세요"를 보여 줍니다(`packages.json`, `.claude/settings.json`).
+setup도 같은 식으로 안내합니다. 이 창의 PATH에 Git이 있고 프로젝트 폴더에 `.git`(폴더나 파일)이
+있을 때만 `git checkout ...` 명령을 보여 줍니다. Git이 없거나, Git은 설치돼 있어도 `.git`이 없으면
+(압축 파일로 받은 경우 그 명령은 실패합니다) "저장소를 다시 내려받아 그 파일을 덮어쓰세요"를
+보여 줍니다(`packages.json`, `.claude/settings.json`).
 `common.ps1`을 읽지 못할 때는 Git이 있는지 확인할 방법이 없어서 두 가지를 함께 보여 줍니다.
 
 ## 10. 환경 점검 항목 (경로 길이, 실행 정책, 인터넷 표시, 실행 차단)

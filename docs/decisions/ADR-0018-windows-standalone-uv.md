@@ -17,7 +17,8 @@ version checks that this audience never benefits from.
 ## Decision
 
 1. **Windows and Claude Code only.** Mac/Linux and other hosts are not
-   supported. (Codex support, ADR-0006, was already not adopted here.)
+   supported. (Codex support was never adopted here; its ADR-0006 was
+   removed from this fork on 2026-10-02.)
 2. **Standalone folder.** gatekit lives in the project's own `.claude/`
    (commands, `settings.json`; the skill shims were removed by ADR-0019) and `.claude/gatekit/` (kernel,
    scripts, tests). No plugin manager, no global install; opening the folder
@@ -47,7 +48,7 @@ version checks that this audience never benefits from.
    exit 0 ready, 1 failed, 2 consent/action needed, 3 restart needed, 4
    blocked by policy or network). `scripts/verify.ps1` runs syntax, tests,
    pyright, ruff, doctor and a `settings.json` check.
-7. **Doctor has eight axes**: plugin files, hooks registered, project state,
+7. **Doctor has eight axes**: gatekit files, hooks registered, project state,
    spec set, contract freshness, workers, python (venv >= 3.14), uv.
 
 ## Rationale (measured)
@@ -151,4 +152,5 @@ still be used after 2026-10, when 3.10 reaches end of life; 3.11 ends
 - ADR-0001 (single plugin): replaced; there is no plugin.
 - ADR-0002: the "any machine with an old Python" wording is replaced;
   stdlib-only stays.
-- ADR-0006 (Codex second host): already not adopted here; unchanged.
+- ADR-0006 (Codex second host): not adopted here; the file was removed
+  from this fork on 2026-10-02.

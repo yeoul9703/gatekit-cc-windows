@@ -1,6 +1,7 @@
 """scripts/*.ps1 must stay Windows PowerShell 5.1 compatible, and setup.ps1
 must behave as documented: check-only by default, install only what was
 allowed, refuse unknown names, and report through the documented exit codes.
+(What the setup skill's documents say is checked in test_command_docs.py.)
 
 Nothing here installs anything. Programs are replaced by fake executables that
 log their arguments (a fake ``winget``, a fake ``uv``), and setup.ps1 runs from
@@ -79,45 +80,6 @@ class TestScriptFiles(unittest.TestCase):
     def test_gitattributes_pins_ps1_line_endings(self) -> None:
         text = (PROJECT / ".gitattributes").read_text(encoding="utf-8")
         self.assertIn("*.ps1 text eol=crlf", text.splitlines())
-
-    def test_setup_command_asks_with_one_question_and_does_not_auto_approve_it(self) -> None:
-        text = (PROJECT / ".claude" / "skills" / "gatekit-setup" / "SKILL.md").read_text(encoding="utf-8")
-        front = text.split("---")[1]
-        allowed = [line for line in front.splitlines() if line.startswith("allowed-tools:")]
-        self.assertEqual(len(allowed), 1)
-        self.assertNotIn("AskUserQuestion", allowed[0])
-        self.assertIn("AskUserQuestion", text.split("---", 2)[2])
-        self.assertIn("-Install", text)
-
-
-
-
-class TestSetupCommandText(unittest.TestCase):
-    """S27: the setup skill covers warn candidates, -Update, -Install venv and -Lang."""
-
-    def setUp(self) -> None:
-        # The skill as a whole: SKILL.md plus the reference files its steps read.
-        skill = PROJECT / ".claude" / "skills" / "gatekit-setup"
-        files = [skill / "SKILL.md"] + sorted((skill / "references").glob("*.md"))
-        self.text = "\n".join(path.read_text(encoding="utf-8") for path in files)
-
-    def test_candidates_include_warn_items_and_update_flow(self) -> None:
-        self.assertIn("`fail` **or `warn`**", self.text)
-        self.assertIn("-Update uv", self.text)
-        self.assertIn("-Update pwsh", self.text)
-        self.assertIn("-Update claude", self.text)
-
-    def test_venv_question_mentions_the_download_size(self) -> None:
-        self.assertIn("-Install venv", self.text)
-        self.assertIn("tens of MB", self.text)
-        self.assertIn("deleted and rebuilt", self.text)
-
-    def test_every_setup_call_passes_lang(self) -> None:
-        calls = [line for line in self.text.splitlines() if "scripts/setup.ps1" in line and "-File" in line]
-        self.assertGreaterEqual(len(calls), 2)
-        for line in calls:
-            self.assertIn("-Lang", line)
-        self.assertIn("Always pass `-Lang <output_lang>`", self.text)
 
 
 def base_env(bin_dir: pathlib.Path, local_app: pathlib.Path) -> dict:
@@ -1069,8 +1031,17 @@ class TestSetupExecutionPolicy(SetupCase):
 
 @unittest.skipUnless(POWERSHELL.is_file(), "Windows PowerShell 5.1 not available")
 class TestSetupRestoreAdvice(SetupCase):
-    """A missing kit file: `git checkout` only when Git is on PATH; otherwise (a zip download)
-    download the repository again and overwrite the file."""
+    """A missing kit file: `git checkout` only when Git is on PATH and the project root is a
+    Git work tree (`.git` folder or file); otherwise (a zip download) download the repository
+    again and overwrite the file."""
+
+    def fake_git(self, work_tree: str = "folder") -> None:
+        """Git on PATH; *work_tree* is 'folder', 'file' (a linked work tree) or '' (a zip)."""
+        fakebin.make_fake(self.bin, "git", "print('git version 2.54.0')\n")
+        if work_tree == "folder":
+            (self.root / ".git").mkdir(exist_ok=True)
+        elif work_tree == "file":
+            (self.root / ".git").write_text("gitdir: elsewhere\n", encoding="utf-8")
 
     def settings_action(self, lang: str = "en") -> str:
         (self.root / ".claude" / "settings.json").unlink(missing_ok=True)
@@ -1086,10 +1057,32 @@ class TestSetupRestoreAdvice(SetupCase):
         self.assertIn("저장소를 다시 내려받아 그 파일을 덮어쓰세요", self.settings_action("ko"))
 
     def test_with_git_the_advice_is_git_checkout(self) -> None:
-        fakebin.make_fake(self.bin, "git", "print('git version 2.54.0')\n")
+        self.fake_git()
         action = self.settings_action()
         self.assertIn("git checkout .claude/settings.json", action)
         self.assertNotIn("download the repository again", action)
+
+    def test_a_git_file_instead_of_a_folder_is_a_work_tree_too(self) -> None:
+        self.fake_git("file")
+        self.assertIn("git checkout .claude/settings.json", self.settings_action())
+
+    def test_git_without_a_repository_is_told_to_download_again(self) -> None:
+        # A zip download on a PC that has Git: there is no .git, so git checkout would fail.
+        self.fake_git("")
+        action = self.settings_action()
+        self.assertIn("not a Git repository", action)
+        self.assertIn("download the repository again and overwrite that file", action)
+        self.assertIn(".claude/settings.json", action)
+        self.assertNotIn("git checkout", action)
+        self.assertNotIn("Git is not installed", action)
+        korean = self.settings_action("ko")
+        self.assertIn("저장소를 다시 내려받아 그 파일을 덮어쓰세요", korean)
+        self.assertNotIn("git checkout", korean)
+        _, out = self.run_setup("-Lang", "ko")
+        self.assertEqual(english_sentence_lines(out), [], out)
+        (self.kit / "scripts" / "packages.json").write_text("{not json", encoding="utf-8")
+        _, _, by_id = self.run_json("-Lang", "en")
+        self.assertNotIn("git checkout", by_id["args"]["action"])
 
     def test_broken_settings_and_packages_json_use_the_same_advice(self) -> None:
         (self.root / ".claude" / "settings.json").write_text("{not json", encoding="utf-8")
@@ -1100,7 +1093,7 @@ class TestSetupRestoreAdvice(SetupCase):
         self.assertEqual(code, 1)
         self.assertIn("download the repository again", by_id["args"]["action"])
         self.assertIn(".claude/gatekit/scripts/packages.json", by_id["args"]["action"])
-        fakebin.make_fake(self.bin, "git", "print('git version 2.54.0')\n")
+        self.fake_git()
         _, _, by_id = self.run_json("-Lang", "en")
         self.assertIn("git checkout .claude/gatekit/scripts/packages.json", by_id["args"]["action"])
 

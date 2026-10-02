@@ -70,13 +70,11 @@ claude -p --output-format json --permission-mode acceptEdits
 finished**. Every one of the thirteen `output.txt` files the trial produced is
 exactly one line, between 5 KB and 10 KB. While the worker runs the file is
 empty; at the last instant it becomes 6 KB. There is no progress in it to
-tail. The `codex` backend (`codex exec --sandbox workspace-write`) carries no
-streaming flag either.
+tail.
 
 Switching to `--output-format stream-json` would produce line-by-line events,
-but that changes the backend contract for every host, has no verified
-equivalent under Codex, and requires its own design for bounding what reaches
-the session. It is out of scope here and listed under open questions.
+but that changes the backend contract and requires its own design for
+bounding what reaches the session. It is out of scope here and listed under open questions.
 
 ### What is already on disk
 
@@ -227,8 +225,7 @@ unchanged, and exit-0-on-internal-error for every new path.
 - **Tail `output.txt`.** The default backend writes one JSON object at exit;
   there is no progress in the file to tail. See Context.
 - **Switch the backend to `--output-format stream-json`.** Changes the backend
-  contract for every host, unverified under Codex, and needs its own design
-  for bounding what reaches the session. Deferred, not rejected on merit.
+  contract and needs its own design for bounding what reaches the session. Deferred, not rejected on merit.
 - **Let `--compact` carry the new columns.** `/gatekit:build` polls with it
   during a build; changing that line breaks the consumer this ADR exists to
   serve.
@@ -244,8 +241,7 @@ unchanged, and exit-0-on-internal-error for every new path.
 
 ## Open questions
 
-- Whether `stream-json` should become the `claude` backend's argv once its
-  Codex equivalent is known. It would make real in-task progress possible and
+- Whether `stream-json` should become the `claude` backend's argv. It would make real in-task progress possible and
   would supersede decision 3's mtime heuristic for that backend.
 - Whether `activity` should show a count of files touched since
   `started_at` rather than only the most recent one. One filename is the

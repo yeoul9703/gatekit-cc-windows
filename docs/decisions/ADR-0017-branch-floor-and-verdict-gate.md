@@ -5,8 +5,7 @@ found during real use on `gk-todo2`, `gk-todo3`, and `gk-todo4` (decision 22
 from reading `gk-todo4`'s completed, end-to-end run; decisions 23–24 from
 the owner's review of that same run's PRD quality — 23 was superseded by
 24 the same day, in the same review conversation, before either shipped).
-All 1091 plugin tests pass (`cd plugin && python3 -m unittest discover -s
-tests`) — decisions 13 through 24 are prompt/template-only changes with no
+All 1091 plugin tests pass — decisions 13 through 24 are prompt/template-only changes with no
 new spec.py logic, so the count is unchanged from decision 12. Implementation
 notes on decisions this document left underspecified:
 
@@ -55,7 +54,7 @@ notes on decisions this document left underspecified:
   `contract.py` itself, only new criteria in `gate.md`'s derivation step
   that use machinery already there.
 - **The "AI-made defaults" list (decision 9) is a new data file,
-  `plugin/spec-kit/design-antipatterns.json`, committed immediately** rather
+  `design-antipatterns.json`, committed immediately** rather
   than held to the same "must be observed in a real build first" rule
   `presets/design/README.md` states for design *presets*. The two are not
   the same kind of claim: a preset asserts "these values work," which is
@@ -87,8 +86,8 @@ notes on decisions this document left underspecified:
   a new convention this preset system did not previously need** (existing
   code only ever wrote `preset:<name>` for an *observed* preset's origin
   after a merge). `shadcn-neutral.json`'s color values are shadcn/ui's own
-  documented neutral-base defaults, not `~/edu/practice/supernext`'s
-  original design — that project was checked (`src/components/` has no
+  documented neutral-base defaults, not the original design of the owner's own project they were read
+  from — that project was checked (`src/components/` has no
   components beyond unmodified shadcn primitives) and found to be an
   uncustomized shadcn/ui install, so only its *structure* (HSL custom
   properties, base/foreground pairs, single-radius derivation, `.dark`
@@ -161,7 +160,7 @@ Two independent gaps, not one:
 
 ### Three related systems the owner asked to compare against
 
-**`grill-me`** (`~/.cys/pack/skills/grill-me/SKILL.md`, 45 lines): a
+**`grill-me`** (45 lines): a
 PreToolUse/Stop hook pair blocks file writes until at least 20 (30 for
 complex work) "distinct decision branches" are resolved. The count is done
 by a separate deterministic script (`grill_gate.py`, 766 lines) — the
@@ -176,8 +175,7 @@ challenge agents (Contrarian/Simplifier/Ontologist) injected at rounds
 4/6/8. This is a *depth* instrument for a single, already-scoped project —
 it does not branch into multiple candidate problems.
 
-**`ai-dev-pm`** (the owner's own internal project,
-`~/edu/awesomedev/ai-dev-pm`): the piece most relevant here, because it is
+**`ai-dev-pm`** (the owner's own internal project): the piece most relevant here, because it is
 structured as exactly the three stages the owner described directly —
 discovery → verdict/selection → deep interview — as actual running code:
 
@@ -685,16 +683,15 @@ reason, a single sans-serif (Inter or similar) used for every text role
 with no second face for contrast, a page built entirely from
 identically-shaped cards in a row, decorative emoji standing in for icons,
 and centered-everything layouts with no deliberate asymmetry. This list is
-a starting point, not exhaustive — it lives in `plugin/spec-kit/` as a data
-file (per this repo's own rule that presets live in `spec-kit/`, not in
-command prose), so it can grow from real trials the way the presets
+a starting point, not exhaustive — it lives in a data file (per this
+repo's own rule that presets live in data files, not in command prose), so it can grow from real trials the way the presets
 themselves already do.
 
 ### 10. Ship seed presets now — an empty preset catalog defeats decision 3's greenfield fallback
 
 Found on `gk-todo2` immediately after decision 3 was live: the owner picked
 the new-design branch (no Figma/HTML/screenshot source), and the pipeline
-had nothing to offer — `plugin/spec-kit/presets/design/` held only its own
+had nothing to offer — the design preset folder held only its own
 README, empty by design, per the rule stated there ("no preset ships...
 until one has been observed in a real build"). The result was a shipped
 todo app with a bold `<h1>`, an unstyled native `<input type="datetime-
@@ -732,7 +729,7 @@ option dressed up as several:
 - `shadcn-neutral.json` — the shadcn/ui default token structure itself
   (HSL custom properties, base/foreground color pairs, one `--radius` value
   the rest derive from, `.dark` class token redefinition), extracted from
-  `~/edu/practice/supernext` (the owner's own project) as a *structural*
+  the owner's own project as a *structural*
   reference — its actual color values are shadcn's own neutral-grey
   defaults, cited as `seed:shadcn-ui` rather than presented as this
   project's original design, because that project itself never customized
@@ -1288,7 +1285,7 @@ one everyone actually reads.
 Found on `gk-todo4` (same finding as decision 24 below): the character-chat
 interview never surfaced context-window management, content-safety limits,
 or persona drift. The first fix tried here was narrow — a new Step 2.5
-reading a seed data file (`plugin/spec-kit/domain-checklists.json`, same
+reading a seed data file (`domain-checklists.json`, same
 convention as `design-antipatterns.json`) that matched a known domain and
 asked its checklist items as ordinary questions. Reviewing it with the
 owner surfaced that this missed the actual point: **a seed file starts
@@ -1302,7 +1299,7 @@ interviewer itself knows about the category. The owner named the actual
 target directly: tools like Lovable propose a fuller feature set from
 domain knowledge and let the user prune it, rather than building up from a
 blank form one answer at a time. **The checklist-file approach and its
-Step 2.5 are withdrawn; `plugin/spec-kit/domain-checklists.json` was
+Step 2.5 are withdrawn; `domain-checklists.json` was
 deleted the same day it was created.** Decision 24 replaces it.
 
 ### 24. `interview.md` researches the category and proposes a fuller feature set for the user to prune, instead of building only from what the conversation's own threads produced

@@ -332,15 +332,44 @@ class TestSetupSkill(unittest.TestCase):
     def setUp(self) -> None:
         self.body = read(skill("setup") / "SKILL.md")
         self.refs = skill("setup") / "references"
+        # The skill as a whole: SKILL.md plus the reference files its steps read.
+        self.text = "\n".join([self.body] + [read(p) for p in sorted(self.refs.glob("*.md"))])
 
     def test_setup_runs_the_setup_script_and_asks_before_installing(self) -> None:
         self.assertIn("powershell -NoProfile -ExecutionPolicy Bypass -File "
                       ".claude/gatekit/scripts/setup.ps1 -Json -Lang <output_lang>", self.body)
         self.assertRegex(self.body, r"only after\s+the user has agreed")
+        # every call of the script, in the body and in the references, passes -Lang
+        calls = [line for line in self.text.splitlines() if "scripts/setup.ps1" in line and "-File" in line]
+        self.assertGreaterEqual(len(calls), 2)
+        for line in calls:
+            self.assertIn("-Lang", line)
+        self.assertIn("Always pass `-Lang <output_lang>`", self.text)
         # the safety rules stay in the body, not in a file read only sometimes
         flat = one_line(self.body)
         self.assertIn("A reinstall and a retry are separate permissions", flat)
         self.assertIn("Never enable a bypass flag", flat)
+
+    def test_setup_asks_with_one_question_and_does_not_auto_approve_it(self) -> None:
+        # TestHandoff leaves setup out, so the allowed-tools rule is checked here.
+        front = self.body.split("---")[1]
+        allowed = [line for line in front.splitlines() if line.startswith("allowed-tools:")]
+        self.assertEqual(len(allowed), 1)
+        self.assertNotIn("AskUserQuestion", allowed[0])
+        self.assertIn("AskUserQuestion", self.body.split("---", 2)[2])
+        self.assertIn("-Install", self.body)
+
+    def test_candidates_include_warn_items_and_update_flow(self) -> None:
+        # S27: the setup skill covers warn candidates, -Update, -Install venv and -Lang.
+        self.assertIn("`fail` **or `warn`**", self.text)
+        self.assertIn("-Update uv", self.text)
+        self.assertIn("-Update pwsh", self.text)
+        self.assertIn("-Update claude", self.text)
+
+    def test_venv_question_mentions_the_download_size(self) -> None:
+        self.assertIn("-Install venv", self.text)
+        self.assertIn("tens of MB", self.text)
+        self.assertIn("deleted and rebuilt", self.text)
 
     def test_setup_names_its_three_references_and_when_to_read_them(self) -> None:
         self.assertEqual(sorted(p.name for p in self.refs.glob("*.md")),

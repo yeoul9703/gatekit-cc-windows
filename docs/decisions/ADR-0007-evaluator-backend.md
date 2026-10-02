@@ -6,14 +6,13 @@
 the code does not grade it. Until now the evaluator was always a read-only
 subagent of the host, so it was a different context but the same model as
 the builder. The build worker, by contrast, can already be a different CLI
-(`workers.py`, ADR-0003). A study participant on Claude Code who wants
-Codex to grade, or the reverse, had no way to ask for it.
+(`workers.py`, ADR-0003). A user who wants a different CLI to grade had
+no way to ask for it.
 
 Two things make this cheap: the worker infrastructure already spawns a CLI
-with a prompt on stdin and `GATEKIT_TASK_ID` in its environment, and both
-CLIs have a read-only mode (`claude -p --permission-mode plan`,
-`codex exec --sandbox read-only`). Both authenticate with the user's
-subscription login; no API key is involved.
+with a prompt on stdin and `GATEKIT_TASK_ID` in its environment, and the
+Claude CLI has a read-only mode (`claude -p --permission-mode plan`). It
+authenticates with the user's subscription login; no API key is involved.
 
 ## Decision
 
@@ -37,14 +36,12 @@ subscription login; no API key is involved.
 
 ## Consequences
 
-- Adversarial verification across models is one config line away, on
-  either host, with subscription logins only. The user needs both
-  subscriptions to use both models; the README says so.
+- Verification by a different CLI is one config line away, once a second
+  backend with a `read_only_argv` is added by hand; this fork ships only
+  the `claude` backend (ADR-0018).
 - The read-only guarantee is two layers deep — CLI sandbox and write gate —
   but the second layer holds only where that CLI's session has gatekit
-  hooks: the Claude Code plugin at user scope, or the Codex layer from
-  ADR-0006 in the project. `jobs evaluate` does not verify this; `doctor`
-  axis 8 reports the Codex layer's presence.
+  hooks. `jobs evaluate` does not verify this.
 - The subagent evaluator can write `spec/PROGRESS.md` as its one
   exception; a CLI evaluator cannot, so the command moves that write to
   the main session. The trail is the same file either way.

@@ -59,7 +59,9 @@ Before any worker runs, the command runs every task's gates once:
   passed at preflight; no worker spawned`.
 - A `warn:` line after the table is a preflight warning. `warn: gate passed
   before any work existed in the write scope` means that gate can pass on an
-  empty tree — tell the user.
+  empty tree — tell the user. `warn: gate ... failed at preflight ... in a way
+  that may be the command rather than the work; starting anyway` means the
+  gate's own command looks wrong: say so, and check it before blaming the code.
 - A gate whose *command* is broken ends the start with exit 4 and names the
   task and the gate. Fix it in `spec/04-tasks.md` (usually a glob instead of
   a directory) and start again; never pass `--no-preflight` to get past it.

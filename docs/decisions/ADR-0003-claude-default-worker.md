@@ -1,5 +1,7 @@
 # ADR-0003: Claude CLI is the default build worker; Codex is opt-in
 
+Status: not adopted in this fork (Claude Code only, ADR-0018).
+
 ## Context
 
 `/gatekit:build` hands tasks from `spec/04-tasks.md` to a worker process:

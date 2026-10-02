@@ -1,27 +1,18 @@
 # Policy: questioning
 
-## Ask one, then stop and wait
+This file says when and how often the question window (`AskUserQuestion`)
+is used, and what counts as a stop signal. How a free-ranging interview
+conversation is conducted — one question per message, nothing but the
+question, no narration — is in
+`.claude/skills/gatekit-shared/references/conversation.md`, and only there.
 
-Asking a question ends your turn. Send exactly one question, then stop —
-do not imagine or invent the user's answer and continue on your own to a
-second, third, or further question in the same turn. Every next question
-in an interview-style conversation is written only after the user's actual
-reply arrives, never before. This applies with no exception: not when the
-likely answer seems obvious, not when several questions feel related enough
-to ask together, not when the conversation is "almost done." A model that
-keeps producing question after question without a real reply in between is
-not conducting an interview — it is performing one, alone.
+## Asking ends your turn
 
-## Nothing but the question
-
-Every message a user sees during an interview-style conversation is either
-a question or a plain statement in the detected language — never narration
-of your own process ("Let me record this," "I'll follow this thread,"
-"This is an important answer"), never meta-commentary on the answer just
-given. Read the answer, decide the next question, ask it; nothing goes in
-between, in any language. Losing this discipline mid-conversation reads as
-the model thinking out loud in front of the user rather than conducting an
-interview.
+Asking a question ends your turn, in the question window or in plain chat.
+Send exactly one question, then stop — do not imagine or invent the user's
+answer and continue on your own. This applies with no exception: not when
+the likely answer seems obvious, not when several questions feel related
+enough to ask together, not when the conversation is "almost done."
 
 ## Draft first
 

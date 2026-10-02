@@ -75,11 +75,6 @@ library only in the kernel, and the verdict words are
    the mockup-reading front end for screens and gains the same re-entry
    rule; the two share one writer for `tokens.json`.
 
-   Host note: `WebFetch` and the Chrome tools are Claude Code host tools.
-   Under Codex the URL branch is `unverified` in the parity table until a
-   real session shows an equivalent; the command must say so and ask for
-   captures rather than guess.
-
 2. **Design lives in its own optional file, `spec/02-design.md`.**
    Screens stay in `02-screens.md`. A project with a reference site but no
    mockup gets a full design file and no half-empty screens file. Canonical
@@ -112,7 +107,7 @@ library only in the kernel, and the verdict words are
    carries `"evidence": "preset:<name>"`. The plugin ships with no
    opinionated preset; the first ones are the ones this repo's owner has
    actually used, and each must be observed in a real build before it is
-   committed (the same rule ADR-0006 applies to parity claims).
+   committed.
 
 4. **The worker prompt carries the design that its task touches.**
    `jobs.build_prompt` gains a `## Design` section, generated from
@@ -218,8 +213,7 @@ library only in the kernel, and the verdict words are
 - `docs/ARCHITECTURE.md` must be updated in the same change: the `spec/`
   tree gains `02-design.md` and `design/`, `tokens.json` becomes
   "optional, from mockup or design pipeline", `active_pipeline` gains
-  `"design"`, the gate table gains `tokens`, and the parity table gains
-  a row for the URL branch marked `unverified` under Codex.
+  `"design"`, and the gate table gains `tokens`.
 
 ## Open questions
 

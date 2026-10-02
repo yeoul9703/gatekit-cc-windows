@@ -198,10 +198,17 @@ function Say([string]$verdict, [string]$id, [string]$name, [string]$detail) {
 
 function Set-Flag([string]$name) { $script:flags[$name] = $true }
 
-# How to get a missing or damaged kit file back. Git on the PATH of this session: the git command.
+# How to get a missing or damaged kit file back. Git on the PATH of this session and the project
+# root is a Git work tree (a .git folder or file): the git command. Git but no .git (a zip file
+# unpacked on a PC that has Git): git checkout would fail, so the advice is the same as without Git.
 # No Git (the project came as a zip file): download the repository again and overwrite the file.
 function Get-RestoreAdvice([string]$rel) {
-    if ((Find-App 'git' $script:sessionPath).Count -gt 0) {
+    $hasGit = ((Find-App 'git' $script:sessionPath).Count -gt 0)
+    $isWorkTree = (Test-Path -LiteralPath (Join-Path $projectRoot '.git'))
+    if ($hasGit -and -not $isWorkTree) {
+        return (T ('이 폴더는 Git 저장소가 아니므로 저장소를 다시 내려받아 그 파일을 덮어쓰세요(' + $rel + ')') ('this folder is not a Git repository, so download the repository again and overwrite that file (' + $rel + ')'))
+    }
+    if ($hasGit) {
         return (T ('저장소에서 복원하세요(git checkout ' + $rel + ')') ('restore it from the repository (git checkout ' + $rel + ')'))
     }
     return (T ('Git 이 없으므로 저장소를 다시 내려받아 그 파일을 덮어쓰세요(' + $rel + ')') ('Git is not installed, so download the repository again and overwrite that file (' + $rel + ')'))

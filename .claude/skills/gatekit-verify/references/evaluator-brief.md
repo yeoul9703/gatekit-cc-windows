@@ -29,7 +29,7 @@ starts "Record the result under" — a CLI evaluator cannot write) to
 `.gatekit/evaluator-prompt.md`, then run:
 
 ```
-uv run --project .claude/gatekit --frozen python .claude/gatekit/bin/gatekit.py jobs evaluate --prompt .gatekit/evaluator-prompt.md --lang <output_lang>
+uv run --project .claude/gatekit --frozen python .claude/gatekit/bin/gatekit.py jobs evaluate --prompt .gatekit/evaluator-prompt.md
 ```
 
 `evaluate` always runs the backend's read-only sandbox — the write gate is the

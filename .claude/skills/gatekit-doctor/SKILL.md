@@ -1,6 +1,6 @@
 ---
 name: gatekit-doctor
-description: Diagnose the gatekit install across eight axes — plugin files, hook registration, project state, spec set, contract freshness, workers, python, uv — then show the table and offer the printed fixes. Read-only, for when something looks wrong in a project that is already set up. Korean triggers — "닥터 돌려줘", "설치 점검해줘", "훅이 안 먹는 것 같아", "게이트킷 상태 확인". English triggers — "run doctor", "diagnose gatekit", "why are my hooks not firing", "check the install". NOT the built-in /doctor, which checks Claude Code itself and knows nothing about gatekit. NOT for installing a missing program — that is /gatekit-setup — and NOT for fixing the spec or approving a gate file.
+description: Diagnose the gatekit install across eight axes — gatekit files, hook registration, project state, spec set, contract freshness, workers, python, uv — then show the table and offer the printed fixes. Read-only, for when something looks wrong in a project that is already set up. Korean triggers — "닥터 돌려줘", "설치 점검해줘", "훅이 안 먹는 것 같아", "게이트킷 상태 확인". English triggers — "run doctor", "diagnose gatekit", "why are my hooks not firing", "check the install". NOT the built-in /doctor, which checks Claude Code itself and knows nothing about gatekit. NOT for installing a missing program — that is /gatekit-setup — and NOT for fixing the spec or approving a gate file.
 argument-hint: "[optional: --json]"
 allowed-tools: Read, Glob, Grep, Bash, PowerShell
 ---
@@ -35,7 +35,7 @@ Render one row per axis, in order, in `output_lang`:
 | # | axis | verdict | what it means |
 |---|------|---------|---------------|
 
-The eight axes are: plugin files, hooks registered, project state, spec set,
+The eight axes are: gatekit files, hooks registered, project state, spec set,
 contract freshness, workers, python, uv.
 
 Reading the verdicts:
@@ -60,7 +60,7 @@ sentence what it will change.
 
 Common cases:
 
-- **plugin files** fail — a gate script, the launcher, a `scripts/*.ps1`,
+- **gatekit files** fail — a gate script, the launcher, a `scripts/*.ps1`,
   `pyproject.toml` or `uv.lock` is missing or empty, so that part is not working
   at all. Restore it from git.
 - **hooks registered** fail — `.claude/settings.json` lacks an event, or a hook is
