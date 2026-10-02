@@ -8,20 +8,32 @@ for a PowerShell call (measured, ADR-0021). Without this gate
 
 This module extracts the files a PowerShell command **would write** and hands
 each one to :func:`write.decide_path`. It is a static reading of the command
-text — no execution — and it follows the Bash gate's three rules:
+text — no execution — and it follows these rules:
 
 * When nothing could be denied anyway (no active task scope, spec gate
   approved or absent) the command is allowed without parsing.
-* When a write's target **cannot be determined** — a variable, a
-  subexpression or a wildcard in the path, ``Invoke-Expression``, the call
-  operator on a variable or a script block, ``Start-Process``, a .NET call
-  such as ``[System.IO.File]::WriteAllText``, inline interpreter code such as
-  ``python -c`` or ``pwsh -Command``, a working-tree ``git`` subcommand, a
-  parameter this gate does not know — and a restriction is active, the
-  command is **denied**. "Could not tell" is not rounded to "allowed".
+* A target that was read is judged by the rules, whatever spelling it came
+  in: ``Set-Content x y -e utf8`` writes ``x`` (``-e`` is ``-Exclude``).
+* When a restriction is active and the target **cannot be determined**, the
+  command is **denied** where a write is certain or arbitrary code runs: a
+  variable, a subexpression or a wildcard in the path of a write cmdlet or a
+  redirect, a relative write after the location became unknown (``D:``,
+  ``cd $dir``), a parameter of a write cmdlet this gate does not know,
+  ``Invoke-Expression``, the call operator on a variable or a script block,
+  ``Start-Process``, a .NET call such as ``[System.IO.File]::WriteAllText``,
+  inline interpreter code such as ``python -c`` or ``pwsh -Command``, a
+  working-tree ``git`` subcommand. The reason says how to retry: a literal
+  path, or the Write/Edit tool.
+* What PowerShell itself takes as plain text is not a write: an argument such
+  as ``std::vector`` or ``tests/a.py::T::t``, any parameter of a command this
+  gate has no table for.
 * Programs invoked by name (``npm run build``, ``python script.py``,
   ``uv run ...``) are outside its reach: it reads PowerShell syntax, not what
   every binary does.
+
+The reading follows PowerShell 7, the shell this kit requires. Where Windows
+PowerShell 5.1 differs and would write, the stricter reading is kept (``sc``
+with a path is still ``Set-Content``).
 
 Paths are Windows paths: either separator, drive letters, resolved with
 ``ntpath`` against the event's ``cwd`` and handed to ``write.decide_path`` as
@@ -78,11 +90,21 @@ _LIST = "\x00"
 _MAX_DEPTH = 12
 
 _PARAM_RE = re.compile(r"^-[A-Za-z?]")
-_NUMBER_RE = re.compile(r"[+-]?\d[\d.]*(?:[A-Za-z]{1,2})?")
+#: A PowerShell number: hex, binary or decimal with an exponent, then a type
+#: suffix (u l ul s us y uy n d) and a multiplier (kb mb gb tb pb). Anything
+#: else that starts with a digit is a command name: ``7z``, ``1kbx``, ``2to3``
+#: (measured against the parser).
+_NUMBER_RE = re.compile(
+    r"(?i)[+-]?(?:0x[0-9a-f]+|0b[01]+|(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?)"
+    r"(?:u?[lsy]|u|n|d)?(?:[kmgtp]b)?")
 _ASSIGN_RE = re.compile(r"^(?:\[[^\]]*\])*\$[^=]*?(?:[-+*/%]|\?\?)?=(.*)$")
 _ASSIGN_OPS = {"=", "+=", "-=", "*=", "/=", "%=", "??="}
 _STATIC_RE = re.compile(r"\[([^\[\]]+)\]::(\w+)")
+_TYPE_RE = re.compile(r"\[([^\[\]]+)\]")
 _METHOD_RE = re.compile(r"\.(\w+)$")
+#: ``$doc.`` at the end of a word: the member name is on the next word or line.
+_SPLIT_MEMBER_RE = re.compile(r"(?:^|[\w\])}])\.$")
+_DRIVE_FUNCTION_RE = re.compile(r"[a-z]:")
 _PROVIDER_RE = re.compile(r"(?i)^(?:microsoft\.powershell\.core\\)?filesystem::")
 _LONG_DRIVE_RE = re.compile(r"^([A-Za-z][A-Za-z0-9_]+):")
 
@@ -91,6 +113,24 @@ _LONG_DRIVE_RE = re.compile(r"^([A-Za-z][A-Za-z0-9_]+):")
 #: ``Alias:`` and ``Function:`` are left out on purpose: an item written there
 #: is a new command name this gate would not recognise, as with ``Set-Alias``.
 _NON_FILE_DRIVES = {"env", "variable", "hklm", "hkcu", "cert", "wsman"}
+
+#: Functions PowerShell defines that change the location and take no argument:
+#: ``cd..`` is ``Set-Location ..`` (``cd~`` exists in PowerShell 7 only). The
+#: drive functions ``A:`` to ``Z:`` are matched by :data:`_DRIVE_FUNCTION_RE`.
+_LOCATION_FUNCTIONS = {"cd..": "..", "cd\\": "\\", "cd~": "~"}
+
+#: The verbs of ``sc.exe``. PowerShell 7 has no ``sc`` alias and runs the
+#: service control program (measured on 7.6 and 7.7); Windows PowerShell 5.1
+#: reads ``sc`` as ``Set-Content``. See :func:`_is_sc_exe`.
+_SC_VERBS = {
+    "query", "queryex", "start", "pause", "interrogate", "continue", "stop",
+    "config", "description", "failure", "failureflag", "sidtype", "privs",
+    "managedaccount", "qc", "qdescription", "qfailure", "qfailureflag",
+    "qsidtype", "qprivs", "qtriggerinfo", "qpreferrednode", "qmanagedaccount",
+    "qprotection", "quserservice", "delete", "create", "control", "sdshow",
+    "sdset", "showsid", "triggerinfo", "preferrednode", "getdisplayname",
+    "getkeyname", "enumdepend", "boot", "lock", "querylock",
+}
 
 #: Aliases of the cmdlets this gate reads.
 _ALIASES = {
@@ -145,6 +185,9 @@ _PURE_TYPES = {
 }
 #: File-system types: only the members listed in :data:`_IO_READS` are harmless.
 _IO_TYPES = {"io.file", "io.directory"}
+#: Types whose one-argument constructor opens a file for writing, so that a
+#: cast alone truncates it: ``[IO.StreamWriter]'x'`` (measured).
+_WRITER_TYPES = {"io.streamwriter"}
 _IO_READS = {
     "exists", "readalltext", "readalllines", "readallbytes", "readlines",
     "getfiles", "getdirectories", "getfilesystementries", "enumeratefiles",
@@ -178,7 +221,7 @@ class _LexError(Exception):
 class _Word:
     """One argument word: its literal value and what is known about it."""
 
-    __slots__ = ("value", "bare", "dynamic", "quoted", "first_bare", "nested", "calls")
+    __slots__ = ("value", "bare", "dynamic", "quoted", "first_bare", "ticked", "nested", "calls")
 
     def __init__(self, first_bare: bool = True) -> None:
         self.value = ""        # quotes removed, escapes applied; list items split by _LIST
@@ -186,6 +229,7 @@ class _Word:
         self.dynamic = ""      # why the value is not a literal ("" when it is)
         self.quoted = False
         self.first_bare = first_bare
+        self.ticked = False    # opens with a backtick escape: a bare word, never a string
         self.nested: List[Tuple[str, bool]] = []   # (text, is_hashtable) to read as statements
         self.calls: List[str] = []                 # instance methods called: .Name(
 
@@ -422,7 +466,12 @@ class _Lexer:
                 if nxt == "\n":
                     self.flush()  # line continuation
                 elif nxt:
-                    word = self.cur(False)
+                    if self.word is None:
+                        # `Set-Content is the command Set-Content (measured):
+                        # the escaped character is never syntax, so the word
+                        # is not a parameter, and it is not a string either.
+                        self.cur(False).ticked = True
+                    word = self.cur()
                     if nxt in _SPECIAL_ESCAPES:
                         word.mark("escape sequence")
                     word.value += nxt
@@ -630,43 +679,51 @@ class _Spec:
     Written as ``name|alias:K@n=slot`` items. ``K`` is the kind: ``P`` a path
     this cmdlet writes (wildcards are expanded), ``L`` the same taken
     literally, ``N`` a name joined to the path, ``R`` a path it only reads,
-    ``V`` any other value, ``X`` a filter that selects targets; no kind means
-    a switch. ``@n`` is the positional order and ``=slot`` names the parameter
-    whose positional slot this one fills (``-LiteralPath`` fills ``-Path``'s).
+    ``V`` any other value, ``X`` a filter that narrows the paths (it never
+    adds one, so the paths themselves are what is judged); no kind means a
+    switch. A ``*`` after the kind marks a dynamic parameter, one the
+    FileSystem provider adds. ``@n`` is the positional order and ``=slot``
+    names the parameter whose positional slot this one fills
+    (``-LiteralPath`` fills ``-Path``'s).
     """
 
-    __slots__ = ("kinds", "slots", "aliases", "positional", "common")
+    __slots__ = ("kinds", "slots", "aliases", "positional", "common", "dynamic")
 
     def __init__(self, text: str) -> None:
         self.kinds: Dict[str, str] = {}
         self.slots: Dict[str, str] = {}
         self.aliases: Dict[str, str] = {}
         self.common = set()
+        self.dynamic = set()
         order: List[Tuple[int, str]] = []
         for source, is_common in ((text, False), (_COMMON, True)):
             for item in source.split():
                 names, _, rest = item.partition(":")
                 canonical, *aliases = names.split("|")
-                match = re.fullmatch(r"([A-Z])?(?:@(\d))?(?:=(\w+))?", rest)
+                match = re.fullmatch(r"([A-Z])?(\*)?(?:@(\d))?(?:=(\w+))?", rest)
                 if match is None:  # pragma: no cover - a typo in a table below
                     raise ValueError("bad parameter spec: %s" % item)
                 self.kinds.setdefault(canonical, match.group(1) or "S")
-                self.slots.setdefault(canonical, match.group(3) or canonical)
+                self.slots.setdefault(canonical, match.group(4) or canonical)
                 for alias in aliases:
                     self.aliases.setdefault(alias, canonical)
+                if match.group(2):
+                    self.dynamic.add(canonical)
                 if is_common:
                     self.common.add(canonical)
-                elif match.group(2):
-                    order.append((int(match.group(2)), canonical))
+                elif match.group(3):
+                    order.append((int(match.group(3)), canonical))
         self.positional = [name for _, name in sorted(order)]
 
     def find(self, given: str) -> Optional[str]:
         """The parameter *given* names, by PowerShell's own rule (measured).
 
         An exact name or alias wins. Otherwise every name and alias that
-        starts with *given* is a candidate; several candidates are narrowed to
-        the cmdlet's own parameters (``-V`` is ``-Value``, not ``-Verbose``),
-        and anything but exactly one is ambiguous: ``None``.
+        starts with *given* is a candidate. Static parameters are bound before
+        dynamic ones (``Set-Content -e`` is ``-Exclude``, ``-en`` is
+        ``-Encoding``); several candidates are narrowed to the cmdlet's own
+        parameters (``-V`` is ``-Value``, not ``-Verbose``), and anything but
+        exactly one is ambiguous: ``None``.
         """
         key = given.lower()
         if key in self.kinds:
@@ -675,6 +732,7 @@ class _Spec:
             return self.aliases[key]
         found = {name for name in self.kinds if name.startswith(key)}
         found |= {name for alias, name in self.aliases.items() if alias.startswith(key)}
+        found = (found - self.dynamic) or found
         if len(found) > 1:
             found = {name for name in found if name not in self.common}
         return found.pop() if len(found) == 1 else None
@@ -690,7 +748,7 @@ _COMMON = (
 
 _LITERAL = "literalpath|pspath|lp:L=path"
 _CONTENT = ("path:P@0 " + _LITERAL + " value:V@1 passthru filter:X include:X exclude:X "
-            "force credential:V nonewline encoding:V asbytestream stream:V")
+            "force credential:V nonewline:* encoding:V* asbytestream:* stream:V*")
 _FILE_OUT = "filepath|path:P@0 literalpath|pspath|lp:L=filepath"
 _LOCATION = "path:P@0 " + _LITERAL + " passthru stackname:V"
 
@@ -698,7 +756,7 @@ _CMDLETS = {name: _Spec(text) for name, text in {
     "set-content": _CONTENT,
     "add-content": _CONTENT,
     "clear-content": "path:P@0 " + _LITERAL + " filter:X include:X exclude:X force "
-                     "credential:V stream:V",
+                     "credential:V stream:V*",
     "out-file": _FILE_OUT + " encoding:V@1 append force noclobber|nooverwrite width:V "
                 "nonewline inputobject:V",
     "tee-object": _FILE_OUT + " append encoding:V inputobject:V variable:V",
@@ -707,11 +765,11 @@ _CMDLETS = {name: _Spec(text) for name, text in {
                 "exclude:X credential:V",
     "copy-item": "path:R@0 literalpath|pspath|lp:R=path destination:P@1 container force "
                  "filter:V include:V exclude:V recurse passthru credential:V "
-                 "fromsession:V tosession:V",
+                 "fromsession:V* tosession:V*",
     "move-item": "path:P@0 " + _LITERAL + " destination:P@1 force filter:X include:X "
                  "exclude:X passthru credential:V",
     "remove-item": "path:P@0 " + _LITERAL + " filter:X include:X exclude:X recurse force "
-                   "credential:V stream:V",
+                   "credential:V stream:V*",
     "rename-item": "path:P@0 " + _LITERAL + " newname:N@1 force passthru credential:V",
     "export-csv": "path:P@0 " + _LITERAL + " delimiter:V@1 inputobject:V force "
                   "noclobber|nooverwrite encoding:V append useculture "
@@ -820,9 +878,6 @@ def _cmdlet(name: str, args: List[_Word], result: WriteTargets, cwd: Optional[st
     bound = _bind(spec, name, args, result)
     if bound is None:
         return
-    if any(spec.kinds[canonical] == "X" for canonical in bound):
-        result.mark_opaque("%s -Filter/-Include/-Exclude" % name)
-        return
 
     readable = True
     targets: List[Tuple[str, bool]] = []
@@ -879,15 +934,29 @@ def _location(name: str, args: List[_Word], cwd: Optional[str]) -> Optional[str]
     return _resolve(values[0], cwd) or None
 
 
+def _type_name(text: str) -> str:
+    name = text.lower().replace(" ", "")
+    return name[len("system."):] if name.startswith("system.") else name
+
+
 def _check_dotnet(word: _Word, result: WriteTargets) -> None:
     """Deny a .NET call unless the type or method is known not to write."""
-    statics = list(_STATIC_RE.finditer(word.bare))
-    if word.bare.count("::") != len(statics):
-        result.mark_opaque(".NET call")
+    bare = word.bare
+    statics = list(_STATIC_RE.finditer(bare))
+    if bare.count("::") != len(statics):
+        # A bare word is text to PowerShell: rg std::vector, pytest a.py::T::t
+        # (measured). A member access has a variable, an expression, a string
+        # or a type literal before the ::, or its member on the next word.
+        if word.dynamic or word.quoted or "]::" in bare or bare.endswith("::"):
+            result.mark_opaque(".NET call")
+    if (word.dynamic or word.quoted) and _SPLIT_MEMBER_RE.search(bare):
+        # $doc.<newline>Save('x') is one call (measured): the name comes next.
+        result.mark_opaque(".NET member access split across words")
+    for match in _TYPE_RE.finditer(bare):
+        if _type_name(match.group(1)) in _WRITER_TYPES:
+            result.mark_opaque(".NET type [%s]" % match.group(1))
     for match in statics:
-        type_name = match.group(1).lower().replace(" ", "")
-        if type_name.startswith("system."):
-            type_name = type_name[len("system."):]
+        type_name = _type_name(match.group(1))
         member = match.group(2).lower()
         if type_name in _IO_TYPES:
             harmless = member in _IO_READS
@@ -910,9 +979,42 @@ def _command_name(value: str) -> str:
 
 def _is_expression(word: _Word) -> bool:
     """True when a statement starting with *word* is an expression, not a command."""
+    if word.ticked:
+        return False  # `Set-Content: an escaped first character still names a command
     if not word.first_bare:
         return True  # starts with a quote: a string, PowerShell prints it
-    return word.bare[:1] in "$(@[{!+,-" or bool(_NUMBER_RE.fullmatch(word.bare))
+    if word.bare and word.bare[0] in "$(@[{!+,-":
+        return True
+    # A number only when the whole word is one: 7z, 7'z' and 7`z are commands.
+    return word.bare == word.value and bool(_NUMBER_RE.fullmatch(word.bare))
+
+
+def _is_sc_exe(raw: str, args: List[_Word]) -> bool:
+    """True when ``sc`` is the service control program, not ``Set-Content``.
+
+    PowerShell 7 has no ``sc`` alias: the name always runs ``sc.exe``. Windows
+    PowerShell 5.1 still has it, so ``sc`` followed by anything but one of
+    ``sc.exe``'s own verbs keeps being read as ``Set-Content``. In PowerShell
+    7 such a line only prints usage, so nothing ordinary is refused by that.
+    """
+    if raw.lower() != "sc":
+        return True  # sc.exe, or a path to it: never an alias
+    if not args:
+        return True
+    first = args[0]  # a verb, or \\server before the verb
+    return not first.dynamic and (
+        first.value.lower() in _SC_VERBS or bool(re.fullmatch(r"\\\\[^\\/]+", first.value)))
+
+
+def _location_function(raw: str, cwd: Optional[str]) -> Tuple[bool, Optional[str]]:
+    """Read ``cd..``, ``cd\\``, ``cd~`` and ``D:``: (is one, the cwd after it)."""
+    name = raw.lower()
+    if name in _LOCATION_FUNCTIONS:
+        return True, (_resolve(_LOCATION_FUNCTIONS[name], cwd) or None)
+    if _DRIVE_FUNCTION_RE.fullmatch(name):
+        # Another drive's location is whatever the session left there: unknown.
+        return True, (cwd if cwd is not None and cwd[:2].lower() == name else None)
+    return False, cwd
 
 
 def _interpreter(name: str, args: List[_Word], result: WriteTargets) -> None:
@@ -1079,7 +1181,13 @@ def _command(words: List[Any], result: WriteTargets, cwd: Optional[str], lhs: bo
 
     if stray:
         result.mark_opaque("call operator")
-    return _dispatch(_command_name(first.value), rest, result, cwd)
+    moves, after = _location_function(first.value, cwd)
+    if moves:
+        return after
+    name = _command_name(first.value)
+    if name == "sc" and _is_sc_exe(first.value, rest):
+        return cwd  # a program invoked by name
+    return _dispatch(name, rest, result, cwd)
 
 
 def _statement(items: List[Any], result: WriteTargets, cwd: Optional[str], depth: int, lhs: bool) -> Optional[str]:
