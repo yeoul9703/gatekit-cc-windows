@@ -357,6 +357,19 @@ class TestScopesIntersectIgnoringCase(unittest.TestCase):
         self.assertFalse(ledger.globs_intersect("SRC/a.ts", "src/b.ts"))
 
 
+class TestBracketScopes(unittest.TestCase):
+    """Brackets are letters here too, the same rule as the write gate."""
+
+    def test_two_different_bracket_folders_do_not_intersect(self) -> None:
+        self.assertFalse(ledger.globs_intersect("src/app/[id]/**", "src/app/[slug]/**"))
+        self.assertFalse(ledger.globs_intersect("src/app/[id]/page.tsx", "src/app/i/page.tsx"))
+
+    def test_a_bracket_folder_intersects_itself_and_its_parent_glob(self) -> None:
+        self.assertTrue(ledger.globs_intersect("src/app/[id]/**", "src/app/[id]/page.tsx"))
+        self.assertTrue(ledger.globs_intersect("src/app/**", "src/app/[id]/page.tsx"))
+        self.assertTrue(ledger.globs_intersect("SRC/APP/[ID]/**", "src/app/[id]/edit.tsx"))
+
+
 class TestScopesIntersect(unittest.TestCase):
     """The documented pairwise heuristic, exercised directly."""
 

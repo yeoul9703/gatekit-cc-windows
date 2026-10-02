@@ -1,5 +1,7 @@
 # ADR-0004: The Bash tool is gated for writes, and unresolvable writes are denied
 
+Amended by ADR-0025 (2026-10-02): a reserved word and a command substitution are read; only a certain write or arbitrary code is denied when unreadable; the limits are listed there.
+
 ## Context
 
 `docs/ARCHITECTURE.md` §0 states that gates are hooks, not prose, and §3

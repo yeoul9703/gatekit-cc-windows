@@ -156,6 +156,10 @@ def matches(relpath: str, pattern: str) -> bool:
 
     Case is ignored on both sides (:func:`fold`): the path and the pattern
     name files on a case-insensitive file system.
+
+    A bracket is a letter, not a character set: ``src/app/[id]/page.tsx`` names
+    the folder ``[id]`` (the route folders of Next.js and its kin), and reading
+    it as "one of i, d" refused that very file while allowing ``src/app/i/``.
     """
     relpath = fold(relpath)
     pattern = fold(pattern.strip().replace("\\", "/"))
@@ -187,7 +191,7 @@ def _glob_match(parts: List[str], pats: List[str]) -> bool:
         return False
     if not parts:
         return False
-    if not fnmatch.fnmatchcase(parts[0], head):
+    if not fnmatch.fnmatchcase(parts[0], head.replace("[", "[[]")):
         return False
     return _glob_match(parts[1:], rest)
 

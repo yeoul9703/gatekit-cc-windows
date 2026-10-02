@@ -1797,11 +1797,16 @@ def _terminate_pid_windows(pid: int, signal_mod) -> bool:
     except (OSError, subprocess.SubprocessError):
         pass
     if not sent:
+        # taskkill /T ends the children first; a launcher (.venv python.exe, a .cmd shim) can
+        # then exit by itself before taskkill reaches it, and taskkill reports failure for a
+        # tree that is in fact gone. Gone is what was asked for.
+        if not _pid_alive(pid):
+            return True
         try:
             os.kill(pid, signal_mod.SIGTERM)  # TerminateProcess
             sent = True
         except OSError:
-            return False
+            return not _pid_alive(pid)
     deadline = time.time() + 5.0
     while time.time() < deadline and _pid_alive(pid):
         time.sleep(0.05)

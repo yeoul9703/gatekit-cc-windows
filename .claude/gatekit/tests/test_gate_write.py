@@ -315,6 +315,131 @@ class TestTaskWriteScope(WriteGateProject):
     def test_no_task_env_skips_rule_b(self) -> None:
         self.assertIsNone(write_gate.handle(self.event(str(self.root / "src" / "billing" / "x.ts"))))
 
+    # -- a name after "**": src/**/x.ts ------------------------------------
+    def test_scope_with_a_name_after_double_star_allows_that_file_at_any_depth(self) -> None:
+        self.write_task(["src/**/x.ts"])
+        self.apply_env()
+        for rel in ("src/x.ts", "src/a/x.ts", "src/a/b/c/x.ts"):
+            with self.subTest(rel=rel):
+                self.assertIsNone(write_gate.handle(self.event(str(self.root / rel))))
+                self.assertIsNone(write_gate.handle(self.event(rel)))
+
+    def test_scope_with_a_name_after_double_star_denies_everything_else(self) -> None:
+        self.write_task(["src/**/x.ts"])
+        self.apply_env()
+        for rel in ("src/a/y.ts", "src/a/x.tsx", "src/a/ax.ts", "src/a/x.ts/inner.ts", "x.ts",
+                    "lib/a/x.ts", "srcx/a/x.ts", "src/a", "spec/x.ts", "docs/x.ts"):
+            with self.subTest(rel=rel):
+                result = write_gate.handle(self.event(str(self.root / rel)))
+                self.assertIsNotNone(result)
+                self.assertEqual(result["hookSpecificOutput"]["permissionDecision"], "deny")
+
+    def test_scope_with_a_name_after_double_star_ignores_case(self) -> None:
+        self.write_task(["src/**/x.ts"])
+        self.apply_env()
+        for rel in ("SRC/X.TS", "Src/Auth/X.ts", "SRC/A/B/x.TS"):
+            with self.subTest(rel=rel):
+                self.assertIsNone(write_gate.handle(self.event(str(self.root / rel))))
+        # the other spelling of a path outside the scope is outside it too
+        for rel in ("SRC/A/Y.TS", "LIB/A/X.TS", "SRC/A/X.TSX"):
+            with self.subTest(rel=rel):
+                self.assertIsNotNone(write_gate.handle(self.event(str(self.root / rel))))
+        self.write_task(["SRC/**/X.TS"])
+        self.assertIsNone(write_gate.handle(self.event(str(self.root / "src" / "deep" / "x.ts"))))
+        self.assertIsNotNone(write_gate.handle(self.event(str(self.root / "src" / "deep" / "y.ts"))))
+
+    def test_one_matching_pattern_among_several_is_enough(self) -> None:
+        self.write_task(["docs/**/notes.md", "src/**/x.ts"])
+        self.apply_env()
+        self.assertIsNone(write_gate.handle(self.event(str(self.root / "src" / "a" / "x.ts"))))
+        self.assertIsNone(write_gate.handle(self.event(str(self.root / "docs" / "a" / "b" / "notes.md"))))
+        self.assertIsNotNone(write_gate.handle(self.event(str(self.root / "docs" / "a" / "x.ts"))))
+        self.assertIsNotNone(write_gate.handle(self.event(str(self.root / "src" / "a" / "notes.md"))))
+
+
+class TestBracketsAreLetters(unittest.TestCase):
+    """A scope names folders as they are on disk. Next.js and its kin use
+    ``[id]``, ``[...slug]`` and ``[[...slug]]`` as folder names."""
+
+    def test_a_bracket_folder_matches_itself_and_nothing_else(self) -> None:
+        pattern = "src/app/[id]/page.tsx"
+        self.assertTrue(write_gate.matches("src/app/[id]/page.tsx", pattern))
+        self.assertTrue(write_gate.matches("SRC/App/[ID]/page.tsx", pattern))
+        for other in ("src/app/i/page.tsx", "src/app/d/page.tsx", "src/app/id/page.tsx"):
+            self.assertFalse(write_gate.matches(other, pattern), other)
+
+    def test_brackets_combine_with_stars(self) -> None:
+        self.assertTrue(write_gate.matches("src/app/[id]/edit/page.tsx", "src/app/[id]/**"))
+        self.assertTrue(write_gate.matches("src/app/blog/[...slug]/page.tsx", "src/app/**/[...slug]/*.tsx"))
+        self.assertTrue(write_gate.matches("src/app/[[...slug]]/page.tsx", "src/app/[[...slug]]/page.tsx"))
+        self.assertFalse(write_gate.matches("src/app/x/edit/page.tsx", "src/app/[id]/**"))
+
+
+class TestNameAfterDoubleStar(unittest.TestCase):
+    """``matches`` with something after ``**`` (``src/**/x.ts``): the ``**`` segment stands
+    for any number of folders, none included, and what follows it still has to match."""
+
+    def yes(self, relpath: str, pattern: str) -> None:
+        self.assertTrue(write_gate.matches(relpath, pattern), "%r should match %r" % (relpath, pattern))
+
+    def no(self, relpath: str, pattern: str) -> None:
+        self.assertFalse(write_gate.matches(relpath, pattern), "%r must not match %r" % (relpath, pattern))
+
+    def test_the_named_file_matches_at_every_depth(self) -> None:
+        self.yes("src/x.ts", "src/**/x.ts")  # "**" stands for no folder at all
+        self.yes("src/a/x.ts", "src/**/x.ts")
+        self.yes("src/a/b/c/x.ts", "src/**/x.ts")
+
+    def test_another_name_or_another_place_does_not_match(self) -> None:
+        for relpath in ("src/a/y.ts", "src/a/x.tsx", "src/a/ax.ts", "src/a/x.ts/inner.ts",
+                        "x.ts", "src", "src/a", "lib/a/x.ts", "srcx/a/x.ts", "a/src/x.ts"):
+            with self.subTest(relpath=relpath):
+                self.no(relpath, "src/**/x.ts")
+
+    def test_case_is_ignored_on_both_sides(self) -> None:
+        self.yes("SRC/A/X.TS", "src/**/x.ts")
+        self.yes("src/a/x.ts", "SRC/**/X.TS")
+        self.yes("Src/Deep/Er/X.Ts", "sRC/**/x.tS")
+        self.no("SRC/A/Y.TS", "src/**/x.ts")
+        self.no("LIB/A/X.TS", "src/**/x.ts")
+
+    def test_double_star_first(self) -> None:
+        self.yes("x.ts", "**/x.ts")
+        self.yes("a/b/x.ts", "**/x.ts")
+        self.no("a/b/y.ts", "**/x.ts")
+        self.no("a/x.ts/b", "**/x.ts")
+
+    def test_a_wildcard_name_after_double_star_stays_in_one_segment(self) -> None:
+        self.yes("src/b.test.ts", "src/**/*.test.ts")
+        self.yes("src/a/deep/b.test.ts", "src/**/*.test.ts")
+        self.no("src/a/b.ts", "src/**/*.test.ts")
+        self.no("src/a/b.test.ts/c.ts", "src/**/*.test.ts")
+
+    def test_a_folder_after_double_star(self) -> None:
+        self.yes("src/a/test/b/c.ts", "src/**/test/**")
+        self.yes("src/test/a.ts", "src/**/test/**")
+        self.yes("src/a/test", "src/**/test/**")  # a trailing "**" also takes no part
+        self.no("src/a/tests/c.ts", "src/**/test/**")
+        self.no("lib/test/a.ts", "src/**/test/**")
+
+    def test_double_star_gives_parts_back_to_what_follows(self) -> None:
+        # the first "a" has to be taken by "**" so that the second one matches the pattern's "a"
+        self.yes("src/a/a/x.ts", "src/**/a/x.ts")
+        self.yes("src/a/x.ts", "src/**/a/x.ts")
+        self.no("src/b/x.ts", "src/**/a/x.ts")
+        self.no("src/a/b/x.ts", "src/**/a/x.ts")
+        self.yes("src/a/b/x.ts", "src/**/a/**/x.ts")
+
+    def test_two_double_stars_in_a_row(self) -> None:
+        self.yes("src/x.ts", "src/**/**/x.ts")
+        self.yes("src/a/b/x.ts", "src/**/**/x.ts")
+        self.no("src/a/b/y.ts", "src/**/**/x.ts")
+
+    def test_the_pattern_may_be_written_with_a_dot_prefix_or_backslashes(self) -> None:
+        self.yes("src/a/x.ts", "./src/**/x.ts")
+        self.yes("src/a/x.ts", "src\\**\\x.ts")
+        self.no("src/a/y.ts", "src\\**\\x.ts")
+
 
 class TestSubprocessInvocation(WriteGateProject):
     """The gate must run as a standalone script with no PYTHONPATH help."""
@@ -382,5 +507,3 @@ class TestSubprocessInvocation(WriteGateProject):
 
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()
-
-

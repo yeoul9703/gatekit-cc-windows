@@ -132,14 +132,20 @@ def _literal_prefix(pattern: str) -> str:
     """
     segments: List[str] = []
     for segment in pattern.split("/"):
-        if any(ch in segment for ch in "*?["):
+        if any(ch in segment for ch in "*?"):
             break
         segments.append(segment)
     return "/".join(segments)
 
 
 def _has_wildcard(pattern: str) -> bool:
-    return any(ch in pattern for ch in "*?[")
+    return any(ch in pattern for ch in "*?")
+
+
+def _fnmatch(text: str, pattern: str) -> bool:
+    """``fnmatch`` with a bracket read as a letter, the rule the write gate uses:
+    ``src/app/[id]/**`` names the folder ``[id]``, not "one of i, d"."""
+    return fnmatch.fnmatchcase(text, pattern.replace("[", "[[]"))
 
 
 def globs_intersect(left: str, right: str) -> bool:
@@ -173,7 +179,7 @@ def globs_intersect(left: str, right: str) -> bool:
         return True
 
     # (2) direct glob match in either direction.
-    if fnmatch.fnmatchcase(left_n, right_n) or fnmatch.fnmatchcase(right_n, left_n):
+    if _fnmatch(left_n, right_n) or _fnmatch(right_n, left_n):
         return True
 
     left_prefix, right_prefix = _literal_prefix(left_n), _literal_prefix(right_n)
@@ -185,9 +191,9 @@ def globs_intersect(left: str, right: str) -> bool:
         return True
 
     # (3) match either pattern against the other's literal prefix.
-    if right_prefix and fnmatch.fnmatchcase(right_prefix, left_n):
+    if right_prefix and _fnmatch(right_prefix, left_n):
         return True
-    if left_prefix and fnmatch.fnmatchcase(left_prefix, right_n):
+    if left_prefix and _fnmatch(left_prefix, right_n):
         return True
 
     # (4) directory containment between the two literal prefixes.

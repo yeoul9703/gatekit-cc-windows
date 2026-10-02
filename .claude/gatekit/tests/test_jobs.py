@@ -1282,15 +1282,45 @@ class TestStop(JobTestCase):
         self.assertNotIn("write-note", result["signalled"])
         self.assertIsNone(victim.poll())
 
+    def _terminate_with(self, alive: bool, kill_error: str):
+        """Run ``_terminate_pid_windows`` with a taskkill that reports failure (255)."""
+        import signal
+        from unittest import mock
+
+        class Failed:
+            returncode = 255
+
+        with mock.patch.object(jobs.subprocess, "run", return_value=Failed()):
+            with mock.patch.object(jobs, "_pid_alive", return_value=alive):
+                with mock.patch.object(jobs.os, "kill", side_effect=OSError(kill_error)) as kill:
+                    return jobs._terminate_pid_windows(4242, signal), kill
+
+    def test_a_tree_that_is_already_gone_counts_as_terminated(self) -> None:
+        # taskkill /T can end the children, see the launcher exit by itself, and report 255.
+        done, kill = self._terminate_with(alive=False, kill_error="gone")
+        self.assertTrue(done)
+        kill.assert_not_called()
+
+    def test_a_pid_that_cannot_be_signalled_and_is_still_alive_is_not_terminated(self) -> None:
+        done, _ = self._terminate_with(alive=True, kill_error="denied")
+        self.assertFalse(done)
+
     def test_terminate_escalates_to_sigkill_when_sigterm_is_ignored(self) -> None:
         import subprocess
         import time as _time
 
-        stubborn = subprocess.Popen([sys.executable, "-c",
+        # The interpreter itself, not the .venv's python.exe: that one is a launcher which starts
+        # the interpreter as its child, so the pid would name a tree of two. `taskkill /T` ends
+        # the child first, and on a busy machine the launcher exits on its own before taskkill
+        # reaches it ("no running instance", exit code 255). `_terminate_pid` then returns False
+        # for a process that is gone, which failed this test about once in thirty runs. With one
+        # process there is no such order to lose.
+        interpreter = getattr(sys, "_base_executable", None) or sys.executable
+        stubborn = subprocess.Popen([interpreter, "-c",
                                      "import signal, time; signal.signal(signal.SIGTERM, signal.SIG_IGN); "
                                      "print('armed', flush=True); time.sleep(30)"],
                                     stdout=subprocess.PIPE)
-        self.addCleanup(lambda: (stubborn.kill(), stubborn.wait()))
+        self.addCleanup(lambda: (stubborn.kill(), stubborn.wait(), stubborn.stdout.close()))
         stubborn.stdout.readline()  # wait until the handler is installed
         started = _time.time()
         self.assertTrue(jobs._terminate_pid(stubborn.pid, grace_s=0.3))

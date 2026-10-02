@@ -1,6 +1,6 @@
 # ADR-0021: The PowerShell tool is gated for writes, and a Skill call records its pipeline
 
-Status: accepted 2026-10-02. Extends ADR-0004 (the Bash write gate) to the
+Status: accepted 2026-10-02; decision 6 and the known limits are amended by ADR-0025 (what is denied when a command cannot be read). Extends ADR-0004 (the Bash write gate) to the
 PowerShell tool and settles the item ADR-0020 left open under "Not decided
 here": recording the active pipeline when the model loads a skill on its own.
 

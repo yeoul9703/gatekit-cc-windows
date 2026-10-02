@@ -14,3 +14,6 @@ tmp/
 
 # uv virtualenv (created by scripts/setup.ps1 / uv sync)
 .venv/
+
+# hypothesis example cache (property tests, dev group only)
+.hypothesis/
