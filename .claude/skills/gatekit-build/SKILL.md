@@ -2,7 +2,7 @@
 name: gatekit-build
 description: Run spec/04-tasks.md as worker jobs behind the gates — spawn workers per task, let the gates decide pass or fail, redelegate failures, and hand off to verify. Korean triggers — "이제 만들자", "만들기 시작하자", "빌드 시작해줘", "작업 실행해줘", "워커 돌려줘", "태스크 자동으로 만들어줘". English triggers — "start making it", "go ahead and build", "build it", "run the tasks", "start the workers", "execute the task list". Call it even when the spec or task file is missing — the skill names the step to do first. NOT for judging whether the result is done — that is /gatekit-verify.
 argument-hint: "[optional: task ids to build, comma-separated]"
-allowed-tools: Read, Write, Edit, Glob, Grep, Bash, PowerShell
+allowed-tools: Read, Write, Edit, Glob, Grep, Bash, PowerShell, Agent
 ---
 
 # /gatekit-build
