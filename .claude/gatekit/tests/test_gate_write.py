@@ -4,7 +4,6 @@ from __future__ import annotations
 import json
 import os
 import pathlib
-import subprocess
 import sys
 import tempfile
 import unittest
@@ -13,20 +12,24 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from gatekit import approval  # noqa: E402
 from gatekit.gates import write as write_gate  # noqa: E402
+from tests import isolation  # noqa: E402
 
 GATE_SCRIPT = pathlib.Path(__file__).resolve().parents[1] / "gatekit" / "gates" / "write.py"
 
 
-def run_gate_subprocess(event: dict, env_extra: "dict | None" = None) -> "tuple[int, str, str]":
-    """Invoke the gate exactly as Claude Code would: a script fed JSON on stdin."""
+def run_gate_subprocess(event: dict, env_extra: "dict | None" = None, *,
+                        cwd: pathlib.Path) -> "tuple[int, str, str]":
+    """Invoke the gate exactly as Claude Code would: a script fed JSON on stdin, standing
+    in the project folder (*cwd*, the test's own project; see tests/isolation.py)."""
     env = {k: v for k, v in os.environ.items() if not k.startswith("GATEKIT_")}
     env.pop("PYTHONPATH", None)
     # The reason is Korean. The registered hook goes through bin/gatekit.py, which
     # makes stdout UTF-8; the script run on its own takes the encoding from here.
     env["PYTHONIOENCODING"] = "utf-8"
     env.update(env_extra or {})
-    proc = subprocess.run(
+    proc = isolation.run_gate(
         [sys.executable, str(GATE_SCRIPT)],
+        cwd=cwd,
         input=json.dumps(event),
         capture_output=True,
         text=True,
@@ -465,12 +468,12 @@ class TestSubprocessInvocation(WriteGateProject):
 
     def test_allow_prints_nothing_and_exits_zero(self) -> None:
         approval.approve(self.root, "spec/05-gate.md")
-        code, out, err = run_gate_subprocess(self.event(str(self.root / "src" / "app.ts")))
+        code, out, err = run_gate_subprocess(self.event(str(self.root / "src" / "app.ts")), cwd=self.root)
         self.assertEqual(code, 0, err)
         self.assertEqual(out.strip(), "")
 
     def test_deny_prints_payload_and_exits_zero(self) -> None:
-        code, out, err = run_gate_subprocess(self.event(str(self.root / "src" / "app.ts")))
+        code, out, err = run_gate_subprocess(self.event(str(self.root / "src" / "app.ts")), cwd=self.root)
         self.assertEqual(code, 0, err)
         self.assertEqual(decision(out), "deny")
         reason = json.loads(out)["hookSpecificOutput"]["permissionDecisionReason"]
@@ -487,6 +490,7 @@ class TestSubprocessInvocation(WriteGateProject):
         code, out, _ = run_gate_subprocess(
             self.event(str(self.root / "other" / "x.ts")),
             env_extra={"GATEKIT_TASK_ID": "t", "GATEKIT_JOB_ID": "j"},
+            cwd=self.root,
         )
         self.assertEqual(code, 0)
         self.assertEqual(decision(out), "deny")
@@ -497,15 +501,16 @@ class TestSubprocessInvocation(WriteGateProject):
         runs.mkdir(parents=True, exist_ok=True)
         # A directory where the ledger file belongs makes every ledger op raise.
         (runs / "sess-write.json").mkdir()
-        code, out, err = run_gate_subprocess(self.event(str(self.root / "src" / "app.ts")))
+        code, out, err = run_gate_subprocess(self.event(str(self.root / "src" / "app.ts")), cwd=self.root)
         self.assertEqual(code, 0, err)
         # It must not crash; either it allowed or denied, but never a traceback.
         self.assertNotIn("Traceback", err)
 
     def test_empty_stdin_exits_zero(self) -> None:
         env = {k: v for k, v in os.environ.items() if not k.startswith("GATEKIT_")}
-        proc = subprocess.run(
+        proc = isolation.run_gate(
             [sys.executable, str(GATE_SCRIPT)],
+            cwd=self.root,
             input="",
             capture_output=True,
             text=True,
@@ -516,8 +521,9 @@ class TestSubprocessInvocation(WriteGateProject):
 
     def test_malformed_stdin_exits_zero(self) -> None:
         env = {k: v for k, v in os.environ.items() if not k.startswith("GATEKIT_")}
-        proc = subprocess.run(
+        proc = isolation.run_gate(
             [sys.executable, str(GATE_SCRIPT)],
+            cwd=self.root,
             input="{not json",
             capture_output=True,
             text=True,

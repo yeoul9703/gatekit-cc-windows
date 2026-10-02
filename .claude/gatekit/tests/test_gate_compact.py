@@ -19,6 +19,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from gatekit import jobs  # noqa: E402
 from gatekit.gates import compact as compact_gate  # noqa: E402
+from tests import isolation  # noqa: E402
 
 GATE_SCRIPT = pathlib.Path(__file__).resolve().parents[1] / "gatekit" / "gates" / "compact.py"
 
@@ -135,18 +136,20 @@ class TestRobustness(CompactProject):
 
     def test_subprocess_exits_zero(self) -> None:
         self.make_job({"a": "passed"})
-        proc = subprocess.run(
-            [sys.executable, str(GATE_SCRIPT)],
+        proc = isolation.run_gate(
+            [sys.executable, str(GATE_SCRIPT)], cwd=self.root,
             input=json.dumps(self.event()).encode("utf-8"),
             stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         self.assertEqual(proc.returncode, 0)
         self.assertIn("a", self.progress())
 
     def test_malformed_stdin_exits_zero(self) -> None:
-        proc = subprocess.run(
-            [sys.executable, str(GATE_SCRIPT)],
+        # No event means no cwd: the gate reads the jobs of its working directory's project.
+        proc = isolation.run_gate(
+            [sys.executable, str(GATE_SCRIPT)], cwd=self.root,
             input=b"not json", stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         self.assertEqual(proc.returncode, 0)
+        self.assertEqual(self.progress(), "")
 
 
 if __name__ == "__main__":

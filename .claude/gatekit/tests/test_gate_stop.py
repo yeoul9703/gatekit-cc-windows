@@ -4,7 +4,6 @@ from __future__ import annotations
 import json
 import os
 import pathlib
-import subprocess
 import sys
 import tempfile
 import unittest
@@ -13,6 +12,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from gatekit import contract, ledger  # noqa: E402
 from gatekit.gates import stop as stop_gate  # noqa: E402
+from tests import isolation  # noqa: E402
 
 GATE_SCRIPT = pathlib.Path(__file__).resolve().parents[1] / "gatekit" / "gates" / "stop.py"
 PY = sys.executable
@@ -204,8 +204,9 @@ class TestSubprocess(StopProject):
         # The reason is Korean. The registered hook goes through bin/gatekit.py, which
         # makes stdout UTF-8; the script run on its own takes the encoding from here.
         env["PYTHONIOENCODING"] = "utf-8"
-        proc = subprocess.run(
+        proc = isolation.run_gate(
             [sys.executable, str(GATE_SCRIPT)],
+            cwd=self.root,
             input=json.dumps(event),
             capture_output=True,
             text=True,
@@ -254,8 +255,11 @@ class TestSubprocess(StopProject):
 
     def test_malformed_stdin_exits_zero(self) -> None:
         env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
-        proc = subprocess.run(
+        # No event means no cwd: the gate takes the project of its working directory,
+        # and in a managed project it records the stop under "unknown-session".
+        proc = isolation.run_gate(
             [sys.executable, str(GATE_SCRIPT)],
+            cwd=self.root,
             input="{oops",
             capture_output=True,
             text=True,
@@ -263,6 +267,7 @@ class TestSubprocess(StopProject):
             timeout=30,
         )
         self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertTrue(ledger.Ledger.exists(self.root, "unknown-session"))
 
 
 if __name__ == "__main__":  # pragma: no cover

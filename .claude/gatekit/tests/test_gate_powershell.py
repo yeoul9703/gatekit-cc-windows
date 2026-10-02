@@ -4,7 +4,6 @@ from __future__ import annotations
 import json
 import os
 import pathlib
-import subprocess
 import sys
 import tempfile
 import unittest
@@ -13,6 +12,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from gatekit import approval, ledger  # noqa: E402
 from gatekit.gates import powershell as ps_gate  # noqa: E402
+from tests import isolation  # noqa: E402
 
 GATE_SCRIPT = pathlib.Path(__file__).resolve().parents[1] / "gatekit" / "gates" / "powershell.py"
 
@@ -780,13 +780,17 @@ class TestOrdinaryCommandsAreRead(unittest.TestCase):
             self.assertEqual(targets_of(cmd), ([], False), cmd)
 
 
-def run_gate_subprocess(event: dict, env_extra: "dict | None" = None, raw: "str | None" = None):
+def run_gate_subprocess(event: dict, env_extra: "dict | None" = None, raw: "str | None" = None,
+                        *, cwd: pathlib.Path):
+    """The gate as a process standing in *cwd*, the test's own project: an event without
+    a usable ``cwd`` sends the gate to its working directory (tests/isolation.py)."""
     env = {k: v for k, v in os.environ.items() if not k.startswith("GATEKIT_")}
     env.pop("PYTHONPATH", None)
     env["PYTHONIOENCODING"] = "utf-8"
     env.update(env_extra or {})
-    proc = subprocess.run(
+    proc = isolation.run_gate(
         [sys.executable, str(GATE_SCRIPT)],
+        cwd=cwd,
         input=raw if raw is not None else json.dumps(event),
         capture_output=True,
         text=True,
@@ -1116,24 +1120,24 @@ class TestTaskScope(PowerShellGateProject):
 
 class TestSubprocessContract(PowerShellGateProject):
     def test_deny_is_json_on_stdout_exit_zero(self) -> None:
-        code, out, _ = run_gate_subprocess(self.event("Set-Content src/x.ts y"))
+        code, out, _ = run_gate_subprocess(self.event("Set-Content src/x.ts y"), cwd=self.root)
         self.assertEqual(code, 0)
         self.assertEqual(json.loads(out)["hookSpecificOutput"]["permissionDecision"], "deny")
 
     def test_allow_prints_nothing_exit_zero(self) -> None:
-        code, out, _ = run_gate_subprocess(self.event("Get-ChildItem"))
+        code, out, _ = run_gate_subprocess(self.event("Get-ChildItem"), cwd=self.root)
         self.assertEqual(code, 0)
         self.assertEqual(out.strip(), "")
 
     def test_internal_error_still_exits_zero(self) -> None:
-        code, out, _ = run_gate_subprocess({}, raw="this is not json")
+        code, out, _ = run_gate_subprocess({}, raw="this is not json", cwd=self.root)
         self.assertEqual(code, 0)
         self.assertEqual(out.strip(), "")
 
     def test_non_string_command_exits_zero(self) -> None:
         event = self.event("x")
         event["tool_input"] = {"command": ["not", "a", "string"]}
-        code, out, _ = run_gate_subprocess(event)
+        code, out, _ = run_gate_subprocess(event, cwd=self.root)
         self.assertEqual(code, 0)
         self.assertEqual(out.strip(), "")
 
@@ -1141,7 +1145,7 @@ class TestSubprocessContract(PowerShellGateProject):
         # A directory where config.json should be: whatever the gate makes of
         # it, the hook must not fail.
         (self.root / ".gatekit" / "config.json").mkdir()
-        code, out, err = run_gate_subprocess(self.event("Set-Content src/x.ts y"))
+        code, out, err = run_gate_subprocess(self.event("Set-Content src/x.ts y"), cwd=self.root)
         self.assertEqual(code, 0, err)
         self.assertNotIn("Traceback", err)
 
@@ -1193,8 +1197,9 @@ class TestSubprocessContract(PowerShellGateProject):
     def test_through_the_cli_dispatcher(self) -> None:
         launcher = pathlib.Path(__file__).resolve().parents[1] / "bin" / "gatekit.py"
         env = {k: v for k, v in os.environ.items() if not k.startswith("GATEKIT_")}
-        proc = subprocess.run(
+        proc = isolation.run_gate(
             [sys.executable, str(launcher), "_gate", "powershell"],
+            cwd=self.root,
             input=json.dumps(self.event("'x' > src/x.ts")).encode("utf-8"),
             capture_output=True, env=env, timeout=30,
         )

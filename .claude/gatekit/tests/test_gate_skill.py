@@ -4,7 +4,6 @@ from __future__ import annotations
 import json
 import os
 import pathlib
-import subprocess
 import sys
 import tempfile
 import unittest
@@ -14,6 +13,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from gatekit import ledger  # noqa: E402
 from gatekit.gates import prompt as prompt_gate  # noqa: E402
 from gatekit.gates import skill as skill_gate  # noqa: E402
+from tests import isolation  # noqa: E402
 
 GATE_SCRIPT = pathlib.Path(__file__).resolve().parents[1] / "gatekit" / "gates" / "skill.py"
 
@@ -234,8 +234,9 @@ class TestUnmanagedProject(unittest.TestCase):
 class TestSubprocess(SkillProject):
     def _run(self, event: "dict | None", raw: "str | None" = None, argv: "list | None" = None):
         env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
-        proc = subprocess.run(
+        proc = isolation.run_gate(
             argv or [sys.executable, str(GATE_SCRIPT)],
+            cwd=self.root,
             input=raw if raw is not None else json.dumps(event),
             capture_output=True,
             text=True,

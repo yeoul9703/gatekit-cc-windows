@@ -4,7 +4,6 @@ from __future__ import annotations
 import json
 import os
 import pathlib
-import subprocess
 import sys
 import tempfile
 import unittest
@@ -13,6 +12,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from gatekit import approval, ledger, paths  # noqa: E402
 from gatekit.gates import bash as bash_gate  # noqa: E402
+from tests import isolation  # noqa: E402
 
 GATE_SCRIPT = pathlib.Path(__file__).resolve().parents[1] / "gatekit" / "gates" / "bash.py"
 
@@ -406,15 +406,19 @@ class TestExtractCwd(unittest.TestCase):
         self.assertEqual(targets_of("cat > x", "/proj")[0], ["/proj/x"])
 
 
-def run_gate_subprocess(event: dict, env_extra: "dict | None" = None, raw: "str | None" = None):
+def run_gate_subprocess(event: dict, env_extra: "dict | None" = None, raw: "str | None" = None,
+                        *, cwd: pathlib.Path):
+    """The gate as a process standing in *cwd*, the test's own project: an event without
+    a usable ``cwd`` sends the gate to its working directory (tests/isolation.py)."""
     env = {k: v for k, v in os.environ.items() if not k.startswith("GATEKIT_")}
     env.pop("PYTHONPATH", None)
     # The reason is Korean. The registered hook goes through bin/gatekit.py, which
     # makes stdout UTF-8; the script run on its own takes the encoding from here.
     env["PYTHONIOENCODING"] = "utf-8"
     env.update(env_extra or {})
-    proc = subprocess.run(
+    proc = isolation.run_gate(
         [sys.executable, str(GATE_SCRIPT)],
+        cwd=cwd,
         input=raw if raw is not None else json.dumps(event),
         capture_output=True,
         text=True,
@@ -614,24 +618,24 @@ class TestTaskScope(BashGateProject):
 
 class TestSubprocessContract(BashGateProject):
     def test_deny_is_json_on_stdout_exit_zero(self) -> None:
-        code, out, _ = run_gate_subprocess(self.event("cat > src/x.ts"))
+        code, out, _ = run_gate_subprocess(self.event("cat > src/x.ts"), cwd=self.root)
         self.assertEqual(code, 0)
         self.assertEqual(json.loads(out)["hookSpecificOutput"]["permissionDecision"], "deny")
 
     def test_allow_prints_nothing_exit_zero(self) -> None:
-        code, out, _ = run_gate_subprocess(self.event("ls"))
+        code, out, _ = run_gate_subprocess(self.event("ls"), cwd=self.root)
         self.assertEqual(code, 0)
         self.assertEqual(out.strip(), "")
 
     def test_internal_error_still_exits_zero(self) -> None:
-        code, out, _ = run_gate_subprocess({}, raw="this is not json")
+        code, out, _ = run_gate_subprocess({}, raw="this is not json", cwd=self.root)
         self.assertEqual(code, 0)
         self.assertEqual(out.strip(), "")
 
     def test_handler_exception_is_logged_and_allows(self) -> None:
         event = self.event("cat > src/x.ts")
         event["tool_input"] = {"command": ["not", "a", "string"]}
-        code, out, _ = run_gate_subprocess(event)
+        code, out, _ = run_gate_subprocess(event, cwd=self.root)
         self.assertEqual(code, 0)
 
 

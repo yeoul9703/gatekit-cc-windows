@@ -19,6 +19,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from gatekit import ledger  # noqa: E402
 from gatekit.gates import release as release_gate  # noqa: E402
 from gatekit.gates import spawn as spawn_gate  # noqa: E402
+from tests import isolation  # noqa: E402
 
 GATE_SCRIPT = pathlib.Path(__file__).resolve().parents[1] / "gatekit" / "gates" / "release.py"
 
@@ -320,9 +321,15 @@ class TestUnmanaged(ReleaseProject):
 
 class TestSubprocess(ReleaseProject):
     def run_gate(self, stdin: str) -> subprocess.CompletedProcess:
+        """The gate as a process whose working directory is this test's project.
+
+        An event without a usable ``cwd`` sends the gate to its process's
+        working directory. Left at the test runner's own, that is this
+        repository, and the gate wrote to its real ``.gatekit/runs/``.
+        """
         env = {k: v for k, v in os.environ.items() if not k.startswith("GATEKIT_")}
-        return subprocess.run([sys.executable, str(GATE_SCRIPT)], input=stdin,
-                              capture_output=True, text=True, timeout=60, env=env)
+        return isolation.run_gate([sys.executable, str(GATE_SCRIPT)], cwd=self.root, input=stdin,
+                                  capture_output=True, text=True, timeout=60, env=env)
 
     def test_release_via_subprocess_prints_nothing(self) -> None:
         self.spawn(self.pre(CALL_A, "probe-bg-a", ["src/a/**"]))
@@ -352,9 +359,17 @@ class TestSubprocess(ReleaseProject):
         self.spawn(self.pre(CALL_A, "probe-bg-a", ["src/a/**"]))
         event = self.stop(AGENT_A)
         event["cwd"] = 12345  # not a path: the handler raises before any work
+        log = self.root / ".gatekit" / "runs" / "hook-errors.log"
+        self.assertFalse(log.exists())
         proc = self.run_gate(json.dumps(event))
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertEqual(proc.stdout, "")
+        # The event names no project, so the line goes to the one the process stands in.
+        lines = log.read_text(encoding="utf-8").splitlines()
+        self.assertEqual(len(lines), 1, lines)
+        self.assertIn("SubagentStop", lines[0])
+        self.assertIn("TypeError", lines[0])
+        self.assertEqual(self.owners(), ["probe-bg-a"])  # nothing was released
 
     def test_empty_and_malformed_stdin_exit_zero(self) -> None:
         for stdin in ("", "{not json", "[1, 2]", "null"):
@@ -362,6 +377,7 @@ class TestSubprocess(ReleaseProject):
                 proc = self.run_gate(stdin)
                 self.assertEqual(proc.returncode, 0, proc.stderr)
                 self.assertEqual(proc.stdout, "")
+        self.assertEqual(list((self.root / ".gatekit").iterdir()), [])  # and no state
 
 
 if __name__ == "__main__":
