@@ -225,6 +225,39 @@ class TestScopes(TempProject):
         self.assertEqual(len(again.scope_conflicts(["src/auth/token.ts"])), 1)
 
 
+class TestReleaseScopes(TempProject):
+    def test_release_by_owner_keeps_the_others(self) -> None:
+        led = ledger.Ledger.load(self.root, "s1")
+        led.add_scope("a", ["src/a/**"])
+        led.add_scope("b", ["src/b/**"])
+        self.assertEqual(led.release_scopes("a"), 1)
+        self.assertEqual([s["owner"] for s in led.data["scopes"]], ["b"])
+        self.assertEqual(led.scope_conflicts(["src/a/x.py"]), [])
+        self.assertEqual(led.data["events"][-1]["kind"], "scopes_released")
+
+    def test_release_all_and_releasing_nothing(self) -> None:
+        led = ledger.Ledger.load(self.root, "s1")
+        led.add_scope("a", ["src/a/**"])
+        led.add_scope("b", "read-only")
+        self.assertEqual(led.release_scopes(), 2)
+        self.assertEqual(led.data["scopes"], [])
+        events = len(led.data["events"])
+        self.assertEqual(led.release_scopes(), 0)
+        self.assertEqual(len(led.data["events"]), events)  # nothing released, nothing logged
+
+    def test_cli_release_scopes(self) -> None:
+        led = ledger.Ledger.load(self.root, "s1")
+        led.add_scope("a", ["src/a/**"])
+        led.add_scope("b", ["src/b/**"])
+        led.save()
+        base = ["--root", str(self.root), "--session", "s1"]
+        self.assertEqual(ledger.run(["release-scopes", "a"] + base), 0)
+        self.assertEqual(len(ledger.Ledger.load(self.root, "s1").data["scopes"]), 1)
+        self.assertEqual(ledger.run(["release-scopes"] + base), 0)
+        self.assertEqual(ledger.Ledger.load(self.root, "s1").data["scopes"], [])
+        self.assertEqual(ledger.run(["release-scopes", "--root", str(self.root), "--session", "nope"]), 1)
+
+
 class TestScopesIntersect(unittest.TestCase):
     """The documented pairwise heuristic, exercised directly."""
 

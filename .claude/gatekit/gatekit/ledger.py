@@ -260,6 +260,22 @@ class Ledger:
             }
         )
 
+    def release_scopes(self, owner: Optional[str] = None) -> int:
+        """Drop recorded scopes and return how many were dropped.
+
+        A scope stays recorded for the whole session: nothing tells the ledger
+        that the agent holding it has finished, so a later round of agents over
+        the same files would be refused for ever. Releasing is the explicit
+        step that says "that agent is done". ``owner=None`` releases all.
+        """
+        scopes = self.data.get("scopes", [])
+        kept = [] if owner is None else [s for s in scopes if str(s.get("owner")) != owner]
+        dropped = len(scopes) - len(kept)
+        if dropped:
+            self.data["scopes"] = kept
+            self.append_event("scopes_released", {"owner": owner or "all", "count": dropped})
+        return dropped
+
     def scope_conflicts(self, write_scope: Scope) -> List[Dict[str, Any]]:
         """Return recorded scopes that intersect *write_scope*.
 
@@ -312,16 +328,17 @@ class Ledger:
 
 
 def run(argv: List[str]) -> int:
-    """``python3 -m gatekit ledger <show|init|set-pipeline> --session <id>``."""
+    """``gatekit.py ledger <show|init|set-pipeline|release-scopes> --session <id>``."""
     import argparse  # CLI only; the hooks that import ledger never parse arguments
 
     parser = argparse.ArgumentParser(prog="gatekit ledger", add_help=True)
-    parser.add_argument("action", choices=["show", "init", "set-pipeline"])
+    parser.add_argument("action", choices=["show", "init", "set-pipeline", "release-scopes"])
     parser.add_argument(
         "pipeline",
         nargs="?",
         default=None,
-        help="for set-pipeline: one of %s, or 'none'" % "/".join(PIPELINES),
+        help="for set-pipeline: one of %s, or 'none'; for release-scopes: an owner "
+             "label (default: every scope)" % "/".join(PIPELINES),
     )
     parser.add_argument("--root", default=None, help="project root (default: detected)")
     parser.add_argument("--session", required=True, help="session id")
@@ -336,6 +353,17 @@ def run(argv: List[str]) -> int:
         led = Ledger.load(root, args.session)
         led.save()
         print(str(Ledger.path_for(root, args.session)))
+        return 0
+
+    if args.action == "release-scopes":
+        if not Ledger.exists(root, args.session):
+            print(f"gatekit: no ledger for session '{args.session}'", file=sys.stderr)
+            return 1
+        led = Ledger.load(root, args.session)
+        owner = None if not args.pipeline or args.pipeline.lower() == "all" else args.pipeline
+        dropped = led.release_scopes(owner)
+        led.save()
+        print("released %d scope(s)" % dropped)
         return 0
 
     if args.action == "set-pipeline":

@@ -51,7 +51,9 @@ _MESSAGES = {
         "invalid": "gatekit: the ```{fence} fence is not usable: {detail}",
         "conflict": (
             "gatekit: write_scope {scope} overlaps a scope already active in this "
-            "session ({owners}). Narrow the scope or wait for that agent to finish."
+            "session ({owners}). Narrow the scope or wait for that agent to finish. "
+            "A scope stays recorded after its agent ends; once it has finished, "
+            "release it with: {release}"
         ),
     },
     "ko": {
@@ -63,7 +65,8 @@ _MESSAGES = {
         "invalid": "gatekit: ```{fence} 펜스를 사용할 수 없습니다: {detail}",
         "conflict": (
             "gatekit: write_scope {scope} 가 이 세션에서 이미 활성화된 범위와 겹칩니다 "
-            "({owners}). 범위를 좁히거나 해당 에이전트가 끝날 때까지 기다리세요."
+            "({owners}). 범위를 좁히거나 해당 에이전트가 끝날 때까지 기다리세요. "
+            "범위는 에이전트가 끝난 뒤에도 기록에 남습니다. 끝났다면 이 명령으로 해제하세요: {release}"
         ),
     },
 }
@@ -175,7 +178,10 @@ def handle(event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         led.append_event("spawn_denied", {"why": "scope_conflict", "owners": owners})
         led.save()
         return hookio.deny(
-            _message(lang, "conflict", scope=scope_text, owners=owners)
+            _message(
+                lang, "conflict", scope=scope_text, owners=owners,
+                release="%s ledger release-scopes --session %s" % (paths.cli_invocation(), session),
+            )
         )
 
     owner = owner_label(tool_input if isinstance(tool_input, dict) else {}, prompt)

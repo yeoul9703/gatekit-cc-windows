@@ -174,6 +174,18 @@ class TestDeny(SpawnProject):
         reason = result["hookSpecificOutput"]["permissionDecisionReason"]
         self.assertIn("a", reason)
 
+    def test_conflict_names_the_release_command_and_a_released_scope_is_free(self) -> None:
+        first = "a\n" + scope_fence({"write_scope": ["src/auth/**"], "stop_when": "x"})
+        spawn_gate.handle(self.event(first, description="a"))
+        second = "b\n" + scope_fence({"write_scope": ["src/auth/token.ts"], "stop_when": "x"})
+        reason = spawn_gate.handle(self.event(second, description="b"))[
+            "hookSpecificOutput"]["permissionDecisionReason"]
+        self.assertIn("ledger release-scopes --session", reason)
+        led = self.led()
+        self.assertEqual(led.release_scopes(), 1)  # the first agent has finished
+        led.save()
+        self.assertIsNone(spawn_gate.handle(self.event(second, description="b")))
+
     def test_conflicting_scope_is_not_recorded(self) -> None:
         first = "a\n" + scope_fence({"write_scope": ["src/auth/**"], "stop_when": "x"})
         spawn_gate.handle(self.event(first, description="a"))
