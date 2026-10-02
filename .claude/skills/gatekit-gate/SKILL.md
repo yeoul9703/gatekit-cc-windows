@@ -15,7 +15,7 @@ Input: `$ARGUMENTS` — optional additional criteria the user wants enforced.
    `output_lang` **from the spec**.
 2. Read `.claude/skills/gatekit-shared/references/verification.md`.
 3. Read `.claude/skills/gatekit-shared/assets/heading-map.json` and
-   `.claude/skills/gatekit-gate/assets/<output_lang>/05-gate.md`.
+   `.claude/skills/gatekit-gate/assets/05-gate.md`.
 
 ## Step 1 — read the inputs
 

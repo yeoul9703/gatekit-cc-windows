@@ -156,15 +156,14 @@ if __name__ == "__main__":
 class TestDoesNotBreakValidation(CompactProject):
     """The stamp must not make `spec validate` reject PROGRESS.md.
 
-    Its heading belongs to neither language's canonical set, so the
-    cross-language residue check ignores it — pinned here because a heading
-    that happened to collide would fail every build after a compaction.
+    Its heading is an extra one: `spec validate` asks for the canonical
+    headings and allows any other, so the stamp adds no finding.
     """
 
     def test_a_template_progress_still_validates(self) -> None:
         from gatekit import spec
         template = (pathlib.Path(__file__).resolve().parents[2]
-                    / "skills" / "gatekit-build" / "assets" / "ko" / "PROGRESS.md")
+                    / "skills" / "gatekit-build" / "assets" / "PROGRESS.md")
         (self.root / "spec" / "PROGRESS.md").write_text(
             template.read_text(encoding="utf-8"), encoding="utf-8")
         self.make_job({"a": "passed"})
@@ -175,9 +174,8 @@ class TestDoesNotBreakValidation(CompactProject):
                  if f["file"] == "PROGRESS.md"]
         self.assertEqual(len(before), len(after))
 
-    def test_the_heading_is_in_neither_canonical_set(self) -> None:
+    def test_the_heading_is_not_a_canonical_one(self) -> None:
         from gatekit import spec
-        hm = spec.heading_map()
-        for lang in ("ko", "en"):
-            self.assertNotIn("## Build state at last compaction",
-                             hm[lang].get("PROGRESS.md", []))
+        canonical = spec.canonical_headings("PROGRESS.md")
+        self.assertTrue(canonical)
+        self.assertNotIn("## Build state at last compaction", canonical)

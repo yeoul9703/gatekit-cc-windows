@@ -17,8 +17,7 @@ from gatekit import spec  # noqa: E402
 
 FIXTURES = pathlib.Path(__file__).resolve().parent / "fixtures" / "spec"
 
-KO_HEADINGS = "## 불편 목록\n\n## 고른 문제\n\n## 기한\n\n## 심화 게이트\n\n## 남은 것\n"
-EN_HEADINGS = "## Pain list\n\n## Chosen problem\n\n## Deadline\n\n## Deepening gates\n\n## Open items\n"
+HEADINGS = "## 불편 목록\n\n## 고른 문제\n\n## 기한\n\n## 심화 게이트\n\n## 남은 것\n"
 
 
 def full_record() -> dict:
@@ -44,9 +43,8 @@ def full_record() -> dict:
     }
 
 
-def discovery_text(record: dict, lang: str = "en") -> str:
-    head = KO_HEADINGS if lang == "ko" else EN_HEADINGS
-    return "# discovery\n\n" + head + "\n```gatekit-discovery\n" + json.dumps(record, ensure_ascii=False) + "\n```\n"
+def discovery_text(record: dict) -> str:
+    return "# discovery\n\n" + HEADINGS + "\n```gatekit-discovery\n" + json.dumps(record, ensure_ascii=False) + "\n```\n"
 
 
 def findings_for(report: dict, name: str = "00-discovery.md") -> list:
@@ -57,14 +55,15 @@ class DiscoveryProject(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
         self.root = pathlib.Path(self._tmp.name) / "case"
-        shutil.copytree(FIXTURES / "valid-en", self.root)
+        shutil.copytree(FIXTURES / "valid-ko", self.root)
         self.path = self.root / "spec" / "00-discovery.md"
 
     def tearDown(self) -> None:
         self._tmp.cleanup()
 
     def write(self, record: dict, lang: str = "en") -> dict:
-        self.path.write_text(discovery_text(record, lang), encoding="utf-8")
+        """`lang` is the language of the messages; the headings are one set."""
+        self.path.write_text(discovery_text(record), encoding="utf-8")
         return spec.validate(self.root, lang)
 
 
@@ -81,22 +80,18 @@ class TestFullRecord(DiscoveryProject):
         report = self.write(full_record())
         self.assertEqual(findings_for(report), [])
 
-    def test_korean_headings_validate_in_korean(self) -> None:
-        report = self.write(full_record(), lang="ko")
-        self.assertEqual([f for f in findings_for(report) if f["verdict"] == "fail"], [])
-
     def test_missing_heading_fails(self) -> None:
         self.path.write_text(
-            "# d\n\n## Pain list\n\n```gatekit-discovery\n" + json.dumps(full_record()) + "\n```\n",
+            "# d\n\n## 불편 목록\n\n```gatekit-discovery\n" + json.dumps(full_record()) + "\n```\n",
             encoding="utf-8",
         )
         report = spec.validate(self.root, "en")
-        self.assertIn("fail", [f["verdict"] for f in findings_for(report)])
+        self.assertEqual([f["verdict"] for f in findings_for(report)], ["fail"] * 4)
 
 
 class TestFence(DiscoveryProject):
     def test_missing_fence_fails(self) -> None:
-        self.path.write_text("# d\n\n" + EN_HEADINGS, encoding="utf-8")
+        self.path.write_text("# d\n\n" + HEADINGS, encoding="utf-8")
         report = spec.validate(self.root, "en")
         verdicts = [f["verdict"] for f in findings_for(report)]
         self.assertIn("fail", verdicts)
@@ -185,7 +180,7 @@ class TestGates(DiscoveryProject):
         self.assertEqual(findings_for(self.write(record)), [])
 
     def test_non_dict_fence_reports_once(self) -> None:
-        self.path.write_text("# d\n\n" + EN_HEADINGS + "\n```gatekit-discovery\n[1, 2]\n```\n", encoding="utf-8")
+        self.path.write_text("# d\n\n" + HEADINGS + "\n```gatekit-discovery\n[1, 2]\n```\n", encoding="utf-8")
         report = spec.validate(self.root, "en")
         fails = [f for f in findings_for(report) if f["verdict"] == "fail"]
         self.assertEqual(len(fails), 1)
@@ -233,13 +228,12 @@ class TestGates(DiscoveryProject):
 
 
 class TestTemplates(unittest.TestCase):
-    def test_discovery_templates_exist_and_fence_parses(self) -> None:
-        for lang in ("ko", "en"):
-            path = PLUGIN_DIR.parent / "skills" / "gatekit-discover" / "assets" / lang / "00-discovery.md"
-            self.assertTrue(path.exists(), path)
-            detailed = spec._parse_fences_detailed(path.read_text(encoding="utf-8"), "gatekit-discovery")
-            self.assertEqual(len(detailed), 1)
-            self.assertIsNone(detailed[0][2])
+    def test_discovery_template_exists_and_fence_parses(self) -> None:
+        path = PLUGIN_DIR.parent / "skills" / "gatekit-discover" / "assets" / "00-discovery.md"
+        self.assertTrue(path.exists(), path)
+        detailed = spec._parse_fences_detailed(path.read_text(encoding="utf-8"), "gatekit-discovery")
+        self.assertEqual(len(detailed), 1)
+        self.assertIsNone(detailed[0][2])
 
     def test_gate_names_constant(self) -> None:
         self.assertEqual(

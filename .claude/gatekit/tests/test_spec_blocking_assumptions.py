@@ -30,19 +30,19 @@ from gatekit import spec  # noqa: E402
 
 FIXTURES = pathlib.Path(__file__).resolve().parent / "fixtures" / "spec"
 
-LEDGER_HEADING = "## Assumption ledger"
+LEDGER_HEADING = "## 가정 원장"
 
 
 def prd_with_ledger_row(row: str) -> str:
     return (
         "# Widget — product requirements\n\n"
-        "## Problem\n\nSomething.\n\n"
-        "## Current state (measured)\n\n| Metric | Current value | Source | Measured on |\n|---|---|---|---|\n\n"
-        "## Goals\n\n- A goal.\n\n"
-        "## Non-goals\n\n- Not this.\n\n"
-        "## Users\n\n| User | Situation | What they do today | What they need |\n|---|---|---|---|\n\n"
-        "## Features\n\n### F1 — Thing\n\nDoes a thing.\n\n"
-        "## Acceptance criteria\n\n- **F1** — Given x, when y, then z.\n\n"
+        "## 문제\n\nSomething.\n\n"
+        "## 현재 상태 (측정값)\n\n| Metric | Current value | Source | Measured on |\n|---|---|---|---|\n\n"
+        "## 목표\n\n- A goal.\n\n"
+        "## 목표가 아닌 것\n\n- Not this.\n\n"
+        "## 사용자\n\n| User | Situation | What they do today | What they need |\n|---|---|---|---|\n\n"
+        "## 기능\n\n### F1 — Thing\n\nDoes a thing.\n\n"
+        "## 수용 기준\n\n- **F1** — Given x, when y, then z.\n\n"
         f"{LEDGER_HEADING}\n\n"
         "> ⚠️ Assumption 1: something unconfirmed.\n\n"
         "| # | Assumption | Basis | Impact if wrong | How to confirm | Blocking | Confirmed |\n"
@@ -59,7 +59,7 @@ class BlockingLedgerProject(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
         self.root = pathlib.Path(self._tmp.name) / "case"
-        shutil.copytree(FIXTURES / "valid-en", self.root)
+        shutil.copytree(FIXTURES / "valid-ko", self.root)
         self.prd_path = self.root / "spec" / "01-prd.md"
 
     def tearDown(self) -> None:

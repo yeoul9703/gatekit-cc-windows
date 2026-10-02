@@ -1,6 +1,6 @@
 """Tests for gatekit.spec.
 
-The kernel modules `paths`, `lang` and `verdict` are owned by another agent and
+The kernel modules `paths` and `verdict` are owned by another agent and
 may not exist yet. When one is missing this module installs a minimal stub in
 `sys.modules` before importing `gatekit.spec`, so these tests are meaningful on
 their own. When the real module is present it is used unchanged, and these
@@ -25,7 +25,7 @@ if str(PLUGIN_DIR) not in sys.path:
 FIXTURES = pathlib.Path(__file__).resolve().parent / "fixtures" / "spec"
 SKILLS_DIR = PLUGIN_DIR.parent / "skills"
 
-#: Which skill owns each spec template (its ``assets/<lang>/<file>``).
+#: Which skill owns each spec template (its ``assets/<file>``).
 TEMPLATE_OWNER = {
     "00-discovery.md": "discover",
     "01-prd.md": "interview",
@@ -39,8 +39,8 @@ TEMPLATE_OWNER = {
 }
 
 
-def template_path(lang: str, name: str) -> pathlib.Path:
-    return SKILLS_DIR / ("gatekit-" + TEMPLATE_OWNER[name]) / "assets" / lang / name
+def template_path(name: str) -> pathlib.Path:
+    return SKILLS_DIR / ("gatekit-" + TEMPLATE_OWNER[name]) / "assets" / name
 
 
 # ---------------------------------------------------------------------------
@@ -71,24 +71,6 @@ def _stub_paths() -> types.ModuleType:
     return mod
 
 
-def _stub_lang() -> types.ModuleType:
-    mod = types.ModuleType("gatekit.lang")
-
-    def detect(text: str) -> str:
-        if not text:
-            return "en"
-        hangul = sum(1 for ch in text if "가" <= ch <= "힣" or "ᄀ" <= ch <= "ᇿ")
-        latin = sum(1 for ch in text if ("a" <= ch.lower() <= "z"))
-        letters = hangul + latin
-        if letters == 0:
-            return "en"
-        return "ko" if hangul / letters >= 0.30 else "en"
-
-    mod.detect = detect
-    mod.run = lambda argv: 0
-    return mod
-
-
 def _stub_verdict() -> types.ModuleType:
     mod = types.ModuleType("gatekit.verdict")
     mod.OK, mod.WARN, mod.FAIL, mod.UNVERIFIED = "ok", "warn", "fail", "unverified"
@@ -110,7 +92,6 @@ def _stub_verdict() -> types.ModuleType:
 
 
 _ensure("gatekit.paths", _stub_paths)
-_ensure("gatekit.lang", _stub_lang)
 _ensure("gatekit.verdict", _stub_verdict)
 
 from gatekit import spec  # noqa: E402
@@ -185,25 +166,44 @@ class ValidSetTests(unittest.TestCase):
         )
         self.assertEqual(report["verdict"], "ok")
 
-    def test_english_set_has_no_failures(self):
-        report = spec.validate(FIXTURES / "valid-en")
-        self.assertEqual(report["lang"], "en")
-        self.assertNotIn(
-            "fail",
-            [f["verdict"] for f in report["findings"]],
-            msg=json.dumps(report["findings"], indent=2),
-        )
-        self.assertEqual(report["verdict"], "ok")
+    def test_lang_is_korean_when_not_given_whatever_the_prd_holds(self):
+        import shutil
+        import tempfile
 
-    def test_language_detected_from_prd_when_not_given(self):
-        self.assertEqual(spec.validate(FIXTURES / "valid-ko")["lang"], "ko")
-        self.assertEqual(spec.validate(FIXTURES / "valid-en")["lang"], "en")
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp) / "case"
+            shutil.copytree(FIXTURES / "valid-ko", root)
+            prd = root / "spec" / "01-prd.md"
+            prd.write_text(
+                prd.read_text(encoding="utf-8") + "\n" + "An English paragraph. " * 200,
+                encoding="utf-8",
+            )
+            report = spec.validate(root)
+            self.assertEqual(report["lang"], "ko")
+            self.assertEqual(report["verdict"], "ok")
+            # a language with no message table falls back to Korean too
+            self.assertEqual(spec.validate(root, lang="fr")["lang"], "ko")
 
-    def test_explicit_lang_overrides_detection(self):
-        # Forcing "en" on the Korean set makes every Korean heading a miss.
-        report = spec.validate(FIXTURES / "valid-ko", lang="en")
-        self.assertEqual(report["lang"], "en")
-        self.assertEqual(report["verdict"], "fail")
+    def test_english_headings_are_not_a_second_valid_set(self):
+        import shutil
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp) / "case"
+            shutil.copytree(FIXTURES / "valid-ko", root)
+            path = root / "spec" / "02-screens.md"
+            path.write_text(
+                path.read_text(encoding="utf-8").replace("## 근거 없는 영역", "## Negative space"),
+                encoding="utf-8",
+            )
+            report = spec.validate(root)
+            self.assertEqual(report["verdict"], "fail")
+            # one finding: the Korean heading is missing. The English one is
+            # an extra heading like any other, not a finding of its own.
+            self.assertEqual(
+                messages(report, "02-screens.md"),
+                [spec._msg("ko", "heading_missing", heading="## 근거 없는 영역")],
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -245,33 +245,22 @@ class MissingFileTests(unittest.TestCase):
 
 
 class HeadingTests(unittest.TestCase):
-    def test_cross_language_heading_is_a_failure(self):
-        report = spec.validate(FIXTURES / "cross-lang")
-        self.assertEqual(report["verdict"], "fail")
-        msgs = messages(report, "02-screens.md")
-        self.assertTrue(
-            any("Negative space" in m for m in msgs),
-            msg="cross-language heading not reported: %r" % msgs,
-        )
-        # and the Korean heading it replaced is reported missing
-        self.assertTrue(any("근거 없는 영역" in m for m in msgs), msgs)
-
     def test_missing_heading_is_a_failure(self):
         import shutil
         import tempfile
 
         with tempfile.TemporaryDirectory() as tmp:
             root = pathlib.Path(tmp) / "case"
-            shutil.copytree(FIXTURES / "valid-en", root)
+            shutil.copytree(FIXTURES / "valid-ko", root)
             path = root / "spec" / "03-architecture.md"
             path.write_text(
-                path.read_text(encoding="utf-8").replace("## Constraints", "## Limits"),
+                path.read_text(encoding="utf-8").replace("## 제약", "## 한계"),
                 encoding="utf-8",
             )
             report = spec.validate(root)
             self.assertEqual(report["verdict"], "fail")
             self.assertTrue(
-                any("## Constraints" in m for m in messages(report, "03-architecture.md"))
+                any("## 제약" in m for m in messages(report, "03-architecture.md"))
             )
 
     def test_extra_non_canonical_heading_is_allowed(self):
@@ -280,10 +269,12 @@ class HeadingTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp:
             root = pathlib.Path(tmp) / "case"
-            shutil.copytree(FIXTURES / "valid-en", root)
+            shutil.copytree(FIXTURES / "valid-ko", root)
             path = root / "spec" / "03-architecture.md"
+            # an extra heading is not a finding, in Korean or in English
             path.write_text(
-                path.read_text(encoding="utf-8") + "\n## Open questions\n\nNone.\n",
+                path.read_text(encoding="utf-8")
+                + "\n## 열린 질문\n\n없음.\n\n## Open questions\n\nNone.\n",
                 encoding="utf-8",
             )
             self.assertEqual(spec.validate(root)["verdict"], "ok")
@@ -422,20 +413,22 @@ class CriterionTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp:
             root = pathlib.Path(tmp) / "case"
-            shutil.copytree(FIXTURES / "valid-en", root)
+            shutil.copytree(FIXTURES / "valid-ko", root)
             path = root / "spec" / "05-gate.md"
+            text = path.read_text(encoding="utf-8")
+            self.assertIn("## 완료로 보지 않는 조건", text)
             path.write_text(
-                path.read_text(encoding="utf-8").replace(
-                    "## Not counted as done", "## Notes"
-                ),
-                encoding="utf-8",
+                text.replace("## 완료로 보지 않는 조건", "## 메모"), encoding="utf-8"
             )
             report = spec.validate(root)
             self.assertEqual(report["verdict"], "fail")
+            self.assertIn(
+                spec._msg("ko", "crit_not_done_section"), messages(report, "05-gate.md")
+            )
 
     def test_empty_argv_fails(self):
         body = (
-            "## Not counted as done\n"
+            "## 완료로 보지 않는 조건\n"
             '```gatekit-criterion\n{"id": "c", "argv": []}\n```\n'
         )
         msgs = [f["message"] for f in spec._check_criteria(body, "en")]
@@ -443,7 +436,7 @@ class CriterionTests(unittest.TestCase):
 
     def test_non_string_argv_fails(self):
         body = (
-            "## Not counted as done\n"
+            "## 완료로 보지 않는 조건\n"
             '```gatekit-criterion\n{"id": "c", "argv": ["python3", 3]}\n```\n'
         )
         msgs = [f["message"] for f in spec._check_criteria(body, "en")]
@@ -451,15 +444,15 @@ class CriterionTests(unittest.TestCase):
 
     def test_duplicate_criterion_ids_fail(self):
         body = (
-            "## Not counted as done\n"
+            "## 완료로 보지 않는 조건\n"
             '```gatekit-criterion\n{"id": "c", "argv": ["true"]}\n```\n'
             '```gatekit-criterion\n{"id": "c", "argv": ["true"]}\n```\n'
         )
         msgs = [f["message"] for f in spec._check_criteria(body, "en")]
-        self.assertTrue(any("Duplicate criterion id" in m for m in msgs), msgs)
+        self.assertEqual(msgs, [spec._msg("en", "crit_duplicate_id", id="c")])
 
     def test_no_criteria_fails(self):
-        body = "## Not counted as done\n\nnothing here\n"
+        body = "## 완료로 보지 않는 조건\n\nnothing here\n"
         msgs = [f["message"] for f in spec._check_criteria(body, "en")]
         self.assertTrue(any("gatekit-criterion" in m for m in msgs), msgs)
 
@@ -476,7 +469,7 @@ class TraceabilityTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp:
             root = pathlib.Path(tmp) / "case"
-            shutil.copytree(FIXTURES / "valid-en", root)
+            shutil.copytree(FIXTURES / "valid-ko", root)
             path = root / "spec" / "05-gate.md"
             path.write_text(
                 path.read_text(encoding="utf-8").replace("note-ui-tests", "other-tests"),
@@ -492,7 +485,7 @@ class TraceabilityTests(unittest.TestCase):
             self.assertTrue(warn, report["findings"])
 
     def test_referenced_tasks_produce_no_warning(self):
-        report = spec.validate(FIXTURES / "valid-en")
+        report = spec.validate(FIXTURES / "valid-ko")
         self.assertEqual(
             [f for f in report["findings"] if "note-store" in f["message"]], []
         )
@@ -514,18 +507,12 @@ class CliTests(unittest.TestCase):
         self.assertTrue(buf.getvalue().startswith("spec: "), buf.getvalue())
         self.assertNotIn("[fail]", buf.getvalue())
 
-    def test_english_set_renders_english_label(self):
-        buf = io.StringIO()
-        with redirect_stdout(buf):
-            code = spec.run(["validate", "--root", str(FIXTURES / "valid-en")])
-        self.assertEqual(code, 0)
-        self.assertIn("ok", buf.getvalue().lower())
-
     def test_failing_set_exits_one(self):
         buf = io.StringIO()
         with redirect_stdout(buf):
-            code = spec.run(["validate", "--root", str(FIXTURES / "cross-lang")])
+            code = spec.run(["validate", "--root", str(FIXTURES / "ledger-mismatch")])
         self.assertEqual(code, 1)
+        self.assertIn("[fail]", buf.getvalue())
 
     def test_warn_only_set_exits_zero(self):
         import shutil
@@ -543,10 +530,10 @@ class CliTests(unittest.TestCase):
     def test_json_output_is_parseable(self):
         buf = io.StringIO()
         with redirect_stdout(buf):
-            spec.run(["validate", "--json", "--root", str(FIXTURES / "valid-en")])
+            spec.run(["validate", "--json", "--root", str(FIXTURES / "valid-ko")])
         report = json.loads(buf.getvalue())
         self.assertEqual(report["verdict"], "ok")
-        self.assertEqual(report["lang"], "en")
+        self.assertEqual(report["lang"], "ko")
         self.assertIsInstance(report["findings"], list)
 
     def test_unknown_subcommand_returns_two(self):
@@ -561,52 +548,43 @@ class CliTests(unittest.TestCase):
 
 
 class TemplateConsistencyTests(unittest.TestCase):
-    def test_every_template_carries_its_canonical_headings(self):
+    def test_the_heading_map_holds_one_korean_set(self):
         hm = spec.heading_map()
-        for lang in ("ko", "en"):
-            for name in hm["files"]:
-                path = template_path(lang, name)
-                self.assertTrue(path.exists(), "missing template %s/%s" % (lang, name))
-                present = set(spec._present_headings(path.read_text(encoding="utf-8")))
-                for heading in hm[lang][name]:
-                    self.assertIn(
-                        heading, present, "%s/%s lacks %r" % (lang, name, heading)
-                    )
+        self.assertNotIn("ko", hm)
+        self.assertNotIn("en", hm)
+        self.assertEqual(sorted(hm["headings"]), sorted(hm["files"]))
+        for name in hm["files"]:
+            headings = spec.canonical_headings(name)
+            self.assertTrue(headings, name)
+            for heading in headings:
+                self.assertRegex(heading, r"^## [가-힣]", "%s: %r" % (name, heading))
+                self.assertNotRegex(heading, r"[A-Za-z]", "%s: %r" % (name, heading))
 
-    def test_templates_have_no_cross_language_headings(self):
-        hm = spec.heading_map()
-        for lang in ("ko", "en"):
-            other = "en" if lang == "ko" else "ko"
-            for name in hm["files"]:
-                path = template_path(lang, name)
-                present = set(spec._present_headings(path.read_text(encoding="utf-8")))
-                stray = present & set(hm[other][name]) - set(hm[lang][name])
-                self.assertEqual(stray, set(), "%s/%s: %r" % (lang, name, stray))
+    def test_every_template_carries_its_canonical_headings(self):
+        for name in spec.spec_files():
+            path = template_path(name)
+            self.assertTrue(path.exists(), "missing template %s" % name)
+            present = set(spec._present_headings(path.read_text(encoding="utf-8")))
+            for heading in spec.canonical_headings(name):
+                self.assertIn(heading, present, "%s lacks %r" % (name, heading))
 
     def test_template_fences_are_valid_json(self):
         checks = [
             ("04-tasks.md", "gatekit-task"),
             ("05-gate.md", "gatekit-criterion"),
         ]
-        for lang in ("ko", "en"):
-            for name, fence in checks:
-                text = template_path(lang, name).read_text(
-                    encoding="utf-8"
-                )
-                detailed = spec._parse_fences_detailed(text, fence)
-                self.assertTrue(detailed, "%s/%s has no %s fence" % (lang, name, fence))
-                for line_no, _, err in detailed:
-                    self.assertIsNone(
-                        err, "%s/%s line %d: %s" % (lang, name, line_no, err)
-                    )
+        for name, fence in checks:
+            text = template_path(name).read_text(encoding="utf-8")
+            detailed = spec._parse_fences_detailed(text, fence)
+            self.assertTrue(detailed, "%s has no %s fence" % (name, fence))
+            for line_no, _, err in detailed:
+                self.assertIsNone(err, "%s line %d: %s" % (name, line_no, err))
 
     def test_templates_stay_under_120_lines(self):
-        hm = spec.heading_map()
-        for lang in ("ko", "en"):
-            for name in hm["files"]:
-                path = template_path(lang, name)
-                count = len(path.read_text(encoding="utf-8").splitlines())
-                self.assertLessEqual(count, 120, "%s/%s is %d lines" % (lang, name, count))
+        for name in spec.spec_files():
+            path = template_path(name)
+            count = len(path.read_text(encoding="utf-8").splitlines())
+            self.assertLessEqual(count, 120, "%s is %d lines" % (name, count))
 
 
 if __name__ == "__main__":  # pragma: no cover
@@ -620,7 +598,7 @@ class ExpectFieldTests(unittest.TestCase):
         import shutil, tempfile
         self._tmp = tempfile.TemporaryDirectory()
         self.root = pathlib.Path(self._tmp.name) / "case"
-        shutil.copytree(FIXTURES / "valid-en", self.root)
+        shutil.copytree(FIXTURES / "valid-ko", self.root)
         self.gate = self.root / "spec" / "05-gate.md"
 
     def tearDown(self):
@@ -663,59 +641,31 @@ class DesignFileTests(unittest.TestCase):
         self.assertIn("02-design.md", hm["absent_ok"])
         self.assertNotIn("02-design.md", hm["required_files"])
 
-    def test_canonical_headings_for_both_languages(self):
-        hm = spec.heading_map()
+    def test_canonical_headings(self):
         self.assertEqual(
-            hm["ko"]["02-design.md"],
+            spec.canonical_headings("02-design.md"),
             ["## 출처", "## 디자인 패턴", "## 컴포넌트", "## 디자인 토큰", "## 근거 없는 영역"],
-        )
-        self.assertEqual(
-            hm["en"]["02-design.md"],
-            ["## Sources", "## Design patterns", "## Components", "## Design tokens", "## Not covered"],
         )
 
     def test_absent_design_file_produces_no_finding(self):
-        report = spec.validate(FIXTURES / "valid-en")
+        report = spec.validate(FIXTURES / "valid-ko")
         self.assertEqual(
             [f for f in report["findings"] if f["file"] == "02-design.md"], []
         )
 
-    def test_headings_shared_with_02_screens_do_not_misfire(self):
-        """`## Components` is canonical in both 02-screens.md and 02-design.md.
-
-        _check_headings works per file, so a heading valid in this file's own
-        canonical set is never reported as cross-language residue.
-        """
-        text = "\n".join(
-            [
-                "# Design",
-                "## Sources",
-                "## Design patterns",
-                "## Components",
-                "## Design tokens",
-                "## Not covered",
-                "",
-            ]
-        )
-        self.assertEqual(spec._check_headings("02-design.md", text, "en"), [])
+    def test_a_design_file_with_every_canonical_heading_has_no_finding(self):
         ko = "\n".join(
             ["# 디자인", "## 출처", "## 디자인 패턴", "## 컴포넌트", "## 디자인 토큰", "## 근거 없는 영역", ""]
         )
         self.assertEqual(spec._check_headings("02-design.md", ko, "ko"), [])
 
-    def test_cross_language_heading_in_design_file_still_fails(self):
-        text = "\n".join(
-            ["## Sources", "## Design patterns", "## Components", "## Design tokens", "## 근거 없는 영역", ""]
-        )
-        findings = spec._check_headings("02-design.md", text, "en")
-        self.assertTrue(any(f["verdict"] == "fail" for f in findings))
-
-    def test_screens_component_heading_is_still_accepted_in_screens(self):
-        hm = spec.heading_map()
-        self.assertIn("## Components", hm["en"]["02-screens.md"])
-        self.assertIn("## Components", hm["en"]["02-design.md"])
-        screens = "\n".join(hm["en"]["02-screens.md"]) + "\n"
-        self.assertEqual(spec._check_headings("02-screens.md", screens, "en"), [])
+    def test_a_heading_shared_with_02_screens_is_canonical_in_both_files(self):
+        """`## 컴포넌트` is canonical in both 02-screens.md and 02-design.md;
+        _check_headings works per file."""
+        self.assertIn("## 컴포넌트", spec.canonical_headings("02-screens.md"))
+        self.assertIn("## 컴포넌트", spec.canonical_headings("02-design.md"))
+        screens = "\n".join(spec.canonical_headings("02-screens.md")) + "\n"
+        self.assertEqual(spec._check_headings("02-screens.md", screens, "ko"), [])
 
 
 # ---------------------------------------------------------------------------
@@ -728,7 +678,7 @@ class TokensJsonTests(unittest.TestCase):
         import shutil, tempfile
         self._tmp = tempfile.TemporaryDirectory()
         self.root = pathlib.Path(self._tmp.name) / "case"
-        shutil.copytree(FIXTURES / "valid-en", self.root)
+        shutil.copytree(FIXTURES / "valid-ko", self.root)
         self.tokens = self.root / "spec" / "tokens.json"
 
     def tearDown(self):
@@ -840,34 +790,17 @@ class LedgerSupersessionTests(unittest.TestCase):
     """A row whose evidence says `supersedes A<n>` retires row n."""
 
     HEAD = "\n".join(
-        [
-            "# PRD",
-            "## Problem",
-            "## Current state (measured)",
-            "## Goals",
-            "## Non-goals",
-            "## Users",
-            "## Features",
-            "## Acceptance criteria",
-            "",
-        ]
+        ["# PRD", "## 문제", "## 현재 상태 (측정값)", "## 목표", "## 목표가 아닌 것",
+         "## 사용자", "## 기능", "## 수용 기준", ""]
     )
 
     def prd(self, inline_nums, rows, lang="en"):
-        if lang == "en":
-            head = self.HEAD
-            ledger_heading = "## Assumption ledger"
-            marker = "> Assumption %d: text"
-        else:
-            head = "\n".join(
-                ["# PRD", "## 문제", "## 현재 상태 (측정값)", "## 목표", "## 목표가 아닌 것",
-                 "## 사용자", "## 기능", "## 수용 기준", ""]
-            )
-            ledger_heading = "## 가정 원장"
-            marker = "> 가정 %d: 내용"
-        lines = [head]
+        """The headings are the one Korean set. `lang` picks only the wording
+        of the inline marker; both wordings are recognised."""
+        marker = "> Assumption %d: text" if lang == "en" else "> 가정 %d: 내용"
+        lines = [self.HEAD]
         lines += [marker % n for n in inline_nums]
-        lines += ["", ledger_heading, "", "| # | Assumption | Impact | Evidence |", "|---|---|---|---|"]
+        lines += ["", "## 가정 원장", "", "| # | Assumption | Impact | Evidence |", "|---|---|---|---|"]
         for num, evidence in rows:
             lines.append("| A%d | something | low | %s |" % (num, evidence))
         return "\n".join(lines) + "\n"
@@ -942,7 +875,7 @@ class TestPreviewNotEvidence(unittest.TestCase):
         import shutil, tempfile
         self._tmp = tempfile.TemporaryDirectory()
         self.root = pathlib.Path(self._tmp.name) / "case"
-        shutil.copytree(FIXTURES / "valid-en", self.root)
+        shutil.copytree(FIXTURES / "valid-ko", self.root)
         self.screens = self.root / "spec" / "02-screens.md"
 
     def tearDown(self):
@@ -1021,7 +954,7 @@ class TestVerificationShapedTask(unittest.TestCase):
         import shutil, tempfile
         self._tmp = tempfile.TemporaryDirectory()
         self.root = pathlib.Path(self._tmp.name) / "case"
-        shutil.copytree(FIXTURES / "valid-en", self.root)
+        shutil.copytree(FIXTURES / "valid-ko", self.root)
         self.tasks = self.root / "spec" / "04-tasks.md"
 
     def tearDown(self):

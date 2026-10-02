@@ -16,7 +16,7 @@ class TestLauncher(unittest.TestCase):
     def _run(self, args, cwd):
         env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
         return subprocess.run([sys.executable, str(LAUNCHER), *args], cwd=cwd,
-                              capture_output=True, text=True, env=env, timeout=30)
+                              capture_output=True, text=True, encoding="utf-8", env=env, timeout=30)
 
     def test_lang_from_foreign_cwd(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

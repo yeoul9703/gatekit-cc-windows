@@ -18,7 +18,7 @@ and both merge rather than overwrite.
 2. Read these under `.claude/skills/gatekit-shared/references/`: `questioning.md`,
    `assumptions.md`, `verification.md`.
 3. Read `.claude/skills/gatekit-shared/assets/heading-map.json` and
-   `.claude/skills/gatekit-mockup/assets/<output_lang>/02-screens.md`.
+   `.claude/skills/gatekit-mockup/assets/02-screens.md`.
 
 ## Step 1 — re-entry check
 
@@ -71,7 +71,7 @@ patterns, CSS custom properties for tokens.
 ## Step 3 — write spec/02-screens.md
 
 Fill the template including its YAML frontmatter (`title`/`date`/`status`).
-Headings verbatim from `heading-map.json[<output_lang>]`.
+Headings verbatim from `headings` in `heading-map.json`.
 
 - **Screen list** — one row per screen, `S<n>` id plus evidence.
 - **Screen flow** — transitions the mockup actually shows; an inferred one

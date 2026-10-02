@@ -23,7 +23,7 @@ including mid-build.
 2. Read `.claude/skills/gatekit-shared/references/questioning.md` and
    `.claude/skills/gatekit-shared/references/verification.md`.
 3. Read `.claude/skills/gatekit-shared/assets/heading-map.json` and
-   `.claude/skills/gatekit-design/assets/<output_lang>/02-design.md`.
+   `.claude/skills/gatekit-design/assets/02-design.md`.
 
 ## Step 1 — re-entry check
 
@@ -65,7 +65,7 @@ corroborate itself (ADR-0011). Say so and ask for a real source.
 ## Step 4 — write spec/02-design.md
 
 Fill the template, including its YAML frontmatter block (`title`/`date`/
-`status`) at the top. Headings verbatim from `heading-map.json[<output_lang>]`:
+`status`) at the top. Headings verbatim from `headings` in `heading-map.json`:
 
 - **Sources** — one row per input: kind, path or URL, capture date.
 - **Design patterns** — `P<n>`, name, the rule in one sentence, screens it

@@ -7,8 +7,8 @@ the structural conventions the rest of gatekit depends on:
   00-discovery.md is an optional stage whose absence is silent)
 * 00-discovery.md: one ```gatekit-discovery fence; each unfilled deepening
   gate is a warn, never silent
-* headings: every canonical heading present, no heading from the other
-  language's set (cross-language residue is a hard fail)
+* headings: every canonical heading present (one Korean set; a heading that
+  is not canonical is allowed)
 * 01-prd.md: inline assumption blockquotes match the assumption ledger table,
   and no inline marker still cites a row a later row supersedes
 * tokens.json: the v2 shape, when the file exists; every finding is a warn,
@@ -29,7 +29,6 @@ import re
 import sys
 from typing import Any, Dict, List, Optional, TypeGuard, Union
 
-from gatekit import lang as lang_mod
 from gatekit import jobstore, paths
 from gatekit import verdict as V
 
@@ -49,6 +48,11 @@ def heading_map() -> Dict[str, Any]:
         with path.open(encoding="utf-8") as fh:
             cached = _HEADING_MAP_CACHE = json.load(fh)
     return cached
+
+
+def canonical_headings(name: str) -> List[str]:
+    """The H2 headings `name` must carry. One set: the spec is written in Korean."""
+    return list(heading_map()["headings"].get(name, []))
 
 
 def spec_files() -> List[str]:
@@ -141,7 +145,6 @@ MESSAGES = {
         "missing_optional": "파일이 없습니다. 파이프라인이 아직 이 단계를 만들지 않았을 수 있습니다.",
         "unreadable": "파일을 읽을 수 없습니다: {err}",
         "heading_missing": "필수 제목이 없습니다: {heading}",
-        "cross_lang": "다른 언어({other})의 제목이 섞여 있습니다: {heading}",
         "ledger_missing_section": "가정 원장 표를 찾을 수 없습니다.",
         "ledger_orphan_inline": "본문 가정 {num}번에 대응하는 원장 행이 없습니다.",
         "ledger_orphan_row": "원장 {num}번 행에 대응하는 본문 가정 표기가 없습니다.",
@@ -207,7 +210,6 @@ MESSAGES = {
         "missing_optional": "File is missing. The pipeline may not have produced this stage yet.",
         "unreadable": "File could not be read: {err}",
         "heading_missing": "Required heading is missing: {heading}",
-        "cross_lang": "A heading from the other language ({other}) is present: {heading}",
         "ledger_missing_section": "Assumption ledger table not found.",
         "ledger_orphan_inline": "Inline assumption {num} has no matching ledger row.",
         "ledger_orphan_row": "Ledger row {num} has no matching inline assumption marker.",
@@ -271,9 +273,13 @@ MESSAGES = {
 }
 
 
+#: The language of the messages when the caller names none, or one with no table.
+DEFAULT_LANG = "ko"
+
+
 def _msg(lang: str, key: str, **kw) -> str:
-    table = MESSAGES.get(lang) or MESSAGES["en"]
-    template = table.get(key) or MESSAGES["en"][key]
+    table = MESSAGES.get(lang) or MESSAGES[DEFAULT_LANG]
+    template = table.get(key) or MESSAGES[DEFAULT_LANG][key]
     return template.format(**kw)
 
 
@@ -307,9 +313,9 @@ def _inline_assumption_numbers(text: str) -> List[int]:
     return nums
 
 
-def _ledger_section(text: str, lang: str) -> Optional[str]:
+def _ledger_section(text: str) -> Optional[str]:
     """Return the text of the assumption-ledger section, or None."""
-    headings = heading_map()[lang]["01-prd.md"]
+    headings = canonical_headings("01-prd.md")
     ledger_heading = headings[-1]  # ledger is the last canonical heading
     lines = text.splitlines()
     start = None
@@ -486,7 +492,7 @@ def _blocking_unconfirmed_rows(section: str) -> List[int]:
 
 def _check_ledger(text: str, lang: str) -> List[dict]:
     findings: List[dict] = []
-    section = _ledger_section(text, lang)
+    section = _ledger_section(text)
     if section is None:
         # the heading check already reported the missing heading
         return findings
@@ -536,30 +542,14 @@ def _present_headings(text: str) -> List[str]:
 
 
 def _check_headings(name: str, text: str, lang: str) -> List[dict]:
+    """Every canonical heading of `name` must be present. `lang` picks the
+    language of the message only: the headings are one Korean set."""
     findings: List[dict] = []
-    hm = heading_map()
-    other = "en" if lang == "ko" else "ko"
-    canonical = hm[lang].get(name, [])
-    other_set = set(hm[other].get(name, []))
-    present = _present_headings(text)
-    present_set = set(present)
-
-    for heading in canonical:
+    present_set = set(_present_headings(text))
+    for heading in canonical_headings(name):
         if heading not in present_set:
             findings.append(
                 _finding(name, V.FAIL, _msg(lang, "heading_missing", heading=heading))
-            )
-    # Cross-language residue: a heading that belongs to the other language's
-    # canonical set for this file and is not also valid in this language.
-    canonical_set = set(canonical)
-    for heading in present:
-        if heading in other_set and heading not in canonical_set:
-            findings.append(
-                _finding(
-                    name,
-                    V.FAIL,
-                    _msg(lang, "cross_lang", other=other, heading=heading),
-                )
             )
     return findings
 
@@ -632,16 +622,15 @@ def _writes_only_tests(task: dict) -> bool:
     return True
 
 
-def _not_done_heading(lang: str) -> str:
-    """Return the canonical 'not counted as done' heading for *lang* by name.
+def _not_done_heading() -> str:
+    """Return the canonical 'not counted as done' heading by name.
 
     Looked up by content rather than by position so reordering
     heading-map.json cannot silently change which section is required.
     """
-    headings = heading_map()[lang]["05-gate.md"]
+    headings = canonical_headings("05-gate.md")
     for h in headings:
-        low = h.lower()
-        if "not counted" in low or "완료로 보지 않는" in h:
+        if "완료로 보지 않는" in h:
             return h
     return headings[-1]
 
@@ -802,7 +791,7 @@ def _check_criteria(text: str, lang: str) -> List[dict]:
             for problem in contract_mod.validate_expect(crit["expect"], cid):
                 findings.append(_finding(name, V.FAIL, _msg(lang, "crit_expect", id=cid, detail=problem)))
 
-    not_done = _not_done_heading(lang)
+    not_done = _not_done_heading()
     if not_done not in set(_present_headings(text)):
         findings.append(_finding(name, V.FAIL, _msg(lang, "crit_not_done_section")))
     return findings
@@ -1371,7 +1360,11 @@ def _check_prototype_required(prd_text: Optional[str], screens_text: Optional[st
 
 
 def validate(root: pathlib.Path, lang: Optional[str] = None) -> dict:
-    """Validate the spec set under `root/spec` and return a verdict report."""
+    """Validate the spec set under `root/spec` and return a verdict report.
+
+    `lang` picks the language of the messages and is `ko` unless the caller
+    names another one that has a table. The headings do not follow it.
+    """
     root = pathlib.Path(root)
     sdir = paths.spec_dir(root)
     contents: Dict[str, Optional[str]] = {}
@@ -1387,11 +1380,8 @@ def validate(root: pathlib.Path, lang: Optional[str] = None) -> dict:
             contents[name] = None
             read_errors[name] = str(exc)
 
-    if lang is None:
-        prd = contents.get("01-prd.md")
-        lang = lang_mod.detect(prd) if prd else "en"
-    if lang not in heading_map():
-        lang = "en"
+    if lang is None or lang not in MESSAGES:
+        lang = DEFAULT_LANG
 
     findings: List[dict] = []
     required = set(required_files())

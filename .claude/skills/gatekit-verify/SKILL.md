@@ -104,7 +104,7 @@ in `spec/PROGRESS.md` (`## 마지막 검증` in Korean, `## Last verification` i
 English): the timestamp, the aggregate verdict, one line per criterion and one
 per reviewed item. Do not add a heading in another language — `spec validate`
 fails on it. If the file or the heading is missing, copy
-`.claude/skills/gatekit-build/assets/<output_lang>/PROGRESS.md` first and fill
+`.claude/skills/gatekit-build/assets/PROGRESS.md` first and fill
 its placeholders, the YAML frontmatter included. Then run
 `uv run --project .claude/gatekit --frozen python .claude/gatekit/bin/gatekit.py spec validate` and fix any
 PROGRESS.md finding before reporting.

@@ -32,7 +32,7 @@ if str(PLUGIN_DIR) not in sys.path:
 from gatekit import spec  # noqa: E402
 
 FIXTURES = pathlib.Path(__file__).resolve().parent / "fixtures" / "spec"
-EN_HEADINGS = "## Pain list\n\n## Chosen problem\n\n## Deadline\n\n## Deepening gates\n\n## Open items\n"
+HEADINGS = "## 불편 목록\n\n## 고른 문제\n\n## 기한\n\n## 심화 게이트\n\n## 남은 것\n"
 
 
 def pain_with_gates(**gate_overrides) -> dict:
@@ -81,7 +81,7 @@ def record_with(chosen_pain: dict, **top_level) -> dict:
 
 
 def discovery_text(record: dict) -> str:
-    return "# discovery\n\n" + EN_HEADINGS + "\n```gatekit-discovery\n" + json.dumps(record, ensure_ascii=False) + "\n```\n"
+    return "# discovery\n\n" + HEADINGS + "\n```gatekit-discovery\n" + json.dumps(record, ensure_ascii=False) + "\n```\n"
 
 
 def findings_for(report: dict, name: str = "00-discovery.md") -> list:
@@ -92,7 +92,7 @@ class FreeformProject(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
         self.root = pathlib.Path(self._tmp.name) / "case"
-        shutil.copytree(FIXTURES / "valid-en", self.root)
+        shutil.copytree(FIXTURES / "valid-ko", self.root)
         self.path = self.root / "spec" / "00-discovery.md"
 
     def tearDown(self) -> None:

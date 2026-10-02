@@ -15,7 +15,7 @@ Input: `$ARGUMENTS` — optional constraints on scope or ordering.
    `output_lang` **from the spec**.
 2. Read `.claude/skills/gatekit-shared/references/verification.md`.
 3. Read `.claude/skills/gatekit-shared/assets/heading-map.json` and
-   `.claude/skills/gatekit-tasks/assets/<output_lang>/04-tasks.md`.
+   `.claude/skills/gatekit-tasks/assets/04-tasks.md`.
 
 ## Step 1 — read the inputs
 

@@ -32,7 +32,7 @@ long as it keeps surfacing something new.
 2. Read `.claude/skills/gatekit-shared/references/questioning.md` and
    `.claude/skills/gatekit-shared/references/conversation.md` — the last one holds every
    rule for how the Step 2 conversation is conducted.
-3. Read `.claude/skills/gatekit-discover/assets/<output_lang>/00-discovery.md`.
+3. Read `.claude/skills/gatekit-discover/assets/00-discovery.md`.
    If `spec/00-discovery.md` exists, continue the conversation from what it
    already records — never re-ask it, never restart because it exists.
 

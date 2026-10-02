@@ -33,13 +33,15 @@ class PrototypeGateProject(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
         self.root = pathlib.Path(self._tmp.name) / "case"
-        shutil.copytree(FIXTURES / "valid-en", self.root)
+        shutil.copytree(FIXTURES / "valid-ko", self.root)
         self.screens_path = self.root / "spec" / "02-screens.md"
         # The canonical fixture now carries its own confirmation line (it
         # represents a project already past this gate) — strip it so tests
         # here start from the pre-confirmation state they mean to exercise.
         text = self.screens_path.read_text(encoding="utf-8")
-        text = text.replace("\n\nPrototype confirmed 2026-09-19\n", "\n")
+        confirmed = "\n\n프로토타입 확정 2026-09-19\n"
+        self.assertIn(confirmed, text)
+        text = text.replace(confirmed, "\n")
         self.screens_path.write_text(text, encoding="utf-8")
 
     def tearDown(self) -> None:
@@ -79,8 +81,9 @@ class TestPrototypeConfirmation(PrototypeGateProject):
     def test_non_ui_project_does_not_need_a_prototype(self) -> None:
         prd_path = self.root / "spec" / "01-prd.md"
         text = prd_path.read_text(encoding="utf-8")
-        text = text.replace("## Non-goals\n\n- Sharing is out of scope for this round.",
-                             "## Non-goals\n\n- Sharing is out of scope for this round.\n- [non-ui] This is a CLI tool with no screens.")
+        non_goals = "## 목표가 아닌 것\n\n- 공유 기능은 이번 범위가 아니다."
+        self.assertIn(non_goals, text)
+        text = text.replace(non_goals, non_goals + "\n- [non-ui] 화면이 없는 CLI 도구다.")
         prd_path.write_text(text, encoding="utf-8")
         self.screens_path.unlink()
         report = spec.validate(self.root, "en")

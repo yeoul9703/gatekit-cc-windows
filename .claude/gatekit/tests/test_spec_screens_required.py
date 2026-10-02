@@ -34,7 +34,7 @@ class ScreensRequiredProject(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
         self.root = pathlib.Path(self._tmp.name) / "case"
-        shutil.copytree(FIXTURES / "valid-en", self.root)
+        shutil.copytree(FIXTURES / "valid-ko", self.root)
         self.screens_path = self.root / "spec" / "02-screens.md"
         self.prd_path = self.root / "spec" / "01-prd.md"
         self.tasks_path = self.root / "spec" / "04-tasks.md"
@@ -52,8 +52,9 @@ class TestUiImplied(ScreensRequiredProject):
     def test_non_ui_marker_in_prd_exempts_the_project(self) -> None:
         self.screens_path.unlink()
         text = self.prd_path.read_text(encoding="utf-8")
-        text = text.replace("## Non-goals\n\n- Sharing is out of scope for this round.",
-                             "## Non-goals\n\n- Sharing is out of scope for this round.\n- [non-ui] This is a CLI tool with no screens.")
+        non_goals = "## 목표가 아닌 것\n\n- 공유 기능은 이번 범위가 아니다."
+        self.assertIn(non_goals, text)
+        text = text.replace(non_goals, non_goals + "\n- [non-ui] 화면이 없는 CLI 도구다.")
         self.prd_path.write_text(text, encoding="utf-8")
         report = spec.validate(self.root, "en")
         messages = " ".join(f["message"] for f in findings_for(report, "04-tasks.md"))

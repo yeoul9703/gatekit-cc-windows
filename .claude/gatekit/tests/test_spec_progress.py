@@ -23,7 +23,7 @@ class ProgressProject(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
         self.root = pathlib.Path(self._tmp.name) / "case"
-        shutil.copytree(FIXTURES / "valid-en", self.root)
+        shutil.copytree(FIXTURES / "valid-ko", self.root)
         (self.root / ".gatekit").mkdir(exist_ok=True)
         self.progress = self.root / "spec" / "PROGRESS.md"
 

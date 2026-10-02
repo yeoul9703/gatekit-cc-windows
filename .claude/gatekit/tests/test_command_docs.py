@@ -128,16 +128,15 @@ class TestPointers(unittest.TestCase):
     def test_every_skill_path_a_doc_names_exists(self) -> None:
         seen = 0
         for path in SKILL_DOCS + REFERENCES:
-            for ref in SKILL_PATH.findall(read(path)):
-                langs = ("ko", "en") if "<output_lang>" in ref else ("",)
-                for lang in langs:
-                    target = ref.replace("<output_lang>", lang)
-                    if "<" in target or "*" in target:
-                        continue  # a pattern such as gatekit-<name>/ or *.json
-                    seen += 1
-                    found = PROJECT / target
-                    ok = found.is_dir() if target.endswith("/") else found.is_file()
-                    self.assertTrue(ok, "%s names %s" % (rel(path), target))
+            for target in SKILL_PATH.findall(read(path)):
+                # the templates are one Korean set: no path is built from a language
+                self.assertNotIn("<output_lang>", target, rel(path))
+                if "<" in target or "*" in target:
+                    continue  # a pattern such as gatekit-<name>/ or *.json
+                seen += 1
+                found = PROJECT / target
+                ok = found.is_dir() if target.endswith("/") else found.is_file()
+                self.assertTrue(ok, "%s names %s" % (rel(path), target))
         self.assertGreater(seen, 60)
 
     def test_no_doc_points_at_a_replaced_folder_or_the_colon_name(self) -> None:
@@ -221,9 +220,11 @@ class TestSkillBodies(unittest.TestCase):
                   "tasks": ["04-tasks.md"], "gate": ["05-gate.md"],
                   "build": ["PROGRESS.md", "RECOVERY.md"]}
         for name, files in owners.items():
-            for lang in ("ko", "en"):
-                found = sorted(p.name for p in (skill(name) / "assets" / lang).glob("*.md"))
-                self.assertEqual(found, files, "gatekit-%s/assets/%s" % (name, lang))
+            found = sorted(p.name for p in (skill(name) / "assets").glob("*.md"))
+            self.assertEqual(found, files, "gatekit-%s/assets" % name)
+        # one Korean set: no skill keeps a folder per language
+        for child in sorted(SKILLS.glob("gatekit-*/assets/*")):
+            self.assertNotIn(child.name, ("ko", "en"), rel(child))
 
 
 class TestHandoff(unittest.TestCase):

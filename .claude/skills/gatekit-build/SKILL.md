@@ -114,7 +114,7 @@ is out of retries (exit 3: diagnose in `spec/RECOVERY.md`, stop the pipeline).
 
 When every task is terminal, update `spec/PROGRESS.md` in `output_lang`.
 If the file does not exist, copy
-`.claude/skills/gatekit-build/assets/<output_lang>/PROGRESS.md` first,
+`.claude/skills/gatekit-build/assets/PROGRESS.md` first,
 filling its YAML frontmatter block (`title`/`date`/`status`) along with the
 rest of the placeholders. **Keep the template's headings exactly** — `spec
 validate` rejects a heading from the other language. Under them record: the

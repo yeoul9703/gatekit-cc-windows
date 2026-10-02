@@ -27,8 +27,8 @@ something concrete to design for.
    `conversation.md` (how Step 2 is conducted), `assumptions.md` (the
    ledger Step 3 writes), `verification.md`.
 3. Read `.claude/skills/gatekit-shared/assets/heading-map.json` and the templates
-   `.claude/skills/gatekit-interview/assets/<output_lang>/01-prd.md` and
-   `.claude/skills/gatekit-interview/assets/<output_lang>/03-architecture.md`.
+   `.claude/skills/gatekit-interview/assets/01-prd.md` and
+   `.claude/skills/gatekit-interview/assets/03-architecture.md`.
 
 **From `.claude/skills/gatekit-shared/references/questioning.md`:** both stop-signal categories and the guard
 against asking what is already knowable. Its two-call `AskUserQuestion`
@@ -91,7 +91,7 @@ whatever of this proposal the user kept.
 Once the interview settles, write both files from the templates, filling
 every placeholder including each file's YAML frontmatter
 (`title`/`date`/`status`). Leave no `{{…}}` markers anywhere. Headings come
-verbatim from `heading-map.json[<output_lang>]`; never mix two languages'
+verbatim from `headings` in `heading-map.json`; never mix two languages'
 headings in one file.
 
 - `spec/01-prd.md` — problem, measured current state, goals, non-goals,

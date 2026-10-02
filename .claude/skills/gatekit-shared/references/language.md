@@ -2,15 +2,11 @@
 
 ## The rule
 
-Detect the language for **this** call. Never carry a language over from a
-previous session, and never default to Korean.
+The output language is Korean, always: `output_lang` is `ko`. Nothing is
+detected. A user who writes in English, or a spec that holds English text,
+still gets Korean. `preamble.md` next to this file says the same for Step 0.
 
-How to run the detection is in `preamble.md` next to this file. The result
-is `ko` or `en`. Use the user's text, not your own paraphrase, as
-the input. When a session ledger already holds an `output_lang` for this
-session, prefer that value — the prompt gate recorded it from the same rule.
-
-## What follows the detected language
+## What is written in Korean
 
 Everything the user reads:
 
@@ -28,7 +24,7 @@ command's source, not vocabulary for the person being interviewed. Never say
 `AskUserQuestion` text, or a written spec file's prose. If a question needs
 justifying, justify it in terms of the problem itself ("한두 개만으로는 뭐가
 진짜 문제인지 판단하기 어려워서요"), never by citing the rule that produced
-it. This applies everywhere the detected language applies, above.
+it. This applies everywhere Korean applies, above.
 
 ## What never gets translated
 
@@ -48,24 +44,15 @@ Verdict tokens are localized only when rendered as prose for a human
 
 ## Templates
 
-Each skill that writes a spec file keeps its templates in its own `assets/ko/`
-and `assets/en/` folders (for example
-`.claude/skills/gatekit-interview/assets/ko/01-prd.md`). For a detected language
-that is neither, use the `en` templates and say once, in the user's language:
-"gatekit has no template set for this language yet, so the English structure is
-used; the content is written in your language." Do not repeat that notice on
-later steps in the same session.
-
-## Mixed input
-
-A prompt that mixes scripts follows the detector's threshold: Hangul at 30% or
-more of the letters counts as `ko`. Do not override the detector because a
-technical term appeared in English — code words in a Korean sentence are still
-a Korean sentence.
+Each skill that writes a spec file keeps its templates in its own `assets/`
+folder (for example `.claude/skills/gatekit-interview/assets/01-prd.md`).
+There is one set, in Korean. Fill it in Korean; a code word or a product name
+in English inside a Korean sentence is fine.
 
 ## Checking your own output
 
-Before writing a file under `spec/`, confirm its headings come from the
-matching language block of `.claude/skills/gatekit-shared/assets/heading-map.json`. Mixing headings
-from both languages in one file is a hard `fail` in `spec validate`, not a
-style issue.
+Before writing a file under `spec/`, confirm its headings come from
+`headings` in `.claude/skills/gatekit-shared/assets/heading-map.json`, exactly
+as written there. A missing canonical heading is a hard `fail` in `spec
+validate`, not a style issue: an English or reworded heading does not count
+as the Korean one. A heading the list does not hold may be added.
